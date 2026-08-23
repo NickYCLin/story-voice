@@ -56,7 +56,7 @@ export function AppLayout() {
           <button className="rounded-full border border-stone-200 px-4 py-2 text-sm text-stone-700 transition hover:border-rose-300 hover:text-rose-700" onClick={() => void logout()} type="button">登出</button>
           <a
             className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-amber-300 hover:bg-amber-50"
-            href="https://github.com/NickYCLin/StoryVoice"
+            href="https://github.com/NickYCLin/story-voice"
             rel="noreferrer"
             target="_blank"
           >

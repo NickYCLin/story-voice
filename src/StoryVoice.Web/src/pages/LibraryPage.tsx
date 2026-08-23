@@ -277,7 +277,7 @@ export function LibraryPage() {
                 <li><span className="mr-2 text-sky-700">3.</span>按「載入未封裝項目」，選擇剛才解壓縮後的資料夾。</li>
               </ol>
               <p className="mt-3 text-xs leading-5 text-stone-400">Chrome 基於安全規則，這一步必須由你親自確認；安裝後不用提供博客來帳密給 StoryVoice。</p>
-              <a className="mt-3 inline-flex text-xs text-sky-700 transition hover:text-sky-800" href="https://github.com/NickYCLin/StoryVoice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">檢視 Companion 原始碼 ↗</a>
+              <a className="mt-3 inline-flex text-xs text-sky-700 transition hover:text-sky-800" href="https://github.com/NickYCLin/story-voice/tree/main/extensions/books-com-tw-companion" rel="noreferrer" target="_blank">檢視 Companion 原始碼 ↗</a>
             </div>
             <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
