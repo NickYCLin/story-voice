@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-17（BlueMagpie 斷點續跑與受控長文 benchmark）
+最後更新：2026-08-24（開發者專案詳情與 BlueMagpie gateway CI）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -23,6 +23,10 @@
 - 書冊（`BookCollection`）：與角色配音系列(`StorySeries`)各自獨立的單純書本分類收藏，可調整成員書籍排序與冊次標籤；書庫的瀏覽器「此裝置標籤」已移除，分類統一使用書冊。
 - 書冊唯讀分享：owner 可依 email 把書冊分享給其他已註冊帳號，被分享者只能唯讀瀏覽書名與章節正文，看不到閱讀筆記、摘要或朗讀音訊；owner 可隨時撤銷。
 - 前端已改為 React Router 多頁面架構（`/library`、`/collections`、`/shared` 等），不再是單一長頁面；`NarrationPanel` 已統一為深色主題。
+- 登入後開發者入口已具備 owner-scoped 唯讀總覽與專案詳情：可查看 access tier、效期、
+  rate／size limits、credential 識別摘要及聲線授權／撤銷狀態；不會回傳或重新顯示 secret、
+  token hash、evidence 路徑或 owner GUID。credential mutation、Playground 與 durable usage
+  ledger 仍未實作。
 - 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 provider registry／dispatcher：Edge TTS 以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；新增供應商不用改動既有系列角色 ID。
@@ -132,6 +136,11 @@ JSON/音訊回應大小。
 dotnet build StoryVoice.sln --configuration Release
 dotnet test StoryVoice.sln --configuration Release
 python -m unittest discover -s tests/python -v
+
+cd services/bluemagpie-gateway
+python -m pip install -r requirements-test.txt
+python -m pytest
+cd ../..
 
 cd src/StoryVoice.Web
 npm ci
