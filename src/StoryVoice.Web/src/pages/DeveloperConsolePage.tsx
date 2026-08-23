@@ -1,61 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { fetchJson } from '../api'
+import {
+  fetchDeveloperVoiceOverview,
+  formatUtc,
+  PROJECT_STATUS_CLASS,
+  PROJECT_STATUS_LABEL,
+  TIER_LABEL,
+} from '../developerVoiceConsole'
+import type { DeveloperVoiceConsoleOverview } from '../developerVoiceConsole'
 
 type LoadState = 'loading' | 'ready' | 'error'
-
-type DeveloperVoiceGrantSummary = {
-  voiceAlias: string
-  status: 'active' | 'revoked'
-  revokedAtUtc: string | null
-}
-
-type DeveloperVoiceProjectSummary = {
-  keyId: string
-  displayName: string
-  projectId: string
-  accessTier: string
-  tokenPrefix: string
-  consumerFamilyId: string
-  territoryCountryCode: string
-  effectiveAtUtc: string
-  expiresAtUtc: string
-  status: 'not-yet-effective' | 'active' | 'expiring-soon' | 'expired'
-  voices: DeveloperVoiceGrantSummary[]
-}
-
-type DeveloperVoiceConsoleOverview = {
-  serviceEnabled: boolean
-  requestsPerMinute: number
-  maximumTextCharacters: number
-  maximumTextUtf8Bytes: number
-  projects: DeveloperVoiceProjectSummary[]
-}
-
-const PROJECT_STATUS_LABEL: Record<DeveloperVoiceProjectSummary['status'], string> = {
-  'not-yet-effective': '尚未生效',
-  active: '有效',
-  'expiring-soon': '即將到期',
-  expired: '已到期',
-}
-
-const PROJECT_STATUS_CLASS: Record<DeveloperVoiceProjectSummary['status'], string> = {
-  'not-yet-effective': 'border-stone-300 bg-stone-50 text-stone-600',
-  active: 'border-emerald-300 bg-emerald-50 text-emerald-700',
-  'expiring-soon': 'border-amber-300 bg-amber-50 text-amber-800',
-  expired: 'border-rose-300 bg-rose-50 text-rose-700',
-}
-
-const TIER_LABEL: Record<string, string> = {
-  'private-development': '私人開發（private-development）',
-  'subscription-commercial': '訂閱商用（subscription-commercial）',
-}
-
-const formatUtc = (value: string) => {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-TW', { hour12: false })
-}
 
 export function DeveloperConsolePage() {
   const [overview, setOverview] = useState<DeveloperVoiceConsoleOverview | null>(null)
@@ -63,7 +18,7 @@ export function DeveloperConsolePage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchJson<DeveloperVoiceConsoleOverview>('/api/developer/external-voice/overview', { signal: controller.signal })
+    fetchDeveloperVoiceOverview(controller.signal)
       .then((value) => {
         setOverview(value)
         setState('ready')
@@ -167,6 +122,13 @@ export function DeveloperConsolePage() {
                       </ul>
                     )}
                   </div>
+
+                  <Link
+                    className="mt-5 inline-flex rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:border-amber-400"
+                    to={`/developer/projects/${encodeURIComponent(project.projectId || project.keyId)}`}
+                  >
+                    查看專案詳情 →
+                  </Link>
                 </article>
               ))}
             </div>

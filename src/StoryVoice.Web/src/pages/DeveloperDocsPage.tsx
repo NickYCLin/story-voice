@@ -109,9 +109,9 @@ export function DeveloperDocsPage() {
 
         <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm leading-7 text-amber-950">
           <strong className="block font-semibold">目前為 private-development 早期接用階段。</strong>
-          還沒有自助開發者控制台可以自己建立專案或 API 金鑰；每個 consumer 都由 StoryVoice
-          手動核發，效期最長 30 天，僅限私人、非公開、非商用用途。公開／商用的
-          subscription-commercial 存取層仍在準備中。
+          登入後可從開發者控制台唯讀查看已核發的專案、效期與聲線，但仍無法自行建立專案或 API
+          金鑰；每個 consumer 都由 StoryVoice 手動核發，效期最長 30
+          天，僅限私人、非公開、非商用用途。公開／商用的 subscription-commercial 存取層仍在準備中。
         </div>
 
         <section className="mt-14" id="tiers">
@@ -210,9 +210,10 @@ Content-Type: application/json
         <section className="mt-14" id="access">
           <h2 className="font-serif text-2xl text-stone-900">如何取得存取</h2>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-600">
-            目前 private-development 存取由 StoryVoice 團隊手動核發，還沒有自助申請流程或開發者控制台。
-            如需要一組短期私人 token，請直接聯繫 StoryVoice 團隊說明用途與想使用的聲線；
-            subscription-commercial 存取要等公開／商用權利鏈與方案上線後才會開放申請。
+            目前 private-development 存取仍由 StoryVoice 團隊手動核發。登入後可在開發者控制台唯讀查看專案與效期，
+            但還沒有自助申請、金鑰建立／輪替／撤銷、Playground 或 usage 查詢。如需要一組短期私人 token，
+            請直接聯繫 StoryVoice 團隊說明用途與想使用的聲線；subscription-commercial
+            存取要等公開／商用權利鏈與方案上線後才會開放申請。
           </p>
         </section>
       </main>
