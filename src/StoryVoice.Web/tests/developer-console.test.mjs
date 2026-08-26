@@ -17,15 +17,16 @@ test('開發者總覽位於需要登入的 AppLayout 內，並可從主導覽開
   assert.match(layout, /to="\/developer">開發者/)
 })
 
-test('只讀取唯讀總覽端點，沒有任何建立、換發或撤銷金鑰的呼叫', () => {
+test('總覽本身維持唯讀，並導向獨立的 owner-scoped API 金鑰頁', () => {
   assert.match(shared, /\/api\/developer\/external-voice\/overview/)
-  assert.doesNotMatch(implementation, /method:\s*'(POST|PUT|DELETE|PATCH)'/)
-  assert.doesNotMatch(implementation, /csrfToken/)
+  assert.doesNotMatch(page, /method:\s*'(POST|PUT|DELETE|PATCH)'/)
+  assert.doesNotMatch(page, /csrfToken/)
+  assert.match(page, /to="\/developer\/credentials">API 金鑰/)
 })
 
-test('明確告知金鑰不會重新顯示，換發撤銷需聯絡團隊', () => {
-  assert.match(page, /金鑰內容不會在任何頁面重新顯示/)
-  assert.match(page, /聯絡 StoryVoice 團隊/)
+test('明確告知完整 secret 只顯示一次，受管金鑰可自行換發與撤銷', () => {
+  assert.match(page, /完整 secret 只在操作完成後顯示一次/)
+  assert.match(page, /建立、換發或撤銷/)
 })
 
 test('呈現專案效期狀態與聲線授權狀態', () => {

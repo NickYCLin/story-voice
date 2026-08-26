@@ -61,6 +61,14 @@ curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE
 
 ## 安全產生 credential
 
+已登入且已有 API 專案的 owner，可從 `/developer/credentials` 建立、換發或撤銷受管
+credential。完整 bearer token 只在建立或換發回應顯示一次，資料庫只保存小寫
+SHA-256；換發可選擇立即停用舊金鑰，或保留 60／1,440 分鐘重疊時間。清單與異動紀錄
+都以目前登入 owner 為範圍，其他 owner 的 credential ID 固定視為不存在。
+
+下列 PowerShell 工具仍用於初次建立 consumer、離線維運或部署設定金鑰，不取代登入後的
+受管 credential 流程。
+
 [New-ExternalVoiceApiCredential.ps1](../scripts/New-ExternalVoiceApiCredential.ps1) 會依
 `AccessTier` 產生正確 prefix。部署或自動化時應使用 `OutputPath` 安全模式：
 

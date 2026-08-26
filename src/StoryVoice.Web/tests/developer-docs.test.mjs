@@ -48,12 +48,11 @@ test('所有範例都標示伺服器端執行，並警告不要把 token 放進�
   assert.match(page, /STORYVOICE_VOICE_TOKEN/)
 })
 
-test('說明控制台目前為唯讀，存取與金鑰操作仍由團隊手動處理', () => {
-  assert.match(page, /開發者控制台唯讀查看/)
-  assert.match(page, /金鑰建立／輪替／撤銷/)
+test('說明專案仍由團隊核發，但受管金鑰已有自助生命週期', () => {
+  assert.match(page, /專案與 consumer entitlement 仍由 StoryVoice 團隊核發/)
+  assert.match(page, /自行建立、輪替或撤銷受管金鑰/)
   assert.match(page, /Playground/)
   assert.match(page, /usage/)
-  assert.match(page, /手動核發/)
 })
 
 test('不洩漏內部路徑、SHA、reference、transcript 或 owner GUID', () => {

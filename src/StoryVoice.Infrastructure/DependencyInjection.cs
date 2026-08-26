@@ -262,6 +262,7 @@ public static class DependencyInjection
         services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
         services.AddSingleton<IPublicVoiceCatalogService, PublicVoiceCatalogService>();
         services.AddScoped<IDeveloperVoiceConsoleService, DeveloperVoiceConsoleService>();
+        services.AddScoped<IDeveloperVoiceCredentialService, DeveloperVoiceCredentialService>();
         services.AddScoped<ILocalClonePreviewService, LocalClonePreviewService>();
         // A singleton owns the successful two-voice preview cache for the lifetime of the API process.
         services.AddSingleton<ISeriesVoicePreviewService, SeriesVoicePreviewService>();

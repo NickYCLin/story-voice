@@ -34,8 +34,8 @@ StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完
 |---|---|---|---|
 | StoryVoice 首頁、登入、書庫、書冊、分享、角色、系列卡司 | 已實作 | 已上線 | ✅ LIVE |
 | 林若晴私人跨專案語音 API | 已實作 `POST /api/external/v1/speech` | 已啟用，限既定 private-development consumer | 🟠 BACKEND LIVE |
-| 開發者/API 管理面板 | 唯讀總覽已完成；專案詳情 source 已完成 | 唯讀總覽已上線；專案詳情待部署確認 | 🟡 IMPLEMENTED / OFF |
-| `/voices` 公開聲線館 React 頁面 | 已實作並有測試 | URL 因 SPA fallback 回 200，但目前 production bundle 不含「公開聲線館」頁面 | 🟡 IMPLEMENTED / OFF |
+| 開發者/API 管理面板 | 總覽、專案詳情、受管金鑰生命週期與 durable audit 已完成 | 總覽與專案詳情已上線；金鑰頁待後端 migration 與新版部署 | 🟡 IMPLEMENTED / PARTIAL LIVE |
+| `/voices` 公開聲線館 React 頁面 | 已實作並有測試 | 新 Web bundle 已部署；catalog 關閉時安全顯示未啟用狀態 | 🟡 IMPLEMENTED / OFF |
 | 公開聲線 list/demo API | 已實作、依 feature flag map | `VoiceCatalog=false`，live API 回 404，0 entries | 🟡 IMPLEMENTED / OFF |
 | 周子謙／林若晴公開卡片 | UI 可接 DTO | 沒有公開 entry、沒有公開固定示範 | ❌ MISSING DATA / ACTIVATION |
 | subscription-commercial 驗證鏈 | 已有授權、期限、地區、consumer 與資產驗證 | 沒有 active commercial consumer 或 catalog entry | 🧱 VALIDATION SCAFFOLD |
@@ -168,8 +168,9 @@ StoryVoice
 > 涵蓋：服務啟用狀態、專案卡（名稱／ID、access tier、token prefix+keyId、效期、
 > not-yet-effective／active／expiring-soon／expired 狀態）、聲線授權（active／revoked）、
 > 共用限制與空狀態。刻意不含：TokenSha256、evidence 路徑／雜湊、owner GUID、
-> 金鑰建立／換發／撤銷（維持人工核發）、Playground、用量資料。
-> `ExternalVoiceAuthenticationHandler` 與正式驗證路徑完全未動。
+> Playground、用量資料。受管金鑰另由 `/developer/credentials` 提供。
+> `ExternalVoiceAuthenticationHandler` 保留既有設定檔 token 相容路徑，並加入只存 SHA-256 的
+> database credential 驗證；成功後仍映射回原 consumer/grant，不放寬聲線授權。
 
 **使用者**：已取得私人開發權限的專案 owner／developer。
 
@@ -187,16 +188,16 @@ StoryVoice
 
 必要狀態：loading、無專案、等待核准、active、即將到期、expired、revoked、service degraded。
 
-**目前缺口**：owner-scoped projects/entitlements summary API 已完成；最近 24 小時活動、
-durable usage、Playground 與 credential 建立／換發／撤銷仍未完成。
+**目前缺口**：owner-scoped projects/entitlements summary API 與受管 credential 生命週期已完成；
+最近 24 小時活動、durable usage 與 Playground 仍未完成。
 
-#### B. 專案列表與詳情 `/developer/projects/:id` — 🟡 IMPLEMENTED / OFF（2026-08-24）
+#### B. 專案列表與詳情 `/developer/projects/:id` — ✅ LIVE（2026-08-26）
 
 > Repository 已交付唯讀專案詳情頁，從 `/developer` 的 owner-scoped 專案卡進入，沿用
 > `GET /api/developer/external-voice/overview`，依目前登入帳號可見的 `projectId`／`keyId`
 > 尋找專案。呈現 access tier、consumer identity、有效期間、剩餘天數、rate／size limits、
 > credential prefix+keyId、聲線 active／revoked 狀態與安全快速開始；完整 secret、token hash、
-> evidence、owner GUID 不進 UI。source 與測試已完成，production 部署尚未在本輪驗證。
+> evidence、owner GUID 不進 UI。source、測試與 production Web bundle 已完成驗證。
 
 最小內容：
 
@@ -207,10 +208,15 @@ durable usage、Playground 與 credential 建立／換發／撤銷仍未完成�
 - credential 摘要與 last used；不得回傳完整 secret。
 - 到期續用或申請擴權 CTA。
 
-**目前缺口**：last-used 與用途 metadata 尚無 durable query；建立、輪替與撤銷 credential
-仍需新的持久化模型與稽核 API，不能由現有唯讀設定投影假裝完成。
+**目前缺口**：受管 credential 已有 durable last-used；既有設定檔 credential 與用途 metadata
+仍沒有 durable query，因此 UI 會誠實顯示「尚無紀錄」或由部署設定提供。
 
-#### C. API 金鑰 `/developer/credentials`
+#### C. API 金鑰 `/developer/credentials` — 🟡 IMPLEMENTED / OFF（2026-08-26）
+
+> Repository 已交付 owner-scoped list/create/rotate/revoke API、PostgreSQL migration、durable audit
+> 與登入殼層 UI。raw token 只在 create／rotate 回應顯示一次，不進 URL、localStorage 或 log；
+> database 只保存小寫 SHA-256。換發支援 0、60、1,440 分鐘 overlap，舊金鑰到期後立即失效；
+> 其他 owner 對同一 credential 的操作固定回 404。production 尚待 API migration 與新版部署。
 
 最小內容與互動：
 
@@ -222,7 +228,7 @@ durable usage、Playground 與 credential 建立／換發／撤銷仍未完成�
 
 必要狀態：create success、copy success、download、lost secret、rotate pending、revoked、forbidden。
 
-**Backend gap**：credential create/rotate/revoke 與 durable audit 都不存在。
+**目前缺口**：source 與測試已完成；尚待 production migration、API／Web 部署與登入後 smoke test。
 
 #### D. API Playground `/developer/playground`
 

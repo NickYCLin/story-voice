@@ -20,6 +20,72 @@ public static class DeveloperConsoleEndpoints
             return Results.Ok(overview);
         });
 
+        group.MapGet("/external-voice/credentials", async (
+            HttpContext httpContext,
+            IDeveloperVoiceCredentialService service,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            return Results.Ok(await service.ListAsync(cancellationToken));
+        });
+
+        group.MapGet("/external-voice/credentials/audit", async (
+            HttpContext httpContext,
+            IDeveloperVoiceCredentialService service,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            return Results.Ok(await service.ListAuditAsync(cancellationToken));
+        });
+
+        group.MapPost("/external-voice/credentials", async (
+            CreateDeveloperVoiceCredentialRequest request,
+            HttpContext httpContext,
+            IDeveloperVoiceCredentialService service,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            var issued = await service.CreateAsync(request, cancellationToken);
+            return issued is null
+                ? Results.NotFound()
+                : Results.Created(
+                    $"{httpContext.Request.PathBase}/api/developer/external-voice/credentials/{issued.Credential.Id:D}",
+                    issued);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
+        group.MapPost("/external-voice/credentials/{credentialId:guid}/rotate", async (
+            Guid credentialId,
+            RotateDeveloperVoiceCredentialRequest request,
+            HttpContext httpContext,
+            IDeveloperVoiceCredentialService service,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            var issued = await service.RotateAsync(credentialId, request, cancellationToken);
+            return issued is null ? Results.NotFound() : Results.Ok(issued);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
+        group.MapPost("/external-voice/credentials/{credentialId:guid}/revoke", async (
+            Guid credentialId,
+            HttpContext httpContext,
+            IDeveloperVoiceCredentialService service,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            return await service.RevokeAsync(credentialId, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         return endpoints;
+    }
+
+    private static void ApplyNoStore(HttpResponse response)
+    {
+        response.Headers.CacheControl = "no-store";
+        response.Headers.XContentTypeOptions = "nosniff";
     }
 }

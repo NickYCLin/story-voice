@@ -164,8 +164,14 @@ export function DeveloperProjectPage() {
             <p className="mt-4 text-xs text-stone-400">最近使用</p>
             <p className="mt-1 text-sm text-stone-600">尚未提供用量資料</p>
             <p className="mt-4 text-xs leading-5 text-stone-500">
-              完整 secret 不會在頁面重新顯示。目前建立、換發與撤銷仍由 StoryVoice 團隊人工處理。
+              完整 secret 不會在頁面重新顯示。受管金鑰可自行建立、換發與撤銷；既有設定檔金鑰仍由維運流程管理。
             </p>
+            <Link
+              className="mt-4 inline-flex font-semibold text-amber-800 underline"
+              to={`/developer/credentials?project=${encodeURIComponent(project.projectId || project.keyId)}`}
+            >
+              管理 API 金鑰 →
+            </Link>
           </section>
 
           <section className="rounded-2xl border border-stone-200 bg-stone-900 p-6 text-stone-100">

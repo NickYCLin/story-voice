@@ -36,10 +36,11 @@ export function DeveloperConsolePage() {
         <p className="eyebrow">Developer console</p>
         <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">你的合成聲線 API 接用總覽。</h1>
         <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">
-          這裡唯讀呈現目前核發給你的 API 專案、金鑰效期與聲線授權狀態；金鑰內容不會在任何頁面重新顯示。
-          需要新增專案、換發或撤銷金鑰，請聯絡 StoryVoice 團隊，並參考
+          這裡唯讀呈現目前核發給你的 API 專案、效期與聲線授權狀態。受管金鑰可到
+          <Link className="mx-1 font-semibold text-amber-800 underline" to="/developer/credentials">API 金鑰</Link>
+          頁建立、換發或撤銷；完整 secret 只在操作完成後顯示一次。接用方式請參考
           <Link className="mx-1 font-semibold text-amber-800 underline" to="/developers/docs">API 文件</Link>
-          的接用方式。
+          。
         </p>
       </div>
 

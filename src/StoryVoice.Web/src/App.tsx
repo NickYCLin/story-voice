@@ -5,6 +5,7 @@ import { CharacterLibraryPage } from './pages/CharacterLibraryPage'
 import { CollectionDetailPage } from './pages/CollectionDetailPage'
 import { CollectionsPage } from './pages/CollectionsPage'
 import { DeveloperConsolePage } from './pages/DeveloperConsolePage'
+import { DeveloperCredentialsPage } from './pages/DeveloperCredentialsPage'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { DeveloperProjectPage } from './pages/DeveloperProjectPage'
 import { LandingPage } from './pages/LandingPage'
@@ -28,6 +29,7 @@ function App() {
         <Route element={<SharedWithMePage />} path="shared" />
         <Route element={<CharacterLibraryPage />} path="characters" />
         <Route element={<DeveloperConsolePage />} path="developer" />
+        <Route element={<DeveloperCredentialsPage />} path="developer/credentials" />
         <Route element={<DeveloperProjectPage />} path="developer/projects/:projectId" />
         <Route element={<SeriesCastPanel />} path="/series" />
         <Route element={<SharedCollectionPage />} path="shared/:collectionId" />

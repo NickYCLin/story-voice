@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Collections;
+using StoryVoice.Domain.ExternalVoices;
 using StoryVoice.Domain.Insights;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Domain.Series;
@@ -58,6 +59,11 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<BookCollectionBook> BookCollectionBooks => Set<BookCollectionBook>();
 
     public DbSet<CollectionShare> CollectionShares => Set<CollectionShare>();
+
+    public DbSet<ExternalVoiceCredential> ExternalVoiceCredentials => Set<ExternalVoiceCredential>();
+
+    public DbSet<ExternalVoiceCredentialAudit> ExternalVoiceCredentialAudits =>
+        Set<ExternalVoiceCredentialAudit>();
 
     public DbSet<ChapterSpeechPlanDraft> ChapterSpeechPlanDrafts => Set<ChapterSpeechPlanDraft>();
 

@@ -43,3 +43,67 @@ public interface IDeveloperVoiceConsoleService
 {
     Task<DeveloperVoiceConsoleOverview> GetOverviewAsync(CancellationToken cancellationToken);
 }
+
+public static class DeveloperVoiceCredentialStatuses
+{
+    public const string NotYetEffective = "not-yet-effective";
+    public const string Active = "active";
+    public const string RevocationScheduled = "revocation-scheduled";
+    public const string Expired = "expired";
+    public const string Revoked = "revoked";
+}
+
+public sealed record DeveloperVoiceCredentialSummary(
+    Guid? Id,
+    string KeyId,
+    string Name,
+    string ProjectId,
+    string AccessTier,
+    string TokenPrefix,
+    bool Managed,
+    DateTimeOffset? CreatedAtUtc,
+    DateTimeOffset? LastUsedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    DateTimeOffset? RevokedAtUtc,
+    string Status);
+
+public sealed record DeveloperVoiceCredentialList(
+    IReadOnlyList<DeveloperVoiceCredentialSummary> Credentials);
+
+public sealed record CreateDeveloperVoiceCredentialRequest(
+    string ProjectId,
+    string Name);
+
+public sealed record RotateDeveloperVoiceCredentialRequest(
+    int OverlapMinutes);
+
+public sealed record IssuedDeveloperVoiceCredential(
+    DeveloperVoiceCredentialSummary Credential,
+    string AccessToken,
+    string Notice);
+
+public sealed record DeveloperVoiceCredentialAuditSummary(
+    Guid Id,
+    string CredentialKeyId,
+    string Action,
+    DateTimeOffset OccurredAtUtc,
+    string? RelatedCredentialKeyId);
+
+public interface IDeveloperVoiceCredentialService
+{
+    Task<DeveloperVoiceCredentialList> ListAsync(CancellationToken cancellationToken);
+
+    Task<IssuedDeveloperVoiceCredential?> CreateAsync(
+        CreateDeveloperVoiceCredentialRequest request,
+        CancellationToken cancellationToken);
+
+    Task<IssuedDeveloperVoiceCredential?> RotateAsync(
+        Guid credentialId,
+        RotateDeveloperVoiceCredentialRequest request,
+        CancellationToken cancellationToken);
+
+    Task<bool> RevokeAsync(Guid credentialId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<DeveloperVoiceCredentialAuditSummary>> ListAuditAsync(
+        CancellationToken cancellationToken);
+}
