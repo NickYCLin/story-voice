@@ -34,7 +34,7 @@ StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完
 |---|---|---|---|
 | StoryVoice 首頁、登入、書庫、書冊、分享、角色、系列卡司 | 已實作 | 已上線 | ✅ LIVE |
 | 林若晴私人跨專案語音 API | 已實作 `POST /api/external/v1/speech` | 已啟用，限既定 private-development consumer | 🟠 BACKEND LIVE |
-| 開發者/API 管理面板 | 總覽、專案詳情、受管金鑰生命週期與 durable audit 已完成 | 總覽與專案詳情已上線；金鑰頁待後端 migration 與新版部署 | 🟡 IMPLEMENTED / PARTIAL LIVE |
+| 開發者/API 管理面板 | 總覽、專案詳情、受管金鑰生命週期與 durable audit 已完成 | migration、API 與 Web 已部署；既有 private consumer 已恢復載入 | ✅ LIVE |
 | `/voices` 公開聲線館 React 頁面 | 已實作並有測試 | 新 Web bundle 已部署；catalog 關閉時安全顯示未啟用狀態 | 🟡 IMPLEMENTED / OFF |
 | 公開聲線 list/demo API | 已實作、依 feature flag map | `VoiceCatalog=false`，live API 回 404，0 entries | 🟡 IMPLEMENTED / OFF |
 | 周子謙／林若晴公開卡片 | UI 可接 DTO | 沒有公開 entry、沒有公開固定示範 | ❌ MISSING DATA / ACTIVATION |
@@ -211,12 +211,14 @@ StoryVoice
 **目前缺口**：受管 credential 已有 durable last-used；既有設定檔 credential 與用途 metadata
 仍沒有 durable query，因此 UI 會誠實顯示「尚無紀錄」或由部署設定提供。
 
-#### C. API 金鑰 `/developer/credentials` — 🟡 IMPLEMENTED / OFF（2026-08-26）
+#### C. API 金鑰 `/developer/credentials` — ✅ LIVE（2026-08-26）
 
 > Repository 已交付 owner-scoped list/create/rotate/revoke API、PostgreSQL migration、durable audit
 > 與登入殼層 UI。raw token 只在 create／rotate 回應顯示一次，不進 URL、localStorage 或 log；
 > database 只保存小寫 SHA-256。換發支援 0、60、1,440 分鐘 overlap，舊金鑰到期後立即失效；
-> 其他 owner 對同一 credential 的操作固定回 404。production 尚待 API migration 與新版部署。
+> 其他 owner 對同一 credential 的操作固定回 404。production 已套用 migration 並部署新版
+> API／Web；公開 route、匿名 401、consumer overlay 與容器健康狀態均已驗證。基於 secret
+> 邊界，本輪未代替 owner 建立或撤銷正式金鑰。
 
 最小內容與互動：
 
@@ -228,7 +230,8 @@ StoryVoice
 
 必要狀態：create success、copy success、download、lost secret、rotate pending、revoked、forbidden。
 
-**目前缺口**：source 與測試已完成；尚待 production migration、API／Web 部署與登入後 smoke test。
+**目前缺口**：尚未用 owner 瀏覽器 session 執行建立／換發／撤銷的正式資料 smoke test；
+其餘 source、CI、migration、API／Web 與匿名權限邊界皆已驗證。
 
 #### D. API Playground `/developer/playground`
 
