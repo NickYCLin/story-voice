@@ -1,12 +1,61 @@
-# StoryVoice
+# StoryVoice — 自架式多角色有聲書製作平台
 
-> **AI Story Director — turn books into performances.**
+[![CI](https://github.com/NickYCLin/story-voice/actions/workflows/ci.yml/badge.svg)](https://github.com/NickYCLin/story-voice/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-StoryVoice 將使用者有權處理的電子書轉成多角色、具情緒與旁白層次的 AI 有聲書。它不是單純的 EPUB-to-TTS：核心放在 **Story Analyzer、Character Bible、AI Director 與可人工修訂的演出流程**。
+> **Self-hosted multi-character audiobook production for EPUB and TXT, with human-in-the-loop story analysis, voice casting and text-to-speech.**
 
-## Current status
+StoryVoice 是開源、自架式的 EPUB／TXT 有聲書製作工具。它會整理章節、角色與對話，讓使用者
+逐章確認說話者和聲線，再以多角色 TTS 產製可重試、可分段重建的朗讀音訊。重點不是一鍵把整本
+書丟進語音引擎，而是保留 **Story Analyzer、Character Bible、Voice Casting、Speech Plan**
+與人工審核流程。
 
-Phase 1 Foundation 已建立：
+English summary: StoryVoice is an open-source audiobook generator and voice-production platform built
+with ASP.NET Core and React. It turns authorized DRM-free EPUB/TXT content into reviewable,
+multi-speaker narration and supports self-hosted or pluggable speech-synthesis providers.
+
+- 正式站：<https://aiprod.wrbtycg.tw/StoryVoice/>
+- 開發進度：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+- 多角色製作規劃：[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
+
+## 可以用它做什麼
+
+- 匯入使用者有權處理的 DRM-free EPUB／TXT，保存目錄、章節順序與原始正文。
+- 以規則和本機 LLM 輔助找出角色、alias、旁白、對話及說話者，低信心結果保留人工確認。
+- 維護跨冊一致的角色表、固定聲線、敘述模式與不可變 cast revision。
+- 逐章審核 speech plan，再建立 staged 多角色朗讀；確認後才原子切換正式音訊。
+- 透過 provider boundary 串接 Edge TTS、BlueMagpie、3wa／VoxCPM2、VoAI 或內網語音服務。
+- 以 Web UI、REST API、背景 Worker、PostgreSQL、Redis 與 Docker Compose 自架完整流程。
+
+適合想研究或實作 `EPUB-to-audiobook`、`multi-speaker TTS`、`voice casting`、
+`human-in-the-loop speech synthesis`、台灣華語語音產製或長篇故事角色一致性的工程師。
+
+## 技術棧
+
+| 區域 | 使用技術 |
+|---|---|
+| Backend | .NET 10、ASP.NET Core、EF Core、PostgreSQL、Serilog、OpenAPI |
+| Frontend | React 19、TypeScript、Vite、Tailwind CSS 4、React Router |
+| Audio / jobs | Background Worker、Redis、FFmpeg／ffprobe、Edge TTS 與可插拔 TTS provider |
+| Deployment | Docker Compose、nginx reverse proxy、GitHub Actions CI |
+
+## 文件與程式碼入口
+
+| 想了解的內容 | 建議先看 |
+|---|---|
+| 實際完成度與未完成項目 | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
+| 系列、角色、speech plan 與 staged narration 設計 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) |
+| External voice API、credential 與 idempotency | [docs/EXTERNAL_VOICE_API.md](docs/EXTERNAL_VOICE_API.md) |
+| 聲線授權與公開／商用邊界 | [docs/VOICE_PUBLICATION_GRANT.md](docs/VOICE_PUBLICATION_GRANT.md) |
+| API 啟動與 endpoint 組裝 | [src/StoryVoice.Api/Program.cs](src/StoryVoice.Api/Program.cs) |
+| Domain 與 EF Core persistence | [src/StoryVoice.Domain](src/StoryVoice.Domain)、[src/StoryVoice.Infrastructure](src/StoryVoice.Infrastructure) |
+| 背景朗讀 pipeline | [src/StoryVoice.Worker/StoryPipelineWorker.cs](src/StoryVoice.Worker/StoryPipelineWorker.cs) |
+| React 路由與主要頁面 | [src/StoryVoice.Web/src/App.tsx](src/StoryVoice.Web/src/App.tsx) |
+| 本機完整環境 | [compose.yml](compose.yml)、[.env.example](.env.example) |
+
+## 目前狀態
+
+目前 repository 已具備：
 
 - .NET 10 Clean Architecture：API / Application / Domain / Infrastructure / Worker
 - PostgreSQL + EF Core migration
