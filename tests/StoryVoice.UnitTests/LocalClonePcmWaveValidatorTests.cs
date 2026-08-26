@@ -25,9 +25,18 @@ public sealed class LocalClonePcmWaveValidatorTests
         Assert.Contains("duration", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static byte[] CreatePcmWav(int frames)
+    [Fact]
+    public void ValidateExternalOutput_returns_the_exact_pcm_duration_in_milliseconds()
     {
-        const int sampleRate = 48_000;
+        var duration = LocalClonePcmWaveValidator.ValidateExternalOutput(
+            CreatePcmWav(checked(24_000 * 2), sampleRate: 24_000),
+            maximumBytes: 4 * 1024 * 1024);
+
+        Assert.Equal(2_000, duration);
+    }
+
+    private static byte[] CreatePcmWav(int frames, uint sampleRate = 48_000)
+    {
         const ushort channels = 1;
         const ushort bitsPerSample = 16;
         const ushort blockAlign = 2;

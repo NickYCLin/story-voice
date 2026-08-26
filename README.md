@@ -182,8 +182,12 @@ private assets and verify owner, active profile, project, time and hashes before
 The external API does not enable browser preview and does not change formal narration or
 active audiobooks.
 Provisioning, request/idempotency rules, stable errors, activation, and credential
-rotation are documented in [`docs/EXTERNAL_VOICE_API.md`](docs/EXTERNAL_VOICE_API.md);
-the unified source/publication contract is documented in
+rotation are documented in [`docs/EXTERNAL_VOICE_API.md`](docs/EXTERNAL_VOICE_API.md).
+Authenticated calls also feed an owner-scoped durable usage ledger and the
+`/developer/usage` dashboard without retaining request text, bearer tokens, idempotency
+keys, reference audio or transcripts. Rate limiting and idempotency coordination remain
+single-process until the documented multi-replica work is completed.
+The unified source/publication contract is documented in
 [`docs/VOICE_PUBLICATION_GRANT.md`](docs/VOICE_PUBLICATION_GRANT.md).
 
 The names currently discussed for public cards are only synthetic candidates based on

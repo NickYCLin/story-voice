@@ -162,7 +162,12 @@ export function DeveloperProjectPage() {
             <p className="mt-4 text-xs text-stone-400">金鑰識別</p>
             <code className="mt-1 block break-all text-sm text-stone-800">{credentialLabel}</code>
             <p className="mt-4 text-xs text-stone-400">最近使用</p>
-            <p className="mt-1 text-sm text-stone-600">尚未提供用量資料</p>
+            <Link
+              className="mt-1 inline-flex text-sm font-semibold text-amber-800 underline"
+              to={`/developer/usage?project=${encodeURIComponent(project.projectId || project.keyId)}`}
+            >
+              查看這個專案的用量與活動 →
+            </Link>
             <p className="mt-4 text-xs leading-5 text-stone-500">
               完整 secret 不會在頁面重新顯示。受管金鑰可自行建立、換發與撤銷；既有設定檔金鑰仍由維運流程管理。
             </p>

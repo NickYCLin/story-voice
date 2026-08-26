@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StoryVoice.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StoryVoice.Infrastructure.Persistence;
 namespace StoryVoice.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(StoryVoiceDbContext))]
-    partial class StoryVoiceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826090725_AddExternalVoiceUsageLedger")]
+    partial class AddExternalVoiceUsageLedger
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

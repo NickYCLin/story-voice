@@ -6,7 +6,8 @@ public sealed record ExternalVoiceSynthesisRequest(
 
 public sealed record ExternalVoiceAudio(
     byte[] Content,
-    string ContentType);
+    string ContentType,
+    long DurationMilliseconds = 0);
 
 public interface IExternalVoiceSynthesisService
 {

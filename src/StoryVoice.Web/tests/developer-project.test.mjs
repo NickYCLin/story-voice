@@ -30,7 +30,7 @@ test('使用 owner-scoped payload 尋找 projectId 或 keyId，找不到時不�
 test('呈現 entitlement、限制、credential 摘要與必要降級狀態', () => {
   assert.match(page, /已授權聲線/)
   assert.match(page, /撤銷狀態會在每次正式 API 呼叫前重新驗證/)
-  assert.match(page, /尚未提供用量資料/)
+  assert.match(page, /查看這個專案的用量與活動/)
   assert.match(page, /合成聲線 API 服務目前未啟用/)
   assert.match(page, /查看 API 文件/)
 })

@@ -114,7 +114,7 @@ internal sealed class ExternalVoiceIdempotencyCoordinator(
         Clone(await task.ConfigureAwait(false));
 
     private static ExternalVoiceAudio Clone(ExternalVoiceAudio audio) =>
-        new(audio.Content.ToArray(), audio.ContentType);
+        new(audio.Content.ToArray(), audio.ContentType, audio.DurationMilliseconds);
 
     private void RemoveExpired(DateTimeOffset now)
     {

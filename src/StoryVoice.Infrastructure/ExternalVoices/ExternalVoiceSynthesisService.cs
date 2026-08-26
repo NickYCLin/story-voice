@@ -120,10 +120,13 @@ internal sealed class ExternalVoiceSynthesisService(
                 throw new InvalidDataException("Unexpected local clone content type.");
             }
 
-            LocalClonePcmWaveValidator.ValidateExternalOutput(
+            var durationMilliseconds = LocalClonePcmWaveValidator.ValidateExternalOutput(
                 audio.Content,
                 maximumResponseBytes);
-            return new ExternalVoiceAudio(audio.Content.ToArray(), "audio/wav");
+            return new ExternalVoiceAudio(
+                audio.Content.ToArray(),
+                "audio/wav",
+                durationMilliseconds);
         }
         catch (ExternalVoiceSynthesisException)
         {

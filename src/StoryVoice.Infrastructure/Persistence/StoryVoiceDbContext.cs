@@ -63,6 +63,9 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<ExternalVoiceCredentialAudit> ExternalVoiceCredentialAudits =>
         Set<ExternalVoiceCredentialAudit>();
 
+    public DbSet<ExternalVoiceUsageRecord> ExternalVoiceUsageRecords =>
+        Set<ExternalVoiceUsageRecord>();
+
     public DbSet<ChapterSpeechPlanDraft> ChapterSpeechPlanDrafts => Set<ChapterSpeechPlanDraft>();
 
     public DbSet<SpeechSegmentDraft> SpeechSegmentDrafts => Set<SpeechSegmentDraft>();

@@ -8,6 +8,7 @@ import { DeveloperConsolePage } from './pages/DeveloperConsolePage'
 import { DeveloperCredentialsPage } from './pages/DeveloperCredentialsPage'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { DeveloperProjectPage } from './pages/DeveloperProjectPage'
+import { DeveloperUsagePage } from './pages/DeveloperUsagePage'
 import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
 import { PublicVoicesPage } from './pages/PublicVoicesPage'
@@ -31,6 +32,7 @@ function App() {
         <Route element={<DeveloperConsolePage />} path="developer" />
         <Route element={<DeveloperCredentialsPage />} path="developer/credentials" />
         <Route element={<DeveloperProjectPage />} path="developer/projects/:projectId" />
+        <Route element={<DeveloperUsagePage />} path="developer/usage" />
         <Route element={<SeriesCastPanel />} path="/series" />
         <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
       </Route>

@@ -107,3 +107,71 @@ public interface IDeveloperVoiceCredentialService
     Task<IReadOnlyList<DeveloperVoiceCredentialAuditSummary>> ListAuditAsync(
         CancellationToken cancellationToken);
 }
+
+public static class ExternalVoiceUsageOutcomes
+{
+    public const string Succeeded = "succeeded";
+    public const string RequestCancelled = "request_cancelled";
+}
+
+public sealed record ExternalVoiceUsageWrite(
+    Guid OwnerId,
+    string ConsumerKeyId,
+    string CredentialKeyId,
+    string ProjectId,
+    string AccessTier,
+    string RequestId,
+    string? VoiceAlias,
+    DateTimeOffset OccurredAtUtc,
+    int StatusCode,
+    string Outcome,
+    int DurationMilliseconds,
+    int? TextCharacters,
+    long ResponseBytes,
+    long AudioDurationMilliseconds);
+
+public interface IExternalVoiceUsageRecorder
+{
+    Task RecordAsync(ExternalVoiceUsageWrite usage, CancellationToken cancellationToken);
+}
+
+public sealed record DeveloperVoiceUsageQuery(
+    DateTimeOffset FromUtc,
+    DateTimeOffset ToUtc,
+    string? ProjectId,
+    string? VoiceAlias,
+    int ActivityLimit);
+
+public sealed record DeveloperVoiceUsageSummary(
+    int TotalRequests,
+    int SuccessfulRequests,
+    double SuccessRatePercent,
+    int RateLimitedRequests,
+    double AverageLatencyMilliseconds,
+    long OutputBytes,
+    long OutputDurationMilliseconds);
+
+public sealed record DeveloperVoiceUsageActivity(
+    string RequestId,
+    string ProjectId,
+    string? VoiceAlias,
+    DateTimeOffset OccurredAtUtc,
+    int StatusCode,
+    string Outcome,
+    int DurationMilliseconds,
+    int? TextCharacters,
+    long ResponseBytes,
+    long AudioDurationMilliseconds);
+
+public sealed record DeveloperVoiceUsageReport(
+    DateTimeOffset FromUtc,
+    DateTimeOffset ToUtc,
+    DeveloperVoiceUsageSummary Summary,
+    IReadOnlyList<DeveloperVoiceUsageActivity> Activities);
+
+public interface IDeveloperVoiceUsageService
+{
+    Task<DeveloperVoiceUsageReport> GetUsageAsync(
+        DeveloperVoiceUsageQuery query,
+        CancellationToken cancellationToken);
+}

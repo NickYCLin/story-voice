@@ -223,6 +223,11 @@ Entries 與全部 supporting files；private grant 不能拿來繞過這條鏈�
 5. 緊急停止可設定 voice grant 的 `RevokedAtUtc`、移除 grant／consumer，或關閉 global
    `Enabled`，再確認舊呼叫回 401 或 404。
 
-目前 rate limit、single-flight 與 idempotency cache 是單一 API process 內的有界狀態，
+通過 API key 驗證後的呼叫會寫入 owner-scoped durable usage ledger，保存 server-generated
+request ID、project／credential 識別、已知聲線、HTTP 結果、latency 與 WAV 秒數／bytes；不保存
+輸入文字、token、冪等鍵、reference 或 transcript。owner 可由
+`GET /api/developer/external-voice/usage` 或 `/developer/usage` 查詢最多 90 天的使用量。
+
+目前 rate limit、single-flight 與 idempotency cache 仍是單一 API process 內的有界狀態，
 只支援一個 API replica。正式多 replica 或付費訂閱前，必須改用共享協調／entitlement
-storage，並完成實際 provider terms 與商用權利審查。
+storage、決定 usage retention／歸檔政策，並完成實際 provider terms 與商用權利審查。

@@ -40,7 +40,7 @@ export function DeveloperConsolePage() {
           <Link className="mx-1 font-semibold text-amber-800 underline" to="/developer/credentials">API 金鑰</Link>
           頁建立、換發或撤銷；完整 secret 只在操作完成後顯示一次。接用方式請參考
           <Link className="mx-1 font-semibold text-amber-800 underline" to="/developers/docs">API 文件</Link>
-          。
+          ，呼叫結果可到 <Link className="font-semibold text-amber-800 underline" to="/developer/usage">用量與活動</Link> 查看。
         </p>
       </div>
 

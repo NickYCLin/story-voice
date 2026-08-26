@@ -38,6 +38,38 @@ public static class DeveloperConsoleEndpoints
             return Results.Ok(await service.ListAuditAsync(cancellationToken));
         });
 
+        group.MapGet("/external-voice/usage", async (
+            DateTimeOffset? fromUtc,
+            DateTimeOffset? toUtc,
+            string? projectId,
+            string? voice,
+            int? limit,
+            HttpContext httpContext,
+            IDeveloperVoiceUsageService service,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken) =>
+        {
+            ApplyNoStore(httpContext.Response);
+            var now = timeProvider.GetUtcNow();
+            var query = new DeveloperVoiceUsageQuery(
+                (fromUtc ?? now.AddHours(-24)).ToUniversalTime(),
+                (toUtc ?? now).ToUniversalTime(),
+                projectId,
+                voice,
+                limit ?? 50);
+            try
+            {
+                return Results.Ok(await service.GetUsageAsync(query, cancellationToken));
+            }
+            catch (ArgumentException)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid usage query",
+                    detail: "Use a UTC range up to 90 days and valid project, voice and limit filters.");
+            }
+        });
+
         group.MapPost("/external-voice/credentials", async (
             CreateDeveloperVoiceCredentialRequest request,
             HttpContext httpContext,

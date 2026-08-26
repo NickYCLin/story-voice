@@ -22,7 +22,7 @@ public sealed class ExternalVoiceIdempotencyCoordinatorTests
         var first = await coordinator.ExecuteAsync("consumer-a", "request_key_0001", RequestHash, () =>
         {
             calls++;
-            return Task.FromResult(new ExternalVoiceAudio([9, 9, 9], "audio/wav"));
+            return Task.FromResult(new ExternalVoiceAudio([9, 9, 9], "audio/wav", 1_250));
         });
         var second = await coordinator.ExecuteAsync("consumer-a", "request_key_0001", RequestHash, () =>
         {
@@ -32,6 +32,7 @@ public sealed class ExternalVoiceIdempotencyCoordinatorTests
 
         Assert.Equal(1, calls);
         Assert.Equal(first.Content, second.Content);
+        Assert.Equal(1_250, second.DurationMilliseconds);
     }
 
     [Fact]

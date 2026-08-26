@@ -248,7 +248,13 @@ StoryVoice
 
 **Backend gap**：需要 owner-session playground proxy 與安全活動摘要 API。
 
-#### E. 用量與活動 `/developer/usage`
+#### E. 用量與活動 `/developer/usage` — ✅ REPOSITORY（2026-08-26）
+
+> 已交付 owner-scoped durable usage ledger、`GET /api/developer/external-voice/usage` 與登入後
+> 使用量頁。只記錄通過 API key 驗證後的安全 metadata；可依近 24 小時／7 天／30 天、project
+> 與 voice 篩選，摘要包含請求數、成功率、429、平均 latency、WAV 秒數與 bytes，最近活動只顯示
+> server-generated request ID、狀態、錯誤類型與耗時。輸入文字、Bearer、冪等鍵、reference 與
+> transcript 都不進資料表或 owner response。
 
 最小內容：
 
@@ -257,7 +263,8 @@ StoryVoice
 - 最近活動只顯示 request ID、狀態、耗時與錯誤類型；不得顯示輸入文字、token、reference 或 transcript。
 - 額度／速率與到期提醒。
 
-**Backend gap**：目前沒有 durable usage ledger；rate limit 與 idempotency 仍是單一 process memory。
+**剩餘營運缺口**：rate limit、single-flight 與 idempotency 仍是單一 process memory；多 replica
+或正式付費訂閱前仍須改成共享協調。usage retention／歸檔政策也需在累積正式商用資料前決定。
 
 #### F. API 文件 `/developers/docs` — ✅ LIVE（2026-08-19）
 

@@ -68,6 +68,44 @@ export type DeveloperVoiceCredentialAuditSummary = {
   relatedCredentialKeyId: string | null
 }
 
+export type DeveloperVoiceUsageSummary = {
+  totalRequests: number
+  successfulRequests: number
+  successRatePercent: number
+  rateLimitedRequests: number
+  averageLatencyMilliseconds: number
+  outputBytes: number
+  outputDurationMilliseconds: number
+}
+
+export type DeveloperVoiceUsageActivity = {
+  requestId: string
+  projectId: string
+  voiceAlias: string | null
+  occurredAtUtc: string
+  statusCode: number
+  outcome: string
+  durationMilliseconds: number
+  textCharacters: number | null
+  responseBytes: number
+  audioDurationMilliseconds: number
+}
+
+export type DeveloperVoiceUsageReport = {
+  fromUtc: string
+  toUtc: string
+  summary: DeveloperVoiceUsageSummary
+  activities: DeveloperVoiceUsageActivity[]
+}
+
+export type DeveloperVoiceUsageFilters = {
+  fromUtc: string
+  toUtc: string
+  projectId?: string
+  voice?: string
+  limit?: number
+}
+
 export const PROJECT_STATUS_LABEL: Record<DeveloperVoiceProjectSummary['status'], string> = {
   'not-yet-effective': '尚未生效',
   active: '有效',
@@ -111,6 +149,23 @@ export const fetchDeveloperVoiceCredentialAudit = (signal?: AbortSignal) =>
     '/api/developer/external-voice/credentials/audit',
     { signal },
   )
+
+export const fetchDeveloperVoiceUsage = (
+  filters: DeveloperVoiceUsageFilters,
+  signal?: AbortSignal,
+) => {
+  const query = new URLSearchParams({
+    fromUtc: filters.fromUtc,
+    toUtc: filters.toUtc,
+    limit: String(filters.limit ?? 50),
+  })
+  if (filters.projectId) query.set('projectId', filters.projectId)
+  if (filters.voice) query.set('voice', filters.voice)
+  return fetchJson<DeveloperVoiceUsageReport>(
+    `/api/developer/external-voice/usage?${query.toString()}`,
+    { signal },
+  )
+}
 
 export const createDeveloperVoiceCredential = (
   projectId: string,

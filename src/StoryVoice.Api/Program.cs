@@ -203,6 +203,7 @@ app.UseExceptionHandler();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<ExternalVoiceUsageMiddleware>();
 // Endpoint-specific authentication runs during authorization because the regular
 // web application keeps its cookie scheme as the default. Rate limiting must run
 // afterwards so its partition is the authenticated external consumer, not an

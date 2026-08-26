@@ -155,6 +155,8 @@ public static class ExternalVoiceEndpoints
                 "invalid_request");
         }
 
+        httpContext.Features.Get<ExternalVoiceUsageFeature>()?.CaptureRequest(request);
+
         var consumerKeyId = httpContext.User.FindFirst(
             ExternalVoiceAuthenticationDefaults.ConsumerKeyIdClaim)?.Value;
         if (string.IsNullOrEmpty(consumerKeyId))
@@ -183,11 +185,10 @@ public static class ExternalVoiceEndpoints
                 return UnavailableProblem();
             }
 
-            var requestId = CreateRequestId();
+            httpContext.Features.Get<ExternalVoiceUsageFeature>()?.MarkSuccess(audio);
             ApplyPrivateNoStoreHeaders(httpContext.Response);
             httpContext.Response.Headers.Pragma = "no-cache";
             httpContext.Response.Headers.XContentTypeOptions = "nosniff";
-            httpContext.Response.Headers["X-StoryVoice-Request-Id"] = requestId;
             httpContext.Response.ContentLength = audio.Content.LongLength;
             return Results.Bytes(audio.Content, WaveContentType);
         }
@@ -371,16 +372,6 @@ public static class ExternalVoiceEndpoints
         }
     }
 
-    private static string CreateRequestId()
-    {
-        Span<byte> bytes = stackalloc byte[16];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
-        return Convert.ToBase64String(bytes)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
     internal static void ApplyPrivateNoStoreHeaders(HttpResponse response) =>
         response.Headers.CacheControl = "private, no-store";
 
@@ -410,6 +401,7 @@ public static class ExternalVoiceEndpoints
         public async Task ExecuteAsync(HttpContext httpContext)
         {
             httpContext.Response.StatusCode = status;
+            httpContext.Features.Get<ExternalVoiceUsageFeature>()?.MarkFailure(code, status);
             ApplyPrivateNoStoreHeaders(httpContext.Response);
             httpContext.Response.Headers.Pragma = "no-cache";
             httpContext.Response.Headers.XContentTypeOptions = "nosniff";

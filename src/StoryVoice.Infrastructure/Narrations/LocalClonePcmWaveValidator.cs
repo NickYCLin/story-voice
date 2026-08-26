@@ -7,7 +7,7 @@ internal static class LocalClonePcmWaveValidator
     private const ushort PcmFormat = 1;
 
     public static void ValidateReference(ReadOnlySpan<byte> content) =>
-        Validate(
+        _ = Validate(
             content,
             requiredSampleRate: 48_000,
             minimumDurationSeconds: 10,
@@ -15,14 +15,14 @@ internal static class LocalClonePcmWaveValidator
             maximumBytes: LocalClonePreviewOptions.MaximumReferenceAudioBytes);
 
     public static void ValidateOutput(ReadOnlySpan<byte> content, int maximumBytes) =>
-        Validate(
+        _ = Validate(
             content,
             requiredSampleRate: 24_000,
             minimumDurationSeconds: 0,
             maximumDurationSeconds: 300,
             maximumBytes);
 
-    public static void ValidateExternalOutput(ReadOnlySpan<byte> content, int maximumBytes) =>
+    public static long ValidateExternalOutput(ReadOnlySpan<byte> content, int maximumBytes) =>
         Validate(
             content,
             requiredSampleRate: 24_000,
@@ -31,7 +31,7 @@ internal static class LocalClonePcmWaveValidator
             maximumBytes);
 
     public static void ValidatePublicDemo(ReadOnlySpan<byte> content, int maximumBytes) =>
-        Validate(
+        _ = Validate(
             content,
             requiredSampleRate: 24_000,
             minimumDurationSeconds: 0,
@@ -39,7 +39,7 @@ internal static class LocalClonePcmWaveValidator
             maximumBytes,
             rejectUnknownChunks: true);
 
-    private static void Validate(
+    private static long Validate(
         ReadOnlySpan<byte> content,
         uint requiredSampleRate,
         double minimumDurationSeconds,
@@ -133,5 +133,7 @@ internal static class LocalClonePcmWaveValidator
         {
             throw new InvalidDataException("PCM WAV duration is outside the accepted bounds.");
         }
+
+        return checked((long)Math.Ceiling(durationSeconds * 1_000));
     }
 }
