@@ -42,21 +42,6 @@ jobs:
         env:
           STORYVOICE_BASE_PATH: /StoryVoice/
 
-  books-com-tw-companion:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: extensions/books-com-tw-companion
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: extensions/books-com-tw-companion/package-lock.json
-      - run: npm ci
-      - run: npm run check
-
   bluemagpie-gateway:
     runs-on: ubuntu-latest
     defaults:

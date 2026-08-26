@@ -12,16 +12,16 @@ public sealed class BookMetadataCorrectionTests
             "來源書名",
             "來源作者",
             "zh-TW",
-            "books-com-tw",
-            "E123456789",
-            "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E123456789",
-            "https://im2.book.com.tw/image/source.jpg");
+            "legacy-external",
+            "legacy-123456789",
+            "https://example.test/books/legacy-123456789",
+            "https://example.test/images/source.jpg");
 
         book.SetMetadataCorrections(" 校正書名 ", "校正作者", "https://example.test/corrected.jpg");
 
         Assert.Equal("來源書名", book.Title);
         Assert.Equal("來源作者", book.Author);
-        Assert.Equal("https://im2.book.com.tw/image/source.jpg", book.CoverImageUrl);
+        Assert.Equal("https://example.test/images/source.jpg", book.CoverImageUrl);
         Assert.Equal("校正書名", book.TitleCorrection);
         Assert.Equal("校正作者", book.AuthorCorrection);
         Assert.Equal("https://example.test/corrected.jpg", book.CoverImageUrlCorrection);
@@ -31,8 +31,8 @@ public sealed class BookMetadataCorrectionTests
     public void Empty_corrections_restore_source_metadata()
     {
         var book = Book.CreateExternal(
-            Guid.NewGuid(), "來源書名", "來源作者", "zh-TW", "books-com-tw", "E123456788",
-            "https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id=E123456788", null);
+            Guid.NewGuid(), "來源書名", "來源作者", "zh-TW", "legacy-external", "legacy-123456788",
+            "https://example.test/books/legacy-123456788", null);
         book.SetMetadataCorrections("替代書名", "替代作者", "https://example.test/cover.jpg");
 
         book.SetMetadataCorrections(null, " ", null);

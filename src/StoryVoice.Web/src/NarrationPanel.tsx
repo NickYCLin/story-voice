@@ -143,7 +143,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">合法正文神經語音</p>
           <h4 className="mt-1 font-serif text-lg text-stone-800">AI 朗讀與有聲書</h4>
           <p className="mt-2 max-w-3xl text-xs leading-6 text-stone-500">
-            StoryVoice 只處理你上傳或明確連結的合法 EPUB／TXT 正文。建立系列配音時，文字會交給該系列目前設定的語音服務（可能是私人本機自架或外部供應商），音訊完成後保存於你的私人 StoryVoice 帳號；這與博客來官方閱讀器的 TTS 標記是不同能力。
+            StoryVoice 只處理你主動匯入、且有權使用的無 DRM EPUB／TXT 正文。建立系列配音時，文字會交給該系列目前設定的語音服務（可能是私人本機自架或外部供應商），音訊完成後保存於你的私人 StoryVoice 帳號。
           </p>
         </div>
         <span className="shrink-0 rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-xs text-amber-800">
@@ -153,7 +153,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
 
       {!eligible && (
         <p className="mt-4 rounded-xl border border-stone-200 bg-white p-4 text-xs leading-6 text-stone-500">
-          目前只有書目資料；先上傳你合法持有、無 DRM 的 EPUB／TXT，再於上方明確連結正文。博客來官方 TTS 標記不等於 StoryVoice 音訊。
+          目前沒有可處理的正文；請先匯入你合法持有、無 DRM 的 EPUB 或 UTF-8 TXT。
         </p>
       )}
 

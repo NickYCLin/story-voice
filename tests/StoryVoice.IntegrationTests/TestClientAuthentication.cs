@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,34 +22,6 @@ internal static class TestClientAuthentication
             $"reader-{Guid.NewGuid():N}@example.com",
             "Moonlight!Story42",
             cancellationToken);
-        return client;
-    }
-
-    public static async Task<HttpClient> CreateCompanionClientAsync(
-        this WebApplicationFactory<Program> factory,
-        CancellationToken cancellationToken)
-    {
-        using var sessionClient = factory.CreateCookieClient();
-        await sessionClient.RegisterAsync(
-            $"companion-{Guid.NewGuid():N}@example.com",
-            "Moonlight!Story42",
-            cancellationToken);
-        using var tokenResponse = await sessionClient.PostWithCsrfAsync(
-            "/api/auth/companion-token",
-            new { },
-            cancellationToken);
-        tokenResponse.EnsureSuccessStatusCode();
-        using var tokenBody = JsonDocument.Parse(
-            await tokenResponse.Content.ReadAsStreamAsync(cancellationToken));
-        var accessToken = tokenBody.RootElement.GetProperty("accessToken").GetString()
-            ?? throw new InvalidOperationException("Companion token endpoint did not return an access token.");
-
-        var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-            HandleCookies = false
-        });
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return client;
     }
 

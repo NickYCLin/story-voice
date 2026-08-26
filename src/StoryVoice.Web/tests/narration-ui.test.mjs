@@ -14,12 +14,12 @@ test('new narration routes eligible authorized text through the multi-character 
   assert.ok(!panel.includes('function createNarration'))
 })
 
-test('narration discloses the configured local or external provider and distinguishes official TTS metadata', () => {
+test('narration discloses the configured local or external provider for imported files', () => {
   assert.ok(panel.includes('該系列目前設定的語音服務'))
   assert.ok(panel.includes('私人本機自架或外部供應商'))
   assert.ok(!panel.includes('文字會送往 Microsoft Edge'))
-  assert.ok(panel.includes('博客來官方閱讀器的 TTS 標記是不同能力'))
-  assert.ok(panel.includes('博客來官方 TTS 標記不等於 StoryVoice 音訊'))
+  assert.ok(panel.includes('主動匯入、且有權使用的無 DRM EPUB／TXT 正文'))
+  assert.ok(!panel.includes('博客來'))
   assert.ok(panel.includes('音訊完成後保存於你的私人 StoryVoice 帳號'))
 })
 
@@ -46,5 +46,5 @@ test('narration mutations use CSRF, poll durable jobs, support cancel and privat
   assert.ok(panel.includes('/audio`)}'))
   assert.ok(panel.includes('<audio'))
   assert.ok(libraryPage.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={csrfToken} />'))
-  assert.ok(bookInsightsPanel.includes('onBookUpdated({ ...book, contentBookId: contentSelection || null })'))
+  assert.ok(bookInsightsPanel.includes('const canAnalyzeText = book.authorizedTextAvailable'))
 })

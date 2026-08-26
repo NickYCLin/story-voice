@@ -19,7 +19,6 @@ using StoryVoice.Api;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
-using StoryVoice.Application.Bookshelves;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.ExternalVoices;
@@ -44,7 +43,6 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddScoped<IBookService, BookService>();
 builder.Services.AddScoped<IBookImportService, BookImportService>();
-builder.Services.AddScoped<IBooksComTwBookshelfService, BooksComTwBookshelfService>();
 builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = CharacterVoiceProfileLimits.MaximumReferenceAudioBytes + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
@@ -97,9 +95,6 @@ builder.Services.AddAuthentication(options =>
             return Task.CompletedTask;
         };
     })
-    .AddScheme<AuthenticationSchemeOptions, CompanionAuthenticationHandler>(
-        CompanionAuthenticationDefaults.Scheme,
-        _ => { })
     .AddScheme<AuthenticationSchemeOptions, ExternalVoiceAuthenticationHandler>(
         ExternalVoiceAuthenticationDefaults.Scheme,
         _ => { });
@@ -108,14 +103,6 @@ builder.Services.AddAuthorizationBuilder()
     {
         policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme);
         policy.RequireAuthenticatedUser();
-    })
-    .AddPolicy(StoryVoicePolicies.BookshelfSync, policy =>
-    {
-        policy.AddAuthenticationSchemes(CompanionAuthenticationDefaults.Scheme);
-        policy.RequireAuthenticatedUser();
-        policy.RequireClaim(
-            CompanionAuthenticationDefaults.ScopeClaim,
-            CompanionAuthenticationDefaults.BookshelfSyncScope);
     })
     .AddPolicy(StoryVoicePolicies.ExternalVoiceSynthesis, policy =>
     {

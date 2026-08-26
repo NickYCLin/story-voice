@@ -63,8 +63,7 @@ multi-speaker narration and supports self-hosted or pluggable speech-synthesis p
 - React 19 + TypeScript + Vite + Tailwind CSS 4
 - Book / Chapter domain model and REST API
 - EPUB / TXT multipart upload、metadata、TOC 與章節解析
-- 博客來電子書櫃 Companion：同步可見 metadata 與官方閱讀連結
-- 使用者明確連結合法 EPUB／TXT 正文與手動閱讀筆記（擷取式摘要入口已退場，既有資料暫留供回復）
+- 來源不綁平台的 EPUB／TXT 檔案匯入與手動閱讀筆記（擷取式摘要入口已退場，既有資料暫留供回復）
 - 單一神經語音 MVP：持久化工作、租約與重試、取消、私有 MP3 與 owner-scoped Range 串流
 - 全書庫處理狀態矩陣：分開標示官方 TTS、合法正文、筆記與 StoryVoice 音訊
 - 跨冊系列／固定角色／alias、不可變 cast revision 與整批原子啟用資料邊界
@@ -240,7 +239,6 @@ Vite proxies `/api` and `/health` to `http://localhost:8080`.
 ```text
 POST /api/books
 POST /api/books/import
-POST /api/books/sources/books-com-tw/import
 GET  /api/books
 GET  /api/books/{id}
 ```
@@ -291,19 +289,6 @@ Open `http://localhost:3000/library` to import EPUB/TXT files, switch between
 books, and expand the parsed chapter text in the read-only library view. Group
 books into a collection at `/collections`, and check collections other users
 shared with you at `/shared`.
-
-### 博客來電子書櫃 Companion
-
-Chrome／Chromium 可載入 [`extensions/books-com-tw-companion`](extensions/books-com-tw-companion)，
-從使用者已登入的官方電子書櫃同步已呈現的書名、作者、封面與官方閱讀連結；
-使用者也能明確觸發有輪次／數量上限的完整書櫃展開掃描。
-Companion 不讀取帳密、Cookie、購買憑證或電子書內文，也不呼叫博客來未公開 API。
-傳送目標採精確 allowlist：本機 `localhost:3000`／`127.0.0.1:3000`，以及正式上線後的
-`https://aiprod.wrbtycg.tw/StoryVoice`。
-
-同步後的書籍狀態為 `Linked`，可以在 StoryVoice 書庫辨識來源並回到博客來官方閱讀器；
-若要進行故事分析與語音生成，仍須另外匯入使用者有權處理的無 DRM EPUB／TXT。
-安裝與測試步驟見 [Companion README](extensions/books-com-tw-companion/README.md)。
 
 Example:
 
@@ -357,7 +342,7 @@ tests/
 
 ## Roadmap
 
-1. **Book Import** — EPUB / TXT upload、博客來書櫃 metadata link、TOC and chapter extraction
+1. **Book Import** — DRM-free EPUB / UTF-8 TXT upload、TOC and chapter extraction
 2. **Story Analyzer** — narrator, dialogue, speaker, emotion and confidence
 3. **Character Bible** — aliases, merge, voice lock and cross-chapter consistency
 4. **Voice Casting / TTS** — provider abstraction, preview, cache and segment regeneration
@@ -368,9 +353,8 @@ tests/
 ## Security and content rights
 
 - StoryVoice **does not provide DRM circumvention**.
-- 博客來 Companion 不接收帳密／Cookie，也不下載或解密博客來電子書內文。
 - Process only content you own or have the right to transform.
-- 建立系列配音時，合法正文會交給該系列目前設定的語音服務；服務可能是私人本機自架或外部供應商。StoryVoice 不會把博客來官方 TTS 標記當成已生成音訊。
+- 建立系列配音時，合法正文會交給該系列目前設定的語音服務；服務可能是私人本機自架或外部供應商。
 - API keys belong in environment variables or a secret manager, never Git.
 - 使用 VoAI 雲端 API 時，待合成文字會透過網路傳送至 VoAI；啟用前請確認內容授權、隱私需求與供應商條款。
 - 對外提供 VoAI 產物時，應依適用法規與平台規範揭露該語音由 AI 生成或合成。

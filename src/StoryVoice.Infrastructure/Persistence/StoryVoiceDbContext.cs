@@ -52,8 +52,6 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<SeriesCharacterIdentityKey> SeriesCharacterIdentityKeys =>
         Set<SeriesCharacterIdentityKey>();
 
-    public DbSet<CompanionAccessToken> CompanionAccessTokens => Set<CompanionAccessToken>();
-
     public DbSet<BookCollection> BookCollections => Set<BookCollection>();
 
     public DbSet<BookCollectionBook> BookCollectionBooks => Set<BookCollectionBook>();

@@ -4,15 +4,16 @@ import test from 'node:test'
 
 const app = await readFile(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 
-test('library organizer exposes accessible search, source, layout, TTS, and sort controls', () => {
+test('library organizer exposes accessible search and sort controls', () => {
   for (const marker of [
     'aria-label="書庫整理工具"',
-    '搜尋書名、作者或書籍 ID',
-    '博客來版型',
-    '博客來官方 TTS',
+    '搜尋書名或作者',
+    '最近加入',
     '符合 {visibleBooks.length}／全部 {books.length} 本',
     '沒有符合條件的書',
   ]) assert.ok(app.includes(marker), `missing ${marker}`)
+  assert.ok(!app.includes('博客來'))
+  assert.ok(!app.includes('Companion'))
 })
 
 test('library renders filtered books and only redirects when the book no longer exists', () => {

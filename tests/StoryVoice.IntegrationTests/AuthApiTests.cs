@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using StoryVoice.Application.Books;
@@ -124,116 +123,22 @@ public sealed class AuthApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task Companion_token_can_sync_bookshelf_only_for_issuing_user()
+    public async Task Retired_bookshelf_sync_routes_are_not_exposed()
     {
-        using var ownerClient = factory.CreateCookieClient();
-        using var otherClient = factory.CreateCookieClient();
         var cancellationToken = TestContext.Current.CancellationToken;
-        await ownerClient.RegisterAsync(
-            $"owner-{Guid.NewGuid():N}@example.com",
-            "Moonlight!Story42",
-            cancellationToken);
-        await otherClient.RegisterAsync(
-            $"other-{Guid.NewGuid():N}@example.com",
-            "Moonlight!Story42",
-            cancellationToken);
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
 
-        using var tokenResponse = await ownerClient.PostWithCsrfAsync(
+        using var tokenResponse = await client.PostWithCsrfAsync(
             "/api/auth/companion-token",
             new { },
             cancellationToken);
-        using var tokenBody = JsonDocument.Parse(
-            await tokenResponse.Content.ReadAsStreamAsync(cancellationToken));
-        var accessToken = tokenBody.RootElement.GetProperty("accessToken").GetString();
-        var expiresAt = tokenBody.RootElement.GetProperty("expiresAt").GetDateTimeOffset();
-        Assert.Equal(HttpStatusCode.OK, tokenResponse.StatusCode);
-        Assert.StartsWith("svc_", accessToken, StringComparison.Ordinal);
-        Assert.InRange(expiresAt, DateTimeOffset.UtcNow.AddDays(6), DateTimeOffset.UtcNow.AddDays(7).AddMinutes(1));
-
-        using var cookieOnlySyncResponse = await ownerClient.PostWithCsrfAsync(
+        using var importResponse = await client.PostWithCsrfAsync(
             "/api/books/sources/books-com-tw/import",
-            new
-            {
-                books = new[]
-                {
-                    new
-                    {
-                        externalId = $"E{Guid.NewGuid():N}",
-                        title = "一般登入不可冒充 Companion",
-                        sourceUrl = "https://www.books.com.tw/products/E050145360"
-                    }
-                }
-            },
+            new { books = Array.Empty<object>() },
             cancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, cookieOnlySyncResponse.StatusCode);
 
-        var externalId = $"E{Guid.NewGuid():N}";
-        using var syncRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            "/api/books/sources/books-com-tw/import")
-        {
-            Content = JsonContent.Create(new
-            {
-                books = new[]
-                {
-                    new
-                    {
-                        externalId,
-                        title = "我的博客來藏書",
-                        author = "博客來作者",
-                        language = "zh-TW",
-                        sourceUrl = $"https://www.books.com.tw/products/{externalId}",
-                        coverImageUrl = $"https://im1.book.com.tw/image/getImage?i={externalId}"
-                    }
-                }
-            })
-        };
-        syncRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var syncResponse = await otherClient.SendAsync(syncRequest, cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
-
-        using var bearerOnlyClient = factory.CreateCookieClient();
-        using var bearerListRequest = new HttpRequestMessage(HttpMethod.Get, "/api/books");
-        bearerListRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var bearerListResponse = await bearerOnlyClient.SendAsync(
-            bearerListRequest,
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, bearerListResponse.StatusCode);
-
-        var ownerBooks = await ownerClient.GetFromJsonAsync<BookDetailsResponse[]>(
-            "/api/books",
-            cancellationToken);
-        var otherBooks = await otherClient.GetFromJsonAsync<BookDetailsResponse[]>(
-            "/api/books",
-            cancellationToken);
-        Assert.Contains(ownerBooks!, book => book.Title == "我的博客來藏書");
-        Assert.DoesNotContain(otherBooks!, book => book.Title == "我的博客來藏書");
-
-        using var revokeResponse = await ownerClient.PostWithCsrfAsync(
-            "/api/auth/companion-token/revoke",
-            new { },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.NoContent, revokeResponse.StatusCode);
-
-        using var revokedSyncRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            "/api/books/sources/books-com-tw/import")
-        {
-            Content = JsonContent.Create(new
-            {
-                books = new[]
-                {
-                    new
-                    {
-                        externalId = $"E{Guid.NewGuid():N}",
-                        title = "已撤銷金鑰不可同步",
-                        sourceUrl = "https://www.books.com.tw/products/E050145360"
-                    }
-                }
-            })
-        };
-        revokedSyncRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var revokedSyncResponse = await bearerOnlyClient.SendAsync(revokedSyncRequest, cancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, revokedSyncResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, tokenResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, importResponse.StatusCode);
     }
+
 }

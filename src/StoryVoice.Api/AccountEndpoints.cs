@@ -8,7 +8,6 @@ namespace StoryVoice.Api;
 public static class StoryVoicePolicies
 {
     public const string UserSession = "StoryVoiceUserSession";
-    public const string BookshelfSync = "StoryVoiceBookshelfSync";
     public const string ExternalVoiceSynthesis = "StoryVoiceExternalVoiceSynthesis";
 }
 
@@ -106,47 +105,6 @@ public static class AccountEndpoints
         .RequireAuthorization(StoryVoicePolicies.UserSession)
         .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("LogoutAccount");
-
-        group.MapPost("/companion-token", async (
-            HttpContext httpContext,
-            CompanionTokenService tokenService,
-            CancellationToken cancellationToken) =>
-        {
-            var userIdValue = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!Guid.TryParse(userIdValue, out var userId))
-            {
-                return Results.Unauthorized();
-            }
-
-            var token = await tokenService.IssueAsync(userId, cancellationToken);
-            return Results.Ok(new
-            {
-                accessToken = token.AccessToken,
-                expiresAt = token.ExpiresAt,
-                notice = "金鑰只顯示這一次；重新建立會撤銷舊金鑰。"
-            });
-        })
-        .RequireAuthorization(StoryVoicePolicies.UserSession)
-        .AddEndpointFilter<AntiforgeryEndpointFilter>()
-        .WithName("IssueCompanionToken");
-
-        group.MapPost("/companion-token/revoke", async (
-            HttpContext httpContext,
-            CompanionTokenService tokenService,
-            CancellationToken cancellationToken) =>
-        {
-            var userIdValue = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!Guid.TryParse(userIdValue, out var userId))
-            {
-                return Results.Unauthorized();
-            }
-
-            await tokenService.RevokeAllAsync(userId, cancellationToken);
-            return Results.NoContent();
-        })
-        .RequireAuthorization(StoryVoicePolicies.UserSession)
-        .AddEndpointFilter<AntiforgeryEndpointFilter>()
-        .WithName("RevokeCompanionTokens");
 
         return endpoints;
     }

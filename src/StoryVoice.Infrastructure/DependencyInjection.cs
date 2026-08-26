@@ -270,7 +270,6 @@ public static class DependencyInjection
         services.AddScoped<ICollectionService, CollectionService>();
         services.AddScoped<ISharedCollectionService, SharedCollectionService>();
         services.AddScoped<PostgreSqlCastEpochActivationPublisher>();
-        services.AddScoped<CompanionTokenService>();
         services.AddSingleton<ChineseSpeechSegmenter>();
         services.AddSingleton<RuleBasedSpeakerAttributionProvider>();
         services.AddSingleton<ISpeakerAttributionProvider>(provider =>

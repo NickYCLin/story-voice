@@ -8,13 +8,6 @@ public sealed class AntiforgeryEndpointFilter(IAntiforgery antiforgery) : IEndpo
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
     {
-        if (context.HttpContext.User.Identities.Any(identity =>
-                identity.IsAuthenticated &&
-                identity.AuthenticationType == CompanionAuthenticationDefaults.Scheme))
-        {
-            return await next(context);
-        }
-
         await antiforgery.ValidateRequestAsync(context.HttpContext);
         return await next(context);
     }

@@ -65,12 +65,12 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
             </div>
           </div>
           <p className="eyebrow mt-14">Step 1</p>
-          <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">先登入 StoryVoice，<span className="text-amber-700">再連接自己的書櫃。</span></h1>
-          <p className="mt-6 max-w-xl text-sm leading-7 text-stone-600">每個帳號都有獨立書庫。StoryVoice 只保存你主動匯入的檔案與書目，不會接收博客來帳密、Cookie 或受 DRM 保護的內文。</p>
+          <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">先登入 StoryVoice，<span className="text-amber-700">再匯入自己的故事。</span></h1>
+          <p className="mt-6 max-w-xl text-sm leading-7 text-stone-600">每個帳號都有獨立書庫。StoryVoice 只保存你主動匯入、且有權處理的無 DRM 檔案。</p>
           <ol className="mt-10 space-y-4 text-sm text-stone-600">
             <li><span className="mr-3 text-amber-700">01</span>登入或建立 StoryVoice 帳號</li>
-            <li><span className="mr-3 text-orange-700">02</span>登入自己的博客來官方書櫃</li>
-            <li><span className="mr-3 text-rose-600">03</span>用 Companion 同步已呈現的書目</li>
+            <li><span className="mr-3 text-orange-700">02</span>準備無 DRM 的 EPUB 或 UTF-8 TXT</li>
+            <li><span className="mr-3 text-rose-600">03</span>匯入檔案並檢查解析後的章節</li>
           </ol>
           <Link className="secondary-button mt-8 public-focus" to="/voices">瀏覽公開聲線館</Link>
         </div>

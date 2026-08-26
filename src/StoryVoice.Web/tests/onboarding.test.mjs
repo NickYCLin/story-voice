@@ -10,13 +10,11 @@ function positionOf(source, marker) {
   return position
 }
 
-test('直接上傳是推薦主流程，博客來同步收在進階選項', () => {
-  const upload = positionOf(libraryPage, 'id="book-file"')
-  const advancedSync = positionOf(libraryPage, '進階：同步博客來書櫃書目')
-
-  assert.ok(upload < advancedSync, '直接上傳應比進階書櫃同步更早出現')
+test('直接上傳是唯一且清楚的書籍匯入主流程', () => {
+  positionOf(libraryPage, 'id="book-file"')
   assert.match(libraryPage, /推薦方式/)
-  assert.match(libraryPage, /只要準備一個無 DRM 的 EPUB 或 UTF-8 TXT/)
+  assert.match(libraryPage, /書籍來自哪個平台都沒關係/)
+  assert.doesNotMatch(libraryPage, /同步博客來|Companion/)
 })
 
 test('空書庫畫面直接教使用者 3 步驟開始，不需要另一個行銷頁面', () => {

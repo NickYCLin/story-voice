@@ -1,13 +1,7 @@
-export type LibrarySourceFilter = 'all' | 'books-com-tw' | 'uploaded'
-export type LibraryLayoutFilter = 'all' | 'Reflowable' | 'Fixed' | 'unknown'
-export type LibraryTtsFilter = 'all' | 'true' | 'false' | 'unknown'
-export type LibrarySort = 'created-desc' | 'title' | 'author' | 'synced-desc'
+export type LibrarySort = 'created-desc' | 'title' | 'author'
 
 export type LibraryCatalogFilters = {
   query: string
-  source: LibrarySourceFilter
-  layout: LibraryLayoutFilter
-  tts: LibraryTtsFilter
   sort: LibrarySort
 }
 
@@ -16,11 +10,6 @@ export type LibraryCatalogBook = {
   title: string
   author: string
   createdAt: string
-  sourceProvider: string | null
-  externalSourceId: string | null
-  nativeTtsAvailable: boolean | null
-  ebookLayout: 'Reflowable' | 'Fixed' | null
-  sourceSyncedAt: string | null
 }
 
 const collator = new Intl.Collator('zh-Hant', { numeric: true, sensitivity: 'base' })
@@ -77,16 +66,9 @@ export function filterAndSortBooks<T extends LibraryCatalogBook>(
 ) {
   const query = normalized(filters.query)
   const visible = books.filter((book) => {
-    if (filters.source === 'books-com-tw' && book.sourceProvider !== 'books-com-tw') return false
-    if (filters.source === 'uploaded' && book.sourceProvider !== null) return false
-    if (filters.layout === 'unknown' && book.ebookLayout !== null) return false
-    if (filters.layout !== 'all' && filters.layout !== 'unknown' && book.ebookLayout !== filters.layout) return false
-    if (filters.tts === 'true' && book.nativeTtsAvailable !== true) return false
-    if (filters.tts === 'false' && book.nativeTtsAvailable !== false) return false
-    if (filters.tts === 'unknown' && book.nativeTtsAvailable !== null) return false
     if (!query) return true
 
-    return [book.title, book.author, book.externalSourceId]
+    return [book.title, book.author]
       .some((value) => normalized(value).includes(query))
   })
 
@@ -95,7 +77,6 @@ export function filterAndSortBooks<T extends LibraryCatalogBook>(
     if (filters.sort === 'title') result = compareTitles(left.title, right.title)
     if (filters.sort === 'author') result = collator.compare(left.author, right.author)
     if (filters.sort === 'created-desc') result = timestamp(right.createdAt) - timestamp(left.createdAt)
-    if (filters.sort === 'synced-desc') result = timestamp(right.sourceSyncedAt) - timestamp(left.sourceSyncedAt)
     return result || compareTitles(left.title, right.title) || collator.compare(left.id, right.id)
   })
 }

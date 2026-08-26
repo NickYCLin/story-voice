@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-26（正式站 Web 更新與受管 API 金鑰生命週期）
+最後更新：2026-08-26（移除特定書商書櫃同步，改以通用檔案匯入為主）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -12,8 +12,8 @@
 
 - .NET 10 Clean Architecture、PostgreSQL／EF Core、React／TypeScript、Worker 與 Docker Compose 基礎架構。
 - 帳號、Cookie session、CSRF、owner-scoped 書庫與私有資料邊界。
-- 無 DRM EPUB／TXT 匯入、章節解析、原始檔安全儲存與博客來書櫃 metadata Companion。
-- 使用者明確連結合法正文、閱讀筆記與書目人工校正；擷取式摘要已從 UI、API 與狀態矩陣退場，既有資料表與資料暫留供回復。
+- 不綁特定書商的無 DRM EPUB／UTF-8 TXT 匯入、章節解析與原始檔安全儲存。
+- 閱讀筆記與書目人工校正；擷取式摘要已從 UI、API 與狀態矩陣退場，既有資料表與資料暫留供回復。
 - 本機 LLM 角色／alias 分析：`gpt-oss:20b` 逐章讀取完整合法正文，只保存名稱、alias、信心與證據次數，不保存分析用正文。前端可勾選候選、編輯 canonical 名稱、合併 alias、指定角色層級與聲線，再以單一 owner-scoped API 原子加入冊次及建立／重用系列角色；重送不會重複建立。
 - 單一聲線朗讀工作：持久化、租約、重試、取消、進度、私有 MP3 與 Range 串流。
 - 系列／冊次／角色／alias domain model 與 PostgreSQL 約束；canonical name 與 alias 共用唯一命名空間。
@@ -149,9 +149,6 @@ npm test
 npm run lint
 npm run build
 
-cd ../../extensions/books-com-tw-companion
-npm ci
-npm run check
 ```
 
 PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。

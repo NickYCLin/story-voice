@@ -1,6 +1,5 @@
 using StoryVoice.Application.Books;
 using StoryVoice.Application.BookImports;
-using StoryVoice.Application.Bookshelves;
 
 namespace StoryVoice.Api;
 
@@ -65,17 +64,6 @@ public static class BookEndpoints
         .ProducesProblem(StatusCodes.Status400BadRequest)
         .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
         .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
-
-        group.MapPost("/sources/books-com-tw/import", async (
-            BooksComTwBookshelfImportRequest request,
-            IBooksComTwBookshelfService bookshelfService,
-            CancellationToken cancellationToken) =>
-            Results.Ok(await bookshelfService.ImportAsync(request, cancellationToken)))
-            .RequireAuthorization(StoryVoicePolicies.BookshelfSync)
-            .AddEndpointFilter<AntiforgeryEndpointFilter>()
-            .WithName("ImportBooksComTwBookshelf")
-            .Produces<BooksComTwBookshelfImportResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status400BadRequest);
 
         group.MapGet("/", async (IBookService service, CancellationToken cancellationToken) =>
             Results.Ok(await service.ListAsync(cancellationToken)))

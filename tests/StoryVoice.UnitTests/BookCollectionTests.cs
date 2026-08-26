@@ -33,7 +33,7 @@ public sealed class BookCollectionTests
             "外部書目",
             "作者",
             "zh-TW",
-            "books-com-tw",
+            "legacy-external",
             "external-1",
             "https://example.invalid/book",
             coverImageUrl: null);

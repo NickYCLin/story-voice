@@ -50,16 +50,16 @@ public sealed class BookTests
     }
 
     [Fact]
-    public void External_book_preserves_and_refreshes_official_tts_metadata()
+    public void Legacy_external_book_preserves_existing_metadata()
     {
         var book = Book.CreateExternal(
             Guid.NewGuid(),
             "月下故事",
             "比比工程師",
             "zh-TW",
-            "books-com-tw",
-            "E050145360",
-            "https://www.books.com.tw/products/E050145360",
+            "legacy-external",
+            "legacy-050145360",
+            "https://example.test/books/legacy-050145360",
             null,
             nativeTtsAvailable: true,
             ebookLayout: EbookLayout.Reflowable);
@@ -71,7 +71,7 @@ public sealed class BookTests
             "月下故事",
             "比比工程師",
             "zh-TW",
-            "https://www.books.com.tw/products/E050145360",
+            "https://example.test/books/legacy-050145360",
             null,
             nativeTtsAvailable: false,
             ebookLayout: EbookLayout.Fixed);

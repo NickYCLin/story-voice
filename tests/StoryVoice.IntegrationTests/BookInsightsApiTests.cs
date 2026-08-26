@@ -3,10 +3,14 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Series;
+using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Series;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
@@ -34,8 +38,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
-        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(sessionClient, cancellationToken);
 
         using var noteResponse = await sessionClient.PostWithCsrfAsync(
             $"/api/books/{linked.Id}/notes",
@@ -53,8 +56,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
-        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(sessionClient, cancellationToken);
         var content = await ImportTextAsync(sessionClient, cancellationToken);
 
         using var linkResponse = await PutWithCsrfAsync(
@@ -104,8 +106,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         using var other = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companion = await CreateCompanionClientAsync(owner, cancellationToken);
-        var linked = await ImportLinkedBookAsync(companion, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(owner, cancellationToken);
 
         using var update = await PutWithCsrfAsync(
             owner,
@@ -192,8 +193,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companion = await CreateCompanionClientAsync(client, cancellationToken);
-        var linked = await ImportLinkedBookAsync(companion, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(client, cancellationToken);
         var firstContent = await ImportTextAsync(client, cancellationToken);
         var secondContent = await ImportTextAsync(client, cancellationToken);
 
@@ -511,7 +511,6 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
         var content = await ImportTextAsync(
             sessionClient,
             """
@@ -519,7 +518,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             正文在分析中變更，這段文字只供受控 race test 使用。
             """,
             cancellationToken);
-        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(sessionClient, cancellationToken);
         using var link = await PutWithCsrfAsync(
             sessionClient,
             $"/api/books/{linked.Id}/content-link",
@@ -543,8 +542,7 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var sessionClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var companionClient = await CreateCompanionClientAsync(sessionClient, cancellationToken);
-        var linked = await ImportLinkedBookAsync(companionClient, cancellationToken);
+        var linked = await SeedLegacyLinkedBookAsync(sessionClient, cancellationToken);
 
         using var response = await PutWithCsrfAsync(
             sessionClient,
@@ -597,77 +595,46 @@ public sealed class BookInsightsApiTests(ApiFactory factory) : IClassFixture<Api
             ?? throw new InvalidOperationException("Import response did not contain a book.");
     }
 
-    private async Task<HttpClient> CreateCompanionClientAsync(
+    private async Task<BookDetailsResponse> SeedLegacyLinkedBookAsync(
         HttpClient sessionClient,
         CancellationToken cancellationToken)
     {
-        using var tokenResponse = await sessionClient.PostWithCsrfAsync(
-            "/api/auth/companion-token",
-            new { },
+        using var sessionResponse = await sessionClient.GetAsync(
+            "/api/auth/session",
             cancellationToken);
-        tokenResponse.EnsureSuccessStatusCode();
-        using var tokenBody = JsonDocument.Parse(await tokenResponse.Content.ReadAsStreamAsync(cancellationToken));
-        var accessToken = tokenBody.RootElement.GetProperty("accessToken").GetString()
-            ?? throw new InvalidOperationException("Companion token was missing.");
-        var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-            HandleCookies = false
-        });
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        return client;
-    }
+        sessionResponse.EnsureSuccessStatusCode();
+        using var session = JsonDocument.Parse(
+            await sessionResponse.Content.ReadAsStreamAsync(cancellationToken));
+        var email = session.RootElement.GetProperty("email").GetString()
+            ?? throw new InvalidOperationException("Authenticated session did not return an email.");
 
-    private static async Task<BookDetailsResponse> ImportLinkedBookAsync(
-        HttpClient companionClient,
-        CancellationToken cancellationToken)
-    {
-        var externalId = $"E{Random.Shared.Next(100000000, 999999999)}";
-        using var response = await companionClient.PostAsJsonAsync(
-            "/api/books/sources/books-com-tw/import",
-            new
-            {
-                books = new[]
-                {
-                    new
-                    {
-                        externalId,
-                        title = "外部書目",
-                        author = "測試作者",
-                        language = "zh-TW",
-                        sourceUrl = $"https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id={externalId}",
-                        coverImageUrl = (string?)null,
-                        nativeTtsAvailable = (bool?)null,
-                        ebookLayout = "Reflowable"
-                    }
-                }
-            },
-            cancellationToken);
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
-        var id = body.RootElement.GetProperty("books")[0].GetProperty("id").GetGuid();
-        return new BookDetailsResponse(
-            id,
-            "外部書目",
-            "測試作者",
-            "zh-TW",
-            $"{externalId}.link",
-            "external",
-            "Linked",
-            DateTimeOffset.UtcNow,
-            [],
-            "books-com-tw",
-            externalId,
-            $"https://viewer-ebook.books.com.tw/viewer/epub_v3/?book_uni_id={externalId}",
-            null,
-            null,
-            "Reflowable",
-            DateTimeOffset.UtcNow,
-            null,
-            false,
-            null,
-            null,
-            null);
+        var externalId = $"legacy-{Guid.NewGuid():N}";
+        Guid id;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var ownerId = await dbContext.Users
+                .Where(user => user.Email == email)
+                .Select(user => user.Id)
+                .SingleAsync(cancellationToken);
+            var book = Book.CreateExternal(
+                ownerId,
+                "外部書目",
+                "測試作者",
+                "zh-TW",
+                "legacy-external",
+                externalId,
+                $"https://example.test/books/{externalId}",
+                coverImageUrl: null);
+            id = book.Id;
+            dbContext.Books.Add(book);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return await sessionClient.GetFromJsonAsync<BookDetailsResponse>(
+                $"/api/books/{id}",
+                cancellationToken)
+            ?? throw new InvalidOperationException("Legacy linked book was not returned.");
     }
 
     private static async Task<HttpResponseMessage> PutWithCsrfAsync(

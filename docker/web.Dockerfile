@@ -5,8 +5,6 @@ ENV STORYVOICE_BASE_PATH=${STORYVOICE_BASE_PATH}
 COPY src/StoryVoice.Web/package*.json ./
 RUN npm ci
 COPY src/StoryVoice.Web/ ./
-COPY extensions/books-com-tw-companion /companion
-RUN node /companion/scripts/package.mjs /app/public/storyvoice-books-companion.zip
 RUN npm run build
 
 FROM nginx:1.29-alpine AS final

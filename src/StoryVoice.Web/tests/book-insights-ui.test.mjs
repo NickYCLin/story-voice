@@ -4,11 +4,10 @@ import test from 'node:test'
 
 const app = readFileSync(new URL('../src/BookInsightsPanel.tsx', import.meta.url), 'utf8')
 
-test('linked metadata requires an explicit authorized EPUB or TXT association', () => {
-  assert.ok(app.includes('連結你合法持有的正文'))
-  assert.ok(app.includes('StoryVoice 不會依書名自動配對，也不會抓取博客來正文'))
-  assert.ok(app.includes('candidate.authorizedTextAvailable'))
-  assert.ok(app.includes("/content-link`"))
+test('角色分析只接受使用者自行匯入的可處理正文', () => {
+  assert.ok(app.includes('const canAnalyzeText = book.authorizedTextAvailable'))
+  assert.ok(app.includes('請先匯入你有權處理的 EPUB 或 UTF-8 TXT'))
+  assert.ok(!app.includes('/content-link`'))
 })
 
 test('retired extractive summary has no remaining UI or API request', () => {
@@ -59,10 +58,8 @@ test('角色候選聲線跟隨目標系列 provider，不會由全域 catalog �
   assert.ok(!app.includes('voiceOptions.find((option) => voiceKey(option) === draft.voiceKey)'))
 })
 
-test('owner-scoped source metadata corrections cover title, author, cover, and reset', () => {
-  assert.ok(app.includes('書名、作者與封面校正'))
-  assert.ok(app.includes('/metadata-corrections`'))
-  assert.ok(app.includes('重新同步也不會覆蓋校正'))
-  assert.ok(app.includes('還原來源資料'))
-  assert.ok(app.includes("{ 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken }"))
+test('書籍分析介面不再提供外部書櫃同步與正文連結', () => {
+  assert.ok(!app.includes('博客來'))
+  assert.ok(!app.includes('來源 metadata'))
+  assert.ok(!app.includes('/metadata-corrections`'))
 })
