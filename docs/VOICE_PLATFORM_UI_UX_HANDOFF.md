@@ -1,6 +1,6 @@
 # StoryVoice 聲線平台 UI/UX 設計交接
 
-- 最後盤點：2026-08-24
+- 最後盤點：2026-08-26
 - 對象：UI/UX、前端、產品、後端
 - 用途：說明目前實作進度、production 真實狀態、缺少畫面與下一階段設計範圍
 
@@ -11,8 +11,8 @@
 StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完整操作介面；新的「聲線平台」目前完成三個部分：
 
 1. **林若晴的私人跨專案 API 已在 production 啟用**。
-2. **登入後的唯讀開發者總覽已上線；專案詳情已在 repository 完成、待部署確認**。兩頁都不提供完整 secret 或 credential mutation。
-3. **公開聲線館的前端與後端骨架已在 repository 完成**，但 production Web 尚未部署這個新頁面，公開 catalog 也仍關閉且沒有任何公開卡片或固定示範音檔。
+2. **登入後的開發者總覽、專案詳情、金鑰管理與用量頁已上線**。完整 secret、token hash 與輸入文字都不進一般查詢或活動紀錄。
+3. **公開聲線館的前端與後端骨架已部署**，但公開 catalog 仍關閉，也沒有任何公開卡片或固定示範音檔。
 
 訂閱、方案價格、付款、帳單、公開發佈流程、owner 授權操作與管理後台仍未實作。UI/UX 的首要任務不是重做既有書庫，而是把已能使用的私人 API 做成可理解、可管理、可安全操作的開發者控制台。
 
@@ -188,8 +188,8 @@ StoryVoice
 
 必要狀態：loading、無專案、等待核准、active、即將到期、expired、revoked、service degraded。
 
-**目前缺口**：owner-scoped projects/entitlements summary API 與受管 credential 生命週期已完成；
-最近 24 小時活動、durable usage 與 Playground 仍未完成。
+**目前缺口**：owner-scoped projects/entitlements summary API、受管 credential 生命週期與
+durable usage 已完成；總覽頁尚未嵌入最近 24 小時摘要，Playground 也仍未完成。
 
 #### B. 專案列表與詳情 `/developer/projects/:id` — ✅ LIVE（2026-08-26）
 
@@ -246,9 +246,9 @@ StoryVoice
 
 安全要求：瀏覽器不得持有 external bearer。Playground 必須呼叫 owner-session 保護的 same-origin backend-for-frontend，再由伺服器代送；不可直接從 browser 打 external API。
 
-**Backend gap**：需要 owner-session playground proxy 與安全活動摘要 API。
+**Backend gap**：安全活動摘要可沿用既有 usage API；仍需要 owner-session playground proxy。
 
-#### E. 用量與活動 `/developer/usage` — ✅ REPOSITORY（2026-08-26）
+#### E. 用量與活動 `/developer/usage` — ✅ LIVE（2026-08-26）
 
 > 已交付 owner-scoped durable usage ledger、`GET /api/developer/external-voice/usage` 與登入後
 > 使用量頁。只記錄通過 API key 驗證後的安全 metadata；可依近 24 小時／7 天／30 天、project
@@ -493,11 +493,11 @@ UI/UX 交付可用以下條件驗收：
 
 ### Phase A：Private API Portal
 
-Developer overview、project detail、credential、Playground、docs、usage shell。目標是讓目前已存在的林若晴 private-development API 可以由 owner 安全理解與操作。
+Developer overview、project detail、credential、docs 與 usage 已上線；下一項是 Playground。目標是讓目前已存在的林若晴 private-development API 可以由 owner 安全理解與操作。
 
 ### Phase B：Public Catalog
 
-部署 `/voices`、擴充卡片 DTO、聲線詳情、固定 demo、owner publication readiness。沒有有效 public entry 時維持 disabled／empty，不硬塞兩張假卡。
+依授權與產品決策啟用 `/voices` catalog、擴充卡片 DTO、聲線詳情、固定 demo、owner publication readiness。沒有有效 public entry 時維持 disabled／empty，不硬塞兩張假卡。
 
 ### Phase C：Subscription Application
 
@@ -505,7 +505,7 @@ Developer overview、project detail、credential、Playground、docs、usage she
 
 ### Phase D：Billing & Operations
 
-付款、webhook、發票、quota、durable usage、admin、auditing、shared rate limit／idempotency 與多 replica 營運。
+付款、webhook、發票、quota、usage retention／歸檔、admin、auditing、shared rate limit／idempotency 與多 replica 營運。
 
 ## VOAI 公開網站參考
 
