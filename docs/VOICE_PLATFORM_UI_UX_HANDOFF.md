@@ -11,7 +11,7 @@
 StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完整操作介面；新的「聲線平台」目前完成三個部分：
 
 1. **林若晴的私人跨專案 API 已在 production 啟用**。
-2. **登入後的開發者總覽、專案詳情、金鑰管理與用量頁已上線**。完整 secret、token hash 與輸入文字都不進一般查詢或活動紀錄。
+2. **登入後的開發者總覽、專案詳情、金鑰管理、Playground 與用量頁已上線**。完整 secret、token hash 與輸入文字都不進一般查詢或活動紀錄。
 3. **公開聲線館的前端與後端骨架已部署**，但公開 catalog 仍關閉，也沒有任何公開卡片或固定示範音檔。
 
 訂閱、方案價格、付款、帳單、公開發佈流程、owner 授權操作與管理後台仍未實作。UI/UX 的首要任務不是重做既有書庫，而是把已能使用的私人 API 做成可理解、可管理、可安全操作的開發者控制台。
@@ -34,7 +34,7 @@ StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完
 |---|---|---|---|
 | StoryVoice 首頁、登入、書庫、書冊、分享、角色、系列卡司 | 已實作 | 已上線 | ✅ LIVE |
 | 林若晴私人跨專案語音 API | 已實作 `POST /api/external/v1/speech` | 已啟用，限既定 private-development consumer | 🟠 BACKEND LIVE |
-| 開發者/API 管理面板 | 總覽、專案詳情、受管金鑰生命週期與 durable audit 已完成 | migration、API 與 Web 已部署；既有 private consumer 已恢復載入 | ✅ LIVE |
+| 開發者/API 管理面板 | 總覽、專案詳情、受管金鑰生命週期、Playground、durable usage 與 audit 已完成 | API 與 Web 已部署；Playground route、匿名權限邊界與正式 bundle 已驗證 | ✅ LIVE |
 | `/voices` 公開聲線館 React 頁面 | 已實作並有測試 | 新 Web bundle 已部署；catalog 關閉時安全顯示未啟用狀態 | 🟡 IMPLEMENTED / OFF |
 | 公開聲線 list/demo API | 已實作、依 feature flag map | `VoiceCatalog=false`，live API 回 404，0 entries | 🟡 IMPLEMENTED / OFF |
 | 周子謙／林若晴公開卡片 | UI 可接 DTO | 沒有公開 entry、沒有公開固定示範 | ❌ MISSING DATA / ACTIVATION |
@@ -233,7 +233,7 @@ durable usage 與 Playground 已完成；總覽頁尚未嵌入最近 24 小時�
 **目前缺口**：尚未用 owner 瀏覽器 session 執行建立／換發／撤銷的正式資料 smoke test；
 其餘 source、CI、migration、API／Web 與匿名權限邊界皆已驗證。
 
-#### D. API Playground `/developer/playground` — 🟡 IMPLEMENTED（待部署，2026-08-27）
+#### D. API Playground `/developer/playground` — ✅ LIVE（2026-08-27）
 
 > Repository 已交付 owner-session、CSRF 保護的 same-origin backend-for-frontend 與登入後頁面。
 > 瀏覽器只傳 project、voice、text 與 idempotency key，不取得 external bearer。owner scope、專案效期、
@@ -252,7 +252,8 @@ durable usage 與 Playground 已完成；總覽頁尚未嵌入最近 24 小時�
 
 安全要求：瀏覽器不得持有 external bearer。Playground 必須呼叫 owner-session 保護的 same-origin backend-for-frontend，再由伺服器代送；不可直接從 browser 打 external API。
 
-**部署缺口**：source 與測試已完成，仍需 production 部署與 owner-session smoke test。
+**驗證邊界**：production route、正式 Web bundle、匿名 401、容器健康與資料不變均已確認；
+owner-session 合成由完整 integration test 驗證，本輪部署沒有代替 owner 送出正式 GPU 合成要求。
 
 #### E. 用量與活動 `/developer/usage` — ✅ LIVE（2026-08-26）
 
