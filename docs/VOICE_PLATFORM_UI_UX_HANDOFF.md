@@ -188,8 +188,8 @@ StoryVoice
 
 必要狀態：loading、無專案、等待核准、active、即將到期、expired、revoked、service degraded。
 
-**目前缺口**：owner-scoped projects/entitlements summary API、受管 credential 生命週期與
-durable usage 已完成；總覽頁尚未嵌入最近 24 小時摘要，Playground 也仍未完成。
+**目前缺口**：owner-scoped projects/entitlements summary API、受管 credential 生命週期、
+durable usage 與 Playground 已完成；總覽頁尚未嵌入最近 24 小時摘要。
 
 #### B. 專案列表與詳情 `/developer/projects/:id` — ✅ LIVE（2026-08-26）
 
@@ -233,7 +233,13 @@ durable usage 已完成；總覽頁尚未嵌入最近 24 小時摘要，Playgrou
 **目前缺口**：尚未用 owner 瀏覽器 session 執行建立／換發／撤銷的正式資料 smoke test；
 其餘 source、CI、migration、API／Web 與匿名權限邊界皆已驗證。
 
-#### D. API Playground `/developer/playground`
+#### D. API Playground `/developer/playground` — 🟡 IMPLEMENTED（待部署，2026-08-27）
+
+> Repository 已交付 owner-session、CSRF 保護的 same-origin backend-for-frontend 與登入後頁面。
+> 瀏覽器只傳 project、voice、text 與 idempotency key，不取得 external bearer。owner scope、專案效期、
+> 聲線 grant 與既有合成授權鏈仍由伺服器驗證；成功與失敗都寫入只含安全 metadata 的 usage ledger。
+> UI 已涵蓋選擇、字元／byte 計數、產生、取消、播放、下載、冪等重送、四種 server-side 範例與
+> 400／404／409／429／503 狀態。
 
 最小內容：
 
@@ -246,7 +252,7 @@ durable usage 已完成；總覽頁尚未嵌入最近 24 小時摘要，Playgrou
 
 安全要求：瀏覽器不得持有 external bearer。Playground 必須呼叫 owner-session 保護的 same-origin backend-for-frontend，再由伺服器代送；不可直接從 browser 打 external API。
 
-**Backend gap**：安全活動摘要可沿用既有 usage API；仍需要 owner-session playground proxy。
+**部署缺口**：source 與測試已完成，仍需 production 部署與 owner-session smoke test。
 
 #### E. 用量與活動 `/developer/usage` — ✅ LIVE（2026-08-26）
 
@@ -481,7 +487,7 @@ UI/UX 交付可用以下條件驗收：
 - [ ] 所有公開播放都標明固定 demo 與 AI 合成。
 - [ ] 每張卡只有一個 primary CTA，CTA 與 entitlement 一致。
 - [ ] 金鑰一次性顯示、撤銷、輪替與遺失流程完整。
-- [ ] Playground 不把 external bearer 交給瀏覽器。
+- [x] Playground 不把 external bearer 交給瀏覽器。
 - [ ] 所有 loading、empty、error、expired、revoked 與 busy 狀態都有設計。
 - [ ] 沒有虛構價格、使用量、方案或付款結果。
 - [ ] Desktop、tablet、mobile 與 keyboard focus 都有稿。
@@ -493,7 +499,7 @@ UI/UX 交付可用以下條件驗收：
 
 ### Phase A：Private API Portal
 
-Developer overview、project detail、credential、docs 與 usage 已上線；下一項是 Playground。目標是讓目前已存在的林若晴 private-development API 可以由 owner 安全理解與操作。
+Developer overview、project detail、credential、docs、usage 與 Playground 均已完成；目前只差把總覽的最近 24 小時摘要接上既有 usage API。目標是讓目前已存在的林若晴 private-development API 可以由 owner 安全理解與操作。
 
 ### Phase B：Public Catalog
 

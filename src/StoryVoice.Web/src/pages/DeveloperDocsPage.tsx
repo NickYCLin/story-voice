@@ -203,7 +203,7 @@ Content-Type: application/json
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">文字長度上限 200 字元／2,048 UTF-8 bytes。</li>
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">WAV 回應大小上限 3 MiB。</li>
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">速率限制按 consumer 各自計算（上限值目前為全服務統一設定）；收到 429 時請依 <code className="text-xs">Retry-After</code> 標頭等待再重試。</li>
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">目前僅支援單一 API process；尚未提供跨 replica 的共用速率限制或用量查詢介面。</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">目前僅支援單一 API process；尚未提供跨 replica 的共用速率限制、single-flight 或冪等協調。</li>
           </ul>
         </section>
 
@@ -211,7 +211,7 @@ Content-Type: application/json
           <h2 className="font-serif text-2xl text-stone-900">如何取得存取</h2>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-stone-600">
             目前 private-development 專案與 entitlement 仍由 StoryVoice 團隊核發。登入後可查看專案與效期，
-            並在 API 金鑰頁自行建立、輪替或撤銷受管金鑰；自助申請、Playground 與 usage 查詢尚未提供。
+            並在 API 金鑰頁自行建立、輪替或撤銷受管金鑰，也能使用 owner-session Playground 與 usage 查詢；自助申請尚未提供。
             如需新的短期私人專案，請直接聯繫 StoryVoice 團隊說明用途與想使用的聲線；subscription-commercial
             存取要等公開／商用權利鏈與方案上線後才會開放申請。
           </p>

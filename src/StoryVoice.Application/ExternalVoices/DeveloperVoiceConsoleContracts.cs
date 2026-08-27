@@ -175,3 +175,26 @@ public interface IDeveloperVoiceUsageService
         DeveloperVoiceUsageQuery query,
         CancellationToken cancellationToken);
 }
+
+public sealed record DeveloperVoicePlaygroundRequest(
+    string ProjectId,
+    string Voice,
+    string Text,
+    string IdempotencyKey);
+
+public sealed record DeveloperVoicePlaygroundResult(
+    string RequestId,
+    int StatusCode,
+    string Outcome,
+    int DurationMilliseconds,
+    byte[]? AudioContent,
+    string? ContentType,
+    long AudioDurationMilliseconds,
+    int? RetryAfterSeconds);
+
+public interface IDeveloperVoicePlaygroundService
+{
+    Task<DeveloperVoicePlaygroundResult> SynthesizeAsync(
+        DeveloperVoicePlaygroundRequest request,
+        CancellationToken cancellationToken);
+}

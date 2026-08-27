@@ -1,4 +1,4 @@
-import { fetchJson } from './api'
+import { apiUrl, fetchJson } from './api'
 
 export type DeveloperVoiceGrantSummary = {
   voiceAlias: string
@@ -106,6 +106,37 @@ export type DeveloperVoiceUsageFilters = {
   limit?: number
 }
 
+export type DeveloperVoicePlaygroundAudio = {
+  audio: Blob
+  requestId: string
+  idempotencyKey: string
+  latencyMilliseconds: number
+  audioDurationMilliseconds: number
+  responseBytes: number
+}
+
+export class DeveloperVoicePlaygroundError extends Error {
+  readonly status: number
+  readonly code: string
+  readonly requestId: string
+  readonly retryAfterSeconds: number | null
+
+  constructor(
+    message: string,
+    status: number,
+    code: string,
+    requestId: string,
+    retryAfterSeconds: number | null,
+  ) {
+    super(message)
+    this.name = 'DeveloperVoicePlaygroundError'
+    this.status = status
+    this.code = code
+    this.requestId = requestId
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
 export const PROJECT_STATUS_LABEL: Record<DeveloperVoiceProjectSummary['status'], string> = {
   'not-yet-effective': '尚未生效',
   active: '有效',
@@ -165,6 +196,52 @@ export const fetchDeveloperVoiceUsage = (
     `/api/developer/external-voice/usage?${query.toString()}`,
     { signal },
   )
+}
+
+export async function synthesizeDeveloperVoicePlayground(
+  projectId: string,
+  voice: string,
+  text: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  signal?: AbortSignal,
+): Promise<DeveloperVoicePlaygroundAudio> {
+  const response = await fetch(apiUrl('/api/developer/external-voice/playground'), {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-TOKEN': csrfToken,
+    },
+    body: JSON.stringify({ projectId, voice, text, idempotencyKey }),
+    signal,
+  })
+  const requestId = response.headers.get('X-StoryVoice-Request-Id') ?? ''
+  const retryAfterHeader = response.headers.get('Retry-After')
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null) as {
+      detail?: string
+      code?: string
+      requestId?: string
+    } | null
+    throw new DeveloperVoicePlaygroundError(
+      problem?.detail ?? `語音產生失敗（${response.status}）`,
+      response.status,
+      problem?.code ?? 'synthesis_unavailable',
+      problem?.requestId ?? requestId,
+      retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : null,
+    )
+  }
+
+  const audio = await response.blob()
+  return {
+    audio,
+    requestId,
+    idempotencyKey,
+    latencyMilliseconds: Number.parseInt(response.headers.get('X-StoryVoice-Latency-Ms') ?? '0', 10),
+    audioDurationMilliseconds: Number.parseInt(response.headers.get('X-StoryVoice-Audio-Duration-Ms') ?? '0', 10),
+    responseBytes: audio.size,
+  }
 }
 
 export const createDeveloperVoiceCredential = (

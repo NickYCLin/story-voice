@@ -41,6 +41,7 @@ export function DeveloperConsolePage() {
           頁建立、換發或撤銷；完整 secret 只在操作完成後顯示一次。接用方式請參考
           <Link className="mx-1 font-semibold text-amber-800 underline" to="/developers/docs">API 文件</Link>
           ，呼叫結果可到 <Link className="font-semibold text-amber-800 underline" to="/developer/usage">用量與活動</Link> 查看。
+          想先確認聲線效果，可以直接使用 <Link className="font-semibold text-amber-800 underline" to="/developer/playground">API Playground</Link>。
         </p>
       </div>
 
@@ -129,6 +130,12 @@ export function DeveloperConsolePage() {
                     to={`/developer/projects/${encodeURIComponent(project.projectId || project.keyId)}`}
                   >
                     查看專案詳情 →
+                  </Link>
+                  <Link
+                    className="mt-5 ml-3 inline-flex rounded-full border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-amber-400"
+                    to={`/developer/playground?project=${encodeURIComponent(project.projectId || project.keyId)}`}
+                  >
+                    試聽聲線 →
                   </Link>
                 </article>
               ))}

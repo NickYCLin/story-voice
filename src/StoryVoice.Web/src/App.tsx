@@ -7,6 +7,7 @@ import { CollectionsPage } from './pages/CollectionsPage'
 import { DeveloperConsolePage } from './pages/DeveloperConsolePage'
 import { DeveloperCredentialsPage } from './pages/DeveloperCredentialsPage'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
+import { DeveloperPlaygroundPage } from './pages/DeveloperPlaygroundPage'
 import { DeveloperProjectPage } from './pages/DeveloperProjectPage'
 import { DeveloperUsagePage } from './pages/DeveloperUsagePage'
 import { LandingPage } from './pages/LandingPage'
@@ -31,6 +32,7 @@ function App() {
         <Route element={<CharacterLibraryPage />} path="characters" />
         <Route element={<DeveloperConsolePage />} path="developer" />
         <Route element={<DeveloperCredentialsPage />} path="developer/credentials" />
+        <Route element={<DeveloperPlaygroundPage />} path="developer/playground" />
         <Route element={<DeveloperProjectPage />} path="developer/projects/:projectId" />
         <Route element={<DeveloperUsagePage />} path="developer/usage" />
         <Route element={<SeriesCastPanel />} path="/series" />

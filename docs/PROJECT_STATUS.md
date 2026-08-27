@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-26（移除特定書商書櫃同步，改以通用檔案匯入為主）
+最後更新：2026-08-27（完成 owner-session API Playground）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -30,7 +30,10 @@
   既有部署設定金鑰維持相容但仍由維運管理。durable usage ledger 已保存通過 API key 驗證後的
   request ID、project、credential 識別、聲線、結果、latency 與 WAV 產出秒數／bytes，並提供
   owner-scoped `/developer/usage` 篩選與活動頁；不保存輸入文字、token、冪等鍵、reference 或
-  transcript。Playground 尚未實作，rate limit 與 idempotency 仍是單一 process memory。
+  transcript。`/developer/playground` 已透過 owner-session、CSRF 與 same-origin backend-for-frontend
+  安全代理既有合成服務，可選專案／聲線、檢查字元與 UTF-8 bytes、產生／取消／播放／下載 WAV，
+  顯示 request ID、冪等鍵、latency、輸出大小與穩定錯誤，並寫入同一份安全 usage ledger；瀏覽器
+  不取得 external bearer。rate limit、single-flight 與 idempotency 仍是單一 process memory。
 - 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 provider registry／dispatcher：Edge TTS 以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；新增供應商不用改動既有系列角色 ID。

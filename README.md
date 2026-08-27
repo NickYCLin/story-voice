@@ -187,6 +187,9 @@ Authenticated calls also feed an owner-scoped durable usage ledger and the
 `/developer/usage` dashboard without retaining request text, bearer tokens, idempotency
 keys, reference audio or transcripts. Rate limiting and idempotency coordination remain
 single-process until the documented multi-replica work is completed.
+Signed-in owners can also use `/developer/playground`. It calls a CSRF-protected,
+same-origin backend-for-frontend, so the browser never receives an external bearer;
+successful and failed attempts use the same safe usage ledger.
 The unified source/publication contract is documented in
 [`docs/VOICE_PUBLICATION_GRANT.md`](docs/VOICE_PUBLICATION_GRANT.md).
 

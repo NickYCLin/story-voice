@@ -187,6 +187,7 @@ export function DeveloperProjectPage() {
               <li>以授權聲線 alias 呼叫 <code className="text-xs text-amber-200">POST /api/external/v1/speech</code>。</li>
             </ol>
             <Link className="mt-5 inline-flex font-semibold text-amber-200 underline" to="/developers/docs">查看 API 文件 →</Link>
+            <Link className="mt-3 block font-semibold text-amber-200 underline" to={`/developer/playground?project=${encodeURIComponent(project.projectId || project.keyId)}`}>前往 API Playground →</Link>
           </section>
         </aside>
       </div>
