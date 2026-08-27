@@ -46,3 +46,20 @@ test('涵蓋服務未啟用與沒有專案的空狀態', () => {
 test('不顯示任何雜湊、內部路徑或 owner GUID 欄位', () => {
   assert.doesNotMatch(page, /Sha256|tokenSha|AuthorizationEvidence|ownerId|AssetRootPath/i)
 })
+
+test('總覽顯示真實的最近 24 小時成功、失敗、429 與耗時', () => {
+  assert.match(page, /fetchDeveloperVoiceUsage/)
+  assert.match(page, /24 \* 60 \* 60 \* 1000/)
+  assert.match(page, /totalRequests - usage\.summary\.successfulRequests/)
+  assert.match(page, /\['成功'/)
+  assert.match(page, /\['失敗'/)
+  assert.match(page, /\['429 次數'/)
+  assert.match(page, /\['平均耗時'/)
+})
+
+test('最近用量讀取失敗時不會把專案總覽一起切成錯誤狀態', () => {
+  const usageRequest = page.slice(page.indexOf('fetchDeveloperVoiceUsage({'), page.indexOf('return () => controller.abort()'))
+  assert.match(usageRequest, /setUsageState\('error'\)/)
+  assert.doesNotMatch(usageRequest, /setState\('error'\)/)
+  assert.match(page, /最近用量暫時無法讀取，不影響下方專案與金鑰操作/)
+})

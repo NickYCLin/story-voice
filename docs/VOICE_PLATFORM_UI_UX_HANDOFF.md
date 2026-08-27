@@ -165,10 +165,11 @@ StoryVoice
 > 已交付唯讀第一版：`GET /api/developer/external-voice/overview`（owner-scoped、UserSession cookie 授權）
 > 由 `DeveloperVoiceConsoleService` 直接投影既有 `ExternalVoiceApi` 設定，前端頁面
 > `src/StoryVoice.Web/src/pages/DeveloperConsolePage.tsx` 掛在登入殼層 `/developer`。
-> 涵蓋：服務啟用狀態、專案卡（名稱／ID、access tier、token prefix+keyId、效期、
+> 涵蓋：最近 24 小時真實用量摘要、服務啟用狀態、專案卡（名稱／ID、access tier、token prefix+keyId、效期、
 > not-yet-effective／active／expiring-soon／expired 狀態）、聲線授權（active／revoked）、
 > 共用限制與空狀態。刻意不含：TokenSha256、evidence 路徑／雜湊、owner GUID、
-> Playground、用量資料。受管金鑰另由 `/developer/credentials` 提供。
+> 完整活動明細。受管金鑰另由 `/developer/credentials` 提供，Playground 與完整用量分別由
+> `/developer/playground`、`/developer/usage` 提供。用量 API 暫時失敗時只降級摘要，不影響專案卡。
 > `ExternalVoiceAuthenticationHandler` 保留既有設定檔 token 相容路徑，並加入只存 SHA-256 的
 > database credential 驗證；成功後仍映射回原 consumer/grant，不放寬聲線授權。
 
@@ -188,8 +189,8 @@ StoryVoice
 
 必要狀態：loading、無專案、等待核准、active、即將到期、expired、revoked、service degraded。
 
-**目前缺口**：owner-scoped projects/entitlements summary API、受管 credential 生命週期、
-durable usage 與 Playground 已完成；總覽頁尚未嵌入最近 24 小時摘要。
+**已完成範圍**：owner-scoped projects/entitlements summary API、受管 credential 生命週期、
+durable usage、Playground 與總覽最近 24 小時摘要均已完成。
 
 #### B. 專案列表與詳情 `/developer/projects/:id` — ✅ LIVE（2026-08-26）
 
@@ -500,7 +501,7 @@ UI/UX 交付可用以下條件驗收：
 
 ### Phase A：Private API Portal
 
-Developer overview、project detail、credential、docs、usage 與 Playground 均已完成；目前只差把總覽的最近 24 小時摘要接上既有 usage API。目標是讓目前已存在的林若晴 private-development API 可以由 owner 安全理解與操作。
+Developer overview、project detail、credential、docs、usage、Playground 與總覽最近 24 小時摘要均已完成。現有林若晴 private-development API 已可由 owner 安全理解與操作。
 
 ### Phase B：Public Catalog
 

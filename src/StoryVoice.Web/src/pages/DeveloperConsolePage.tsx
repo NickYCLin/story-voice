@@ -3,21 +3,30 @@ import { Link } from 'react-router-dom'
 
 import {
   fetchDeveloperVoiceOverview,
+  fetchDeveloperVoiceUsage,
   formatUtc,
   PROJECT_STATUS_CLASS,
   PROJECT_STATUS_LABEL,
   TIER_LABEL,
 } from '../developerVoiceConsole'
-import type { DeveloperVoiceConsoleOverview } from '../developerVoiceConsole'
+import type {
+  DeveloperVoiceConsoleOverview,
+  DeveloperVoiceUsageReport,
+} from '../developerVoiceConsole'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 export function DeveloperConsolePage() {
   const [overview, setOverview] = useState<DeveloperVoiceConsoleOverview | null>(null)
   const [state, setState] = useState<LoadState>('loading')
+  const [usage, setUsage] = useState<DeveloperVoiceUsageReport | null>(null)
+  const [usageState, setUsageState] = useState<LoadState>('loading')
 
   useEffect(() => {
     const controller = new AbortController()
+    const toUtc = new Date()
+    const fromUtc = new Date(toUtc.getTime() - 24 * 60 * 60 * 1000)
+
     fetchDeveloperVoiceOverview(controller.signal)
       .then((value) => {
         setOverview(value)
@@ -27,8 +36,27 @@ export function DeveloperConsolePage() {
         if (error instanceof DOMException && error.name === 'AbortError') return
         setState('error')
       })
+
+    fetchDeveloperVoiceUsage({
+      fromUtc: fromUtc.toISOString(),
+      toUtc: toUtc.toISOString(),
+      limit: 1,
+    }, controller.signal)
+      .then((value) => {
+        setUsage(value)
+        setUsageState('ready')
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setUsageState('error')
+      })
+
     return () => controller.abort()
   }, [])
+
+  const failedRequests = usage
+    ? Math.max(0, usage.summary.totalRequests - usage.summary.successfulRequests)
+    : 0
 
   return (
     <section className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
@@ -55,6 +83,48 @@ export function DeveloperConsolePage() {
               合成聲線 API 服務目前未啟用；下方僅為已登錄的核發紀錄，實際呼叫會得到 404。
             </div>
           )}
+
+          <section aria-label="最近 24 小時用量" className="mb-8">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="eyebrow">Last 24 hours</p>
+                <h2 className="mt-2 font-serif text-2xl text-stone-900">最近 24 小時</h2>
+              </div>
+              <Link className="text-sm font-semibold text-amber-800 underline" to="/developer/usage">
+                查看完整用量與活動
+              </Link>
+            </div>
+
+            {usageState === 'loading' && (
+              <div className="library-state min-h-28">正在整理最近用量…</div>
+            )}
+            {usageState === 'error' && (
+              <div className="library-state min-h-28 border-amber-300 text-amber-800">
+                最近用量暫時無法讀取，不影響下方專案與金鑰操作。
+              </div>
+            )}
+            {usageState === 'ready' && usage && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                  {[
+                    ['要求數', usage.summary.totalRequests.toLocaleString('zh-TW')],
+                    ['成功', usage.summary.successfulRequests.toLocaleString('zh-TW')],
+                    ['失敗', failedRequests.toLocaleString('zh-TW')],
+                    ['429 次數', usage.summary.rateLimitedRequests.toLocaleString('zh-TW')],
+                    ['平均耗時', `${usage.summary.averageLatencyMilliseconds.toFixed(1)} ms`],
+                  ].map(([label, value]) => (
+                    <article className="rounded-2xl border border-stone-200 bg-white/80 p-5" key={label}>
+                      <p className="text-xs text-stone-400">{label}</p>
+                      <p className="mt-2 font-serif text-2xl text-stone-900">{value}</p>
+                    </article>
+                  ))}
+                </div>
+                {usage.summary.totalRequests === 0 && (
+                  <p className="mt-3 text-sm text-stone-500">這段期間尚無 API 活動。</p>
+                )}
+              </>
+            )}
+          </section>
 
           {overview.projects.length === 0 && (
             <div className="library-state min-h-52">
