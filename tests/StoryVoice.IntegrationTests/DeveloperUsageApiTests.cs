@@ -58,6 +58,7 @@ public sealed class DeveloperUsageApiTests(ApiFactory factory) : IClassFixture<A
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         Assert.Single(invalid.Headers.GetValues("X-StoryVoice-Request-Id"));
 
+        await WaitForUsageCountAsync(configuredFactory, ownerId, 2, cancellationToken);
         var fromUtc = now.AddMinutes(-5).ToString("O", CultureInfo.InvariantCulture);
         var toUtc = now.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture);
         using var usageResponse = await ownerClient.GetAsync(
@@ -115,6 +116,7 @@ public sealed class DeveloperUsageApiTests(ApiFactory factory) : IClassFixture<A
         await using var scope = configuredFactory.Services.CreateAsyncScope();
         var stored = await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>()
             .ExternalVoiceUsageRecords
+            .Where(record => record.OwnerId == ownerId)
             .OrderBy(record => record.OccurredAtUtc)
             .ToArrayAsync(cancellationToken);
         Assert.Equal(2, stored.Length);
@@ -154,6 +156,7 @@ public sealed class DeveloperUsageApiTests(ApiFactory factory) : IClassFixture<A
             cancellationToken);
         Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
 
+        await WaitForUsageCountAsync(configuredFactory, ownerId, 2, cancellationToken);
         var fromUtc = now.AddMinutes(-5).ToString("O", CultureInfo.InvariantCulture);
         var toUtc = now.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture);
         using var response = await ownerClient.GetAsync(
@@ -168,6 +171,34 @@ public sealed class DeveloperUsageApiTests(ApiFactory factory) : IClassFixture<A
             usage.RootElement.GetProperty("activities").EnumerateArray(),
             activity => activity.GetProperty("statusCode").GetInt32() == 429
                 && activity.GetProperty("outcome").GetString() == "rate_limited");
+    }
+
+    private static async Task WaitForUsageCountAsync(
+        WebApplicationFactory<Program> configuredFactory,
+        Guid ownerId,
+        int expectedCount,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            await using var scope = configuredFactory.Services.CreateAsyncScope();
+            var count = await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>()
+                .ExternalVoiceUsageRecords
+                .CountAsync(record => record.OwnerId == ownerId, cancellationToken);
+            if (count >= expectedCount)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Timed out waiting for {expectedCount} background usage records; found {count}.");
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
     }
 
     private WebApplicationFactory<Program> CreateConfiguredFactory(

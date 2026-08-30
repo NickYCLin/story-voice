@@ -12,7 +12,7 @@ internal sealed class DeveloperVoicePlaygroundService(
     IOptions<ExternalVoiceApiOptions> options,
     ICurrentUser currentUser,
     IExternalVoiceSynthesisService synthesisService,
-    DeveloperVoicePlaygroundRateLimiter rateLimiter,
+    IExternalVoiceRequestRateLimiter rateLimiter,
     IExternalVoiceUsageRecorder usageRecorder,
     TimeProvider timeProvider,
     ILogger<DeveloperVoicePlaygroundService> logger) : IDeveloperVoicePlaygroundService
@@ -125,7 +125,7 @@ internal sealed class DeveloperVoicePlaygroundService(
             durationMilliseconds = ElapsedMilliseconds(started);
             try
             {
-                await usageRecorder.RecordAsync(
+                usageRecorder.TryEnqueue(
                     new ExternalVoiceUsageWrite(
                         ownerId,
                         consumerKeyId,
@@ -144,14 +144,13 @@ internal sealed class DeveloperVoicePlaygroundService(
                         durationMilliseconds,
                         textCharacters,
                         audioContent?.LongLength ?? 0,
-                        audioDurationMilliseconds),
-                    CancellationToken.None);
+                        audioDurationMilliseconds));
             }
             catch (Exception exception)
             {
                 logger.LogError(
                     exception,
-                    "Failed to persist developer playground usage record {RequestId}.",
+                    "Failed to enqueue developer playground usage record {RequestId}.",
                     requestId);
             }
         }
@@ -275,51 +274,5 @@ internal sealed class DeveloperVoicePlaygroundService(
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
-    }
-}
-
-internal sealed class DeveloperVoicePlaygroundRateLimiter(
-    IOptions<ExternalVoiceApiOptions> options,
-    TimeProvider timeProvider)
-{
-    private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
-
-    private readonly object sync = new();
-    private readonly Dictionary<string, WindowState> windows = new(StringComparer.Ordinal);
-
-    public bool TryAcquire(string consumerKeyId, out int retryAfterSeconds)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(consumerKeyId);
-        var now = timeProvider.GetUtcNow();
-        lock (sync)
-        {
-            if (!windows.TryGetValue(consumerKeyId, out var state)
-                || state.StartedAtUtc + Window <= now)
-            {
-                windows[consumerKeyId] = new WindowState(now, 1);
-                retryAfterSeconds = 0;
-                return true;
-            }
-
-            if (state.Count < Math.Max(1, options.Value.RequestsPerMinute))
-            {
-                state.Count++;
-                retryAfterSeconds = 0;
-                return true;
-            }
-
-            retryAfterSeconds = (int)Math.Clamp(
-                Math.Ceiling((state.StartedAtUtc + Window - now).TotalSeconds),
-                1,
-                60);
-            return false;
-        }
-    }
-
-    private sealed class WindowState(DateTimeOffset startedAtUtc, int count)
-    {
-        public DateTimeOffset StartedAtUtc { get; } = startedAtUtc;
-
-        public int Count { get; set; } = count;
     }
 }

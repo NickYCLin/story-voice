@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.ExternalVoices;
@@ -8,7 +9,7 @@ namespace StoryVoice.Infrastructure.ExternalVoices;
 
 public sealed class ExternalVoiceUsageService(
     StoryVoiceDbContext dbContext,
-    ICurrentUser currentUser) : IExternalVoiceUsageRecorder, IDeveloperVoiceUsageService
+    ICurrentUser currentUser) : IDeveloperVoiceUsageService
 {
     public async Task RecordAsync(
         ExternalVoiceUsageWrite usage,
@@ -56,22 +57,35 @@ public sealed class ExternalVoiceUsageService(
             records = records.Where(record => record.VoiceAlias == query.VoiceAlias);
         }
 
-        var totalRequests = await records.CountAsync(cancellationToken);
-        var successfulRequests = await records.CountAsync(
-            record => record.Outcome == ExternalVoiceUsageOutcomes.Succeeded,
-            cancellationToken);
-        var rateLimitedRequests = await records.CountAsync(
-            record => record.Outcome == "rate_limited",
-            cancellationToken);
-        var averageLatency = await records
-            .Select(record => (double?)record.DurationMilliseconds)
-            .AverageAsync(cancellationToken) ?? 0;
-        var outputBytes = await records
-            .Select(record => (long?)record.ResponseBytes)
-            .SumAsync(cancellationToken) ?? 0;
-        var outputDuration = await records
-            .Select(record => (long?)record.AudioDurationMilliseconds)
-            .SumAsync(cancellationToken) ?? 0;
+        // The report combines an aggregate and a bounded activity query. On relational
+        // stores, hold one repeatable-read snapshot so traffic committed between those
+        // statements cannot make the activity rows newer than their summary.
+        await using var snapshotTransaction = dbContext.Database.IsRelational()
+            && dbContext.Database.CurrentTransaction is null
+                ? await dbContext.Database.BeginTransactionAsync(
+                    IsolationLevel.RepeatableRead,
+                    cancellationToken)
+                : null;
+
+        // Keep every summary metric in one database statement. Separate Count/Average/Sum
+        // statements observe different read-committed snapshots while traffic is still
+        // writing the ledger and can otherwise produce impossible reports (for example,
+        // more successful requests than total requests).
+        var aggregate = await records
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                TotalRequests = group.Count(),
+                SuccessfulRequests = group.Count(
+                    record => record.Outcome == ExternalVoiceUsageOutcomes.Succeeded),
+                RateLimitedRequests = group.Count(record => record.Outcome == "rate_limited"),
+                AverageLatency = group.Average(record => (double)record.DurationMilliseconds),
+                OutputBytes = group.Sum(record => record.ResponseBytes),
+                OutputDuration = group.Sum(record => record.AudioDurationMilliseconds),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var totalRequests = aggregate?.TotalRequests ?? 0;
+        var successfulRequests = aggregate?.SuccessfulRequests ?? 0;
         var activities = await records
             .OrderByDescending(record => record.OccurredAtUtc)
             .ThenByDescending(record => record.Id)
@@ -89,6 +103,11 @@ public sealed class ExternalVoiceUsageService(
                 record.AudioDurationMilliseconds))
             .ToArrayAsync(cancellationToken);
 
+        if (snapshotTransaction is not null)
+        {
+            await snapshotTransaction.CommitAsync(cancellationToken);
+        }
+
         return new DeveloperVoiceUsageReport(
             query.FromUtc,
             query.ToUtc,
@@ -98,10 +117,10 @@ public sealed class ExternalVoiceUsageService(
                 totalRequests == 0
                     ? 0
                     : Math.Round(successfulRequests * 100d / totalRequests, 1),
-                rateLimitedRequests,
-                Math.Round(averageLatency, 1),
-                outputBytes,
-                outputDuration),
+                aggregate?.RateLimitedRequests ?? 0,
+                Math.Round(aggregate?.AverageLatency ?? 0, 1),
+                aggregate?.OutputBytes ?? 0,
+                aggregate?.OutputDuration ?? 0),
             activities);
     }
 

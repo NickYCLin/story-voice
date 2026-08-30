@@ -8,8 +8,12 @@ public sealed class ExternalVoiceApiOptions
     public const int DefaultMaximumTextUtf8Bytes = 2_048;
     public const int DefaultMaximumResponseBytes = 3 * 1024 * 1024;
     public const int DefaultRequestsPerMinute = 3;
+    public const int DefaultPreAuthenticationRequestsPerMinute = 60;
+    public const int DefaultPreAuthenticationGlobalRequestsPerMinute = 600;
     public const int DefaultIdempotencyCacheEntries = 32;
     public const int DefaultIdempotencyTtlMinutes = 10;
+    public const int DefaultUsageLedgerQueueCapacity = 1_024;
+    public const int MaximumUsageLedgerQueueCapacity = 10_000;
     public bool Enabled { get; set; }
 
     public int MaximumRequestBytes { get; set; } = DefaultMaximumRequestBytes;
@@ -22,9 +26,17 @@ public sealed class ExternalVoiceApiOptions
 
     public int RequestsPerMinute { get; set; } = DefaultRequestsPerMinute;
 
+    public int PreAuthenticationRequestsPerMinute { get; set; } =
+        DefaultPreAuthenticationRequestsPerMinute;
+
+    public int PreAuthenticationGlobalRequestsPerMinute { get; set; } =
+        DefaultPreAuthenticationGlobalRequestsPerMinute;
+
     public int IdempotencyCacheEntries { get; set; } = DefaultIdempotencyCacheEntries;
 
     public int IdempotencyTtlMinutes { get; set; } = DefaultIdempotencyTtlMinutes;
+
+    public int UsageLedgerQueueCapacity { get; set; } = DefaultUsageLedgerQueueCapacity;
 
     public Dictionary<string, ExternalVoiceConsumerOptions> Consumers { get; set; } = [];
 }

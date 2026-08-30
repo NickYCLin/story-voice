@@ -91,7 +91,7 @@ internal sealed class ExternalVoiceUsageMiddleware(
             var outcome = feature.Outcome ?? OutcomeFromStatus(statusCode);
             try
             {
-                await recorder.RecordAsync(
+                recorder.TryEnqueue(
                     new ExternalVoiceUsageWrite(
                         ownerId,
                         consumerKeyId,
@@ -108,14 +108,13 @@ internal sealed class ExternalVoiceUsageMiddleware(
                         durationMilliseconds,
                         feature.TextCharacters,
                         responseBytes,
-                        feature.AudioDurationMilliseconds),
-                    CancellationToken.None);
+                        feature.AudioDurationMilliseconds));
             }
             catch (Exception exception)
             {
                 logger.LogError(
                     exception,
-                    "Failed to persist external voice usage record {RequestId}.",
+                    "Failed to enqueue external voice usage record {RequestId}.",
                     requestId);
             }
         }
