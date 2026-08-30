@@ -87,8 +87,11 @@ services:
       ExternalVoiceApi__MaximumTextUtf8Bytes: ${EXTERNAL_VOICE_API_MAXIMUM_TEXT_UTF8_BYTES:-2048}
       ExternalVoiceApi__MaximumResponseBytes: ${EXTERNAL_VOICE_API_MAXIMUM_RESPONSE_BYTES:-3145728}
       ExternalVoiceApi__RequestsPerMinute: ${EXTERNAL_VOICE_API_REQUESTS_PER_MINUTE:-3}
+      ExternalVoiceApi__PreAuthenticationRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_REQUESTS_PER_MINUTE:-60}
+      ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_GLOBAL_REQUESTS_PER_MINUTE:-600}
       ExternalVoiceApi__IdempotencyCacheEntries: ${EXTERNAL_VOICE_API_IDEMPOTENCY_CACHE_ENTRIES:-32}
       ExternalVoiceApi__IdempotencyTtlMinutes: ${EXTERNAL_VOICE_API_IDEMPOTENCY_TTL_MINUTES:-10}
+      ExternalVoiceApi__UsageLedgerQueueCapacity: ${EXTERNAL_VOICE_API_USAGE_LEDGER_QUEUE_CAPACITY:-1024}
     volumes:
       - book-storage:/data/books
       - character-voice-storage:/data/character-voices

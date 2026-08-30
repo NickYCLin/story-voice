@@ -21,6 +21,8 @@ test('manual notes work independently from provider text and mutations carry CSR
   assert.ok(app.includes("body: JSON.stringify({ body, chapterId: null })"))
   assert.ok(app.includes("method: 'DELETE'"))
   assert.ok(app.includes("headers: { 'X-CSRF-TOKEN': csrfToken }"))
+  assert.ok(app.includes('<ConfirmDialog'))
+  assert.ok(!app.includes('window.confirm'))
 })
 
 test('local LLM candidates can be checked, merged by canonical name and applied to a series cast', () => {

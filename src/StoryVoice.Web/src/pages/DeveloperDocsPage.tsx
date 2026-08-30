@@ -7,7 +7,7 @@ const ERROR_CODES: Array<[string, string, string]> = [
   ['409', 'idempotency_conflict', '同一組 Idempotency-Key 已綁定不同的 request'],
   ['413', 'request_too_large', '請求內容超過大小上限'],
   ['415', 'unsupported_media_type', '不是 application/json，或帶有 Content-Encoding'],
-  ['429', 'rate_limited', '已達 consumer 速率限制，請依 Retry-After 重試'],
+  ['429', 'rate_limited', '已達驗證前來源／全域防濫用額度或 consumer 速率限制，請依 Retry-After 重試'],
   ['503', 'synthesis_unavailable', '合成服務暫時不可用，可依 Retry-After 重試'],
 ]
 
@@ -200,9 +200,9 @@ Content-Type: application/json
         <section className="mt-14" id="limits">
           <h2 className="font-serif text-2xl text-stone-900">限制與重試</h2>
           <ul className="mt-4 space-y-3 text-sm leading-6 text-stone-600">
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">文字長度上限 200 字元／2,048 UTF-8 bytes。</li>
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">WAV 回應大小上限 3 MiB。</li>
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">速率限制按 consumer 各自計算（上限值目前為全服務統一設定）；收到 429 時請依 <code className="text-xs">Retry-After</code> 標頭等待再重試。</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">協定允許的文字硬上限為 200 字元／2,048 UTF-8 bytes；部署可設定得更低，實際值以登入後專案頁或 Playground 顯示為準。</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">協定允許的 WAV 回應硬上限為 3 MiB；部署可設定得更低。</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">External speech POST 會先通過來源／全域防濫用額度；驗證成功後再按 consumer 計算，Playground 與 external API 會共同消耗同一 consumer 的每分鐘額度。收到 429 時請依 <code className="text-xs">Retry-After</code> 標頭等待再重試。</li>
             <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">目前僅支援單一 API process；尚未提供跨 replica 的共用速率限制、single-flight 或冪等協調。</li>
           </ul>
         </section>

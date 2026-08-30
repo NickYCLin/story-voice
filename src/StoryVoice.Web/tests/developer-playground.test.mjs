@@ -26,7 +26,8 @@ test('playground sends only same-origin session data with CSRF and no external b
   assert.match(page, /瀏覽器不會取得、保存或傳送 external bearer/)
   assert.match(endpoint, /RequireAuthorization\(StoryVoicePolicies\.UserSession\)/)
   assert.match(endpoint, /AddEndpointFilter<AntiforgeryEndpointFilter>/)
-  assert.match(service, /DeveloperVoicePlaygroundRateLimiter/)
+  assert.match(service, /IExternalVoiceRequestRateLimiter rateLimiter/)
+  assert.match(service, /rateLimiter\.TryAcquire/)
   assert.match(service, /ExternalVoiceSynthesisFailureKind\.RateLimited/)
 })
 
@@ -40,9 +41,58 @@ test('playground exposes generation, cancellation, playback, download and safe m
   assert.match(page, /Idempotency key/)
   assert.match(page, /UTF-8 bytes/)
   assert.match(page, /401、404、409、429、503/)
+  assert.match(page, /Playground 與同一 consumer 的 external API 共用這份額度/)
   assert.match(shared, /X-StoryVoice-Request-Id/)
   assert.match(shared, /X-StoryVoice-Latency-Ms/)
   assert.match(shared, /X-StoryVoice-Audio-Duration-Ms/)
   assert.match(page, /URL\.createObjectURL/)
   assert.match(page, /URL\.revokeObjectURL/)
+})
+
+test('playground result cleanup cannot abort a replacement request', () => {
+  const audioCleanupStart = page.indexOf('if (!audioUrl) return')
+  const audioCleanupEnd = page.indexOf('const selectedProject', audioCleanupStart)
+  const audioCleanup = page.slice(audioCleanupStart, audioCleanupEnd)
+
+  assert.notEqual(audioCleanupStart, -1)
+  assert.ok(audioCleanupEnd > audioCleanupStart)
+  assert.match(audioCleanup, /URL\.revokeObjectURL\(audioUrl\)/)
+  assert.doesNotMatch(audioCleanup, /\.abort\(\)/)
+  assert.match(page, /useEffect\(\(\) => \(\) => \{[\s\S]*controllerRef\.current\?\.abort\(\)[\s\S]*\}, \[\]\)/)
+})
+
+test('playground ignores stale responses and freezes request inputs while generating', () => {
+  assert.match(page, /requestSequenceRef\.current !== requestSequence/)
+  assert.match(page, /controller\.signal\.aborted/)
+  assert.match(page, /function invalidatePendingGeneration\(\)[\s\S]*controllerRef\.current\?\.abort\(\)/)
+  assert.ok((page.match(/disabled=\{generateState === 'generating'\}/g) ?? []).length >= 3)
+})
+
+test('project query 切換會立即停用舊 overview 與 synthesis 並顯示 transition loading', () => {
+  assert.match(page, /const routeTransitioning = loadedRequestedProject !== requestedProject/)
+  assert.match(page, /const activeOverview = routeTransitioning \? null : overview/)
+  assert.match(page, /useEffect\(\(\) => \{[\s\S]*setLoadState\('loading'\)[\s\S]*setOverview\(null\)/)
+  assert.match(page, /requestSequenceRef\.current \+= 1[\s\S]*controllerRef\.current\?\.abort\(\)/)
+  assert.match(page, /setProjectId\(''\)[\s\S]*setVoice\(''\)/)
+  assert.match(page, /if \(routeTransitioning \|\| loadState !== 'ready' \|\| !activeOverview/)
+  assert.match(page, /if \(routeTransitioning \|\| loadState === 'loading'\)/)
+  assert.doesNotMatch(page, /\{overview && overview\.projects\.length > 0/)
+})
+
+test('playground examples use the same token variable as downloaded env files', () => {
+  assert.match(page, /STORYVOICE_VOICE_TOKEN/)
+  assert.doesNotMatch(page, /STORYVOICE_TOKEN/)
+})
+
+test('playground example tabs expose complete ARIA relationships and keyboard navigation', () => {
+  assert.match(page, /role="tablist"/)
+  assert.match(page, /aria-controls=\{`playground-example-panel-\$\{tab\}`\}/)
+  assert.match(page, /aria-selected=\{exampleTab === tab\}/)
+  assert.match(page, /tabIndex=\{exampleTab === tab \? 0 : -1\}/)
+  assert.match(page, /role="tabpanel"/)
+  assert.match(page, /aria-labelledby=\{`playground-example-tab-\$\{tab\}`\}/)
+  assert.match(page, /event\.key === 'ArrowRight'/)
+  assert.match(page, /event\.key === 'ArrowLeft'/)
+  assert.match(page, /event\.key === 'Home'/)
+  assert.match(page, /event\.key === 'End'/)
 })

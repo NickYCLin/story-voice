@@ -15,14 +15,14 @@ const FEATURES: Feature[] = [
   {
     eyebrow: 'Your library',
     title: '一個檔案，一次搞定',
-    description: '不用手動拆章、不用自己編目錄。丟一個 EPUB 或 TXT 進來，StoryVoice 幫你認出每一章的標題與順序，之後想找哪本書、哪一章，直接用關鍵字或標籤撈出來。',
+    description: '不用手動拆章、不用自己編目錄。丟一個 EPUB 或 TXT 進來，StoryVoice 幫你認出每一章的標題與順序，之後可用書名、作者或原始檔名搜尋書籍。',
     image: '/landing/01-library.jpg',
     imageAlt: '書庫頁面，顯示已匯入的書籍與章節解析結果',
   },
   {
     eyebrow: 'AI narration',
     title: '讀給你聽，而不是幫你讀',
-    description: '你上傳什麼、連結什麼，StoryVoice 就只處理什麼——不會偷偷跑去抓你沒授權的內容。生出來的音檔留在你自己的帳號裡，不公開、不外流。',
+    description: '你主動匯入什麼，StoryVoice 就只處理什麼——不會主動抓取外部平台或你沒授權的內容。生出來的音檔留在你自己的帳號裡，不公開、不外流。',
     image: '/landing/01b-library-reading.jpg',
     imageAlt: '章節閱讀畫面與 AI 朗讀功能入口',
   },
@@ -43,7 +43,7 @@ const FEATURES: Feature[] = [
   {
     eyebrow: 'Collections',
     title: '追更的書歸追更的書',
-    description: '手邊同時看好幾套作品時，書冊讓你把同系列的集數排好順序放在一起，想推薦給朋友也可以開唯讀連結分享，不用把帳號整個借出去。',
+    description: '手邊同時看好幾套作品時，書冊讓你把同系列的集數排好順序放在一起，也能依已註冊帳號的 email 分享唯讀書冊，不用把自己的帳號借出去。',
     image: '/landing/04b-collections-list.jpg',
     imageAlt: '書冊列表頁面，顯示已建立的書冊卡片',
   },

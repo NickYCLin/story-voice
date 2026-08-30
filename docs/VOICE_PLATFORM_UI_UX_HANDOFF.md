@@ -1,6 +1,6 @@
 # StoryVoice 聲線平台 UI/UX 設計交接
 
-- 最後盤點：2026-08-26
+- 最後盤點：2026-08-30
 - 對象：UI/UX、前端、產品、後端
 - 用途：說明目前實作進度、production 真實狀態、缺少畫面與下一階段設計範圍
 
@@ -14,7 +14,7 @@ StoryVoice 原本的書庫、角色、系列卡司與朗讀工作台已經有完
 2. **登入後的開發者總覽、專案詳情、金鑰管理、Playground 與用量頁已上線**。完整 secret、token hash 與輸入文字都不進一般查詢或活動紀錄。
 3. **公開聲線館的前端與後端骨架已部署**，但公開 catalog 仍關閉，也沒有任何公開卡片或固定示範音檔。
 
-訂閱、方案價格、付款、帳單、公開發佈流程、owner 授權操作與管理後台仍未實作。UI/UX 的首要任務不是重做既有書庫，而是把已能使用的私人 API 做成可理解、可管理、可安全操作的開發者控制台。
+訂閱、方案價格、付款、帳單、公開發佈流程、owner 聲線發佈操作與管理後台仍未實作。Private API Portal 已完成；下一階段必須先決定公開資料、授權與產品流程，再啟用 catalog 或設計訂閱，不可用假資料補齊。
 
 ## 狀態圖例
 
@@ -50,7 +50,15 @@ Production 於 2026-08-19 的唯讀確認：
 - 目前限制為每分鐘 1 次、文字最多 200 字元／2,048 UTF-8 bytes、WAV 回應最多 3 MiB。
 - `LocalClonePreview=false`、`VoiceCatalog=false`、`ExternalVoiceApi=true`。
 - 公開 catalog API 回 404；external speech 的 GET 回 405，表示 POST-only route 已註冊。
-- 私人 API 曾得到 server HTTP 200 與上游 200；目前沒有 UI 可查看這次活動、用量或剩餘效期。
+- 私人 API 曾得到 server HTTP 200 與上游 200；這是 2026-08-19 的歷史合成證據，不能代替本次 smoke test。
+
+Production 於 2026-08-30 再次唯讀確認：
+
+- `/StoryVoice/`、`/voices`、`/developers/docs`、`/developer` 均回傳目前 SPA；盤點當時的正式 bundle 與基準 commit `f30166e` 的 base-path build 相符。後續 repository 合併仍須另做人工部署，不能沿用這筆證據宣稱新 commit 已上線。
+- `/StoryVoice/health/live` 與 `/StoryVoice/health/ready` 均回 200；匿名 session API 可讀。
+- `/api/developer/external-voice/overview`、credentials 與 usage 匿名請求均回 401。
+- external speech 的 GET 回 405，未帶 token 的 POST 回 401；公開 catalog API 因功能關閉回 404。
+- 本次沒有用 owner session 建立、換發、撤銷正式 credential，也沒有送出付費／GPU 合成；這些 production mutation 仍不應由唯讀稽核冒充已驗證。
 
 ### 既有產品畫面
 
@@ -61,9 +69,9 @@ Production 於 2026-08-19 的唯讀確認：
 | `/library`、`/library/:bookId` | EPUB/TXT、搜尋、書目、角色分析、筆記、朗讀工作與私有音訊 | 成熟內容工作區，不是本輪重做重點 |
 | `/collections`、`/collections/:id` | 書冊建立、排序、描述與分享 | 已完成 |
 | `/shared`、`/shared/:id` | 收到的唯讀書冊與章節 | 已完成 |
-| `/characters` | 角色資料、頭像、聲線、試講、任務紀錄 | 需重整聲線區；目前仍混有舊真人錄音 Clone 欄位 |
+| `/characters` | 角色資料、頭像、私人錄音 Clone、試講、任務紀錄 | consent／transcript 等欄位是私人 Clone 安全邊界；不可直接沿用到公開 synthetic catalog |
 | `/series` | 系列、角色連結、卡司、POV、固定句試音、speech plan、重建與啟用 | 已完成主要流程 |
-| `/voices` | 搜尋、篩選、卡片、固定示範播放器、狀態、訂閱說明 | source 已完成；production 未真正部署／啟用 |
+| `/voices` | 搜尋、篩選、卡片、固定示範播放器、狀態、訂閱說明 | Web route 已部署；catalog feature flag 關閉且沒有公開資料 |
 
 ### 現有 `/voices` 已有的設計基礎
 
@@ -88,9 +96,9 @@ Production 於 2026-08-19 的唯讀確認：
 
 ## 目前最重要的產品問題
 
-### 1. API 能用，但使用者看不到也管不到
+### 1. Private API Portal 已完成，剩下 production owner mutation smoke 與多副本營運
 
-目前 consumer 只能由維運人員取得 endpoint 與 credential。產品內沒有地方回答：
+登入後的總覽、專案詳情、credential、文件、Playground、用量與近 24 小時摘要已能回答：
 
 - 我有哪些專案？
 - 哪些聲線可以用？
@@ -100,23 +108,23 @@ Production 於 2026-08-19 的唯讀確認：
 - 要怎麼輪替或撤銷 key？
 - 如何送第一個 request？
 
-這是本輪 UI/UX 的 P0。
+這一批 P0 已由 source 與測試完成；正式環境仍刻意沒有代替 owner 操作一次性 secret。Repository 的 usage 寫入已改為 bounded background queue，bearer DB lookup 前也有固定記憶體的來源／全域防濫用 limiter；它們仍是 process-local，多副本共用 rate limit／idempotency、usage retention／歸檔與營運監控仍屬 Phase D。
 
-### 2. 現有「聲線管理」仍是假設真人錄音 Clone
+### 2. 公開 synthetic catalog 與私人錄音 Clone 是兩條不同流程
 
-[`CharacterVoiceProfilesPanel.tsx`](../src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx) 目前要求 WAV、逐字稿、consent receipt、簽署日與真人授權 attestation。產品最新規則是：角色與聲音預設皆為使用者自行建立的合成素材，不會有真人來源。
+[`CharacterVoiceProfilesPanel.tsx`](../src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx) 的私人 Clone 流程要求 WAV、逐字稿、consent receipt、簽署日與授權 attestation；這些是目前 fail-closed 的安全條件，不是應直接移除的舊欄位。公開 catalog 則預設只接受經核定的 owner-created synthetic voice，不能把私人 Clone 的輸入素材或證明欄位公開。
 
-因此不要在新合成聲線流程顯示：
+因此新的公開 synthetic 聲線流程不要顯示：
 
 - 真人姓名、聲紋本人或身份文件。
 - 真人錄音同意、簽署日期、consent type。
 - 「合法授權聲線」等容易暗示真人來源的預設文案。
 
-新流程應改為「原創合成聲線」，只保留必要的角色綁定、來源工具／模型、reference、transcript、manifest、terms snapshot、固定 demo、使用範圍、有效期與撤銷狀態。若未來要加入真人來源，應新增一條明確分離的流程，不把真人欄位重新塞回預設表單。
+公開流程應標為「原創合成聲線」，只顯示核准後可公開的角色綁定、來源工具／模型、manifest、terms snapshot、固定 demo、使用範圍、有效期與撤銷狀態；private reference、transcript、consent evidence 與內部路徑不得進 catalog DTO。真人或錄音 Clone 必須維持明確分離、具證據且 owner-scoped 的流程。
 
-### 3. 角色、聲線、專案與金鑰目前混在不同概念中
+### 3. 角色、聲線、專案與金鑰必須持續分層
 
-設計必須固定四層：
+Private API Portal 已將 project 與 credential 分開；未來 creator／catalog 設計也必須維持以下四層：
 
 | 物件 | 回答的問題 | 不應混入 |
 |---|---|---|
@@ -158,7 +166,7 @@ StoryVoice
 
 ## 缺少畫面與優先順序
 
-### P0：把目前已上線的私人 API 做成可用產品
+### P0：Private API Portal（已完成；持續做安全與狀態 hardening）
 
 #### A. 開發者總覽 `/developer` — ✅ 唯讀版 LIVE（2026-08-21）
 
@@ -219,7 +227,7 @@ durable usage、Playground 與總覽最近 24 小時摘要均已完成。
 > database 只保存小寫 SHA-256。換發支援 0、60、1,440 分鐘 overlap，舊金鑰到期後立即失效；
 > 其他 owner 對同一 credential 的操作固定回 404。production 已套用 migration 並部署新版
 > API／Web；公開 route、匿名 401、consumer overlay 與容器健康狀態均已驗證。基於 secret
-> 邊界，本輪未代替 owner 建立或撤銷正式金鑰。
+> 邊界，2026-08-30 的唯讀盤點未代替 owner 建立或撤銷正式金鑰。
 
 最小內容與互動：
 
@@ -231,14 +239,15 @@ durable usage、Playground 與總覽最近 24 小時摘要均已完成。
 
 必要狀態：create success、copy success、download、lost secret、rotate pending、revoked、forbidden。
 
-**目前缺口**：尚未用 owner 瀏覽器 session 執行建立／換發／撤銷的正式資料 smoke test；
-其餘 source、CI、migration、API／Web 與匿名權限邊界皆已驗證。
+**目前缺口**：尚未用 owner 瀏覽器 session 執行建立／換發／撤銷的正式資料 smoke test。
+每批 credential service／UI／並行修正都必須以該批 PR head 與合併後 `main` 的 GitHub Actions
+為 repository 證據；production 部署與 owner mutation smoke 另行驗證，不能互相替代。
 
 #### D. API Playground `/developer/playground` — ✅ LIVE（2026-08-27）
 
 > Repository 已交付 owner-session、CSRF 保護的 same-origin backend-for-frontend 與登入後頁面。
 > 瀏覽器只傳 project、voice、text 與 idempotency key，不取得 external bearer。owner scope、專案效期、
-> 聲線 grant 與既有合成授權鏈仍由伺服器驗證；成功與失敗都寫入只含安全 metadata 的 usage ledger。
+> 聲線 grant 與既有合成授權鏈仍由伺服器驗證；成功及已解析到 owner／project 的合成失敗會以 best-effort 寫入只含安全 metadata 的 usage ledger。ledger 寫入失敗只記 server error、不取代合成回應，因此不能作為 billing／hard quota 的唯一來源；格式錯誤或找不到 owner 專案的要求不建立無法可靠歸屬的紀錄。
 > UI 已涵蓋選擇、字元／byte 計數、產生、取消、播放、下載、冪等重送、四種 server-side 範例與
 > 400／404／409／429／503 狀態。
 
@@ -254,15 +263,15 @@ durable usage、Playground 與總覽最近 24 小時摘要均已完成。
 安全要求：瀏覽器不得持有 external bearer。Playground 必須呼叫 owner-session 保護的 same-origin backend-for-frontend，再由伺服器代送；不可直接從 browser 打 external API。
 
 **驗證邊界**：production route、正式 Web bundle、匿名 401、容器健康與資料不變均已確認；
-owner-session 合成由完整 integration test 驗證，本輪部署沒有代替 owner 送出正式 GPU 合成要求。
+owner-session 的 HTTP route／auth／CSRF／ledger contract 由使用 fake synthesizer 的 integration test 驗證；2026-08-30 的唯讀盤點沒有代替 owner 送出正式 provider／GPU／asset E2E 合成要求。
 
 #### E. 用量與活動 `/developer/usage` — ✅ LIVE（2026-08-26）
 
 > 已交付 owner-scoped durable usage ledger、`GET /api/developer/external-voice/usage` 與登入後
-> 使用量頁。只記錄通過 API key 驗證後的安全 metadata；可依近 24 小時／7 天／30 天、project
+> 使用量頁。只記錄 external API 與可可靠歸屬到 owner／project 的 Playground 合成安全 metadata；可依近 24 小時／7 天／30 天、project
 > 與 voice 篩選，摘要包含請求數、成功率、429、平均 latency、WAV 秒數與 bytes，最近活動只顯示
 > server-generated request ID、狀態、錯誤類型與耗時。輸入文字、Bearer、冪等鍵、reference 與
-> transcript 都不進資料表或 owner response。
+> transcript 都不進資料表或 owner response。寫入採非阻塞 bounded queue 的 best-effort 模式；滿載或落盤失敗會記錄 log／metric，但不等待或覆蓋合成結果，這份資料目前不是 billing-grade meter 或 hard quota 的唯一來源。
 
 最小內容：
 
@@ -304,7 +313,7 @@ grant JSON 內部欄位與檔案路徑，只留下開發者實際需要的 HTTP 
 - public、private-only、coming-soon、revoked 的清楚狀態。
 - 兩張卡時只做搜尋與快捷 chips；10 張以上再做完整 filter drawer。
 
-正式上線前還需要：production 部署新 Web bundle、啟用 catalog、建立有效 entries、安裝固定 demo，並通過公開 metadata/授權檢查。
+正式啟用前還需要：建立有效 entries、安裝固定 demo、通過公開 metadata／授權檢查，再開啟 catalog feature flag。Web route 與 disabled／empty shell 已在 production，不應再寫成尚未部署。
 
 #### H. 聲線詳情 `/voices/:alias`
 
@@ -344,7 +353,7 @@ grant JSON 內部欄位與檔案路徑，只留下開發者實際需要的 HTTP 
 
 不要讓使用者手填 hash、owner ID、audit ID、狀態、server timestamp 或權利 boolean；這些必須由受控 backend 產生或驗證。
 
-**Backend gap**：目前沒有 owner issue/activate/revoke API、durable audit store 或 terms review workflow；此 wizard 先做 UX prototype，不能假接 production。
+**Backend gap**：目前沒有 publication 專用的 owner issue／activate／revoke API、publication audit store 或 terms review workflow；此 wizard 先做 UX prototype，不能把 developer credential audit 誤當成聲線發佈流程。
 
 #### K. 固定示範管理
 
@@ -391,22 +400,20 @@ grant JSON 內部欄位與檔案路徑，只留下開發者實際需要的 HTTP 
 - 稽核事件與失敗原因。
 - 服務 health、gateway、voice provider、GPU busy／degraded 狀態。
 - 帳號設定、安全與通知中心。
-- 404、403、expired、revoked、maintenance 等完整狀態頁；目前 App 沒有 wildcard route。
+- 403、expired、revoked、maintenance 等完整狀態頁；一般未知 SPA route 已有 client-rendered wildcard 404 畫面（nginx SPA fallback 的 HTTP status 仍為 200）。
 
-## UI/UX 第一批應交付的畫面
+## 已交付與下一批 UI/UX 畫面
 
-建議先交 8 組核心 frame，先 desktop，再補必要 mobile：
+已交付並有 source／測試的 developer 畫面：
 
 1. 開發者總覽：active private-development。
 2. 開發者總覽：即將到期／expired。
 3. 專案詳情與可用聲線。
 4. API 金鑰列表＋一次性 secret modal。
 5. Playground：idle／generating／success／429／503。
-6. 公開聲線館：兩張卡、disabled、empty、error、mobile。
-7. 聲線詳情：公開固定 demo＋申請 API。
-8. 我的聲線＋publication readiness wizard。
+6. 用量摘要、篩選與安全活動明細。
 
-第二批再做方案／申請、usage dashboard、授權 timeline、營運審核。
+下一批必須在真實 publication contract 與資料核准後再做：公開聲線館的 disabled／empty／error／mobile、聲線詳情、我的聲線與 publication readiness。不得先硬塞兩張假卡。方案／申請、授權 timeline 與營運審核仍屬後續產品／backend 工作。
 
 ## 周子謙與林若晴卡片規格
 
@@ -545,7 +552,7 @@ StoryVoice 必須保留的差異：
 - App shell：[`src/StoryVoice.Web/src/AppLayout.tsx`](../src/StoryVoice.Web/src/AppLayout.tsx)
 - 公開聲線頁：[`src/StoryVoice.Web/src/pages/PublicVoicesPage.tsx`](../src/StoryVoice.Web/src/pages/PublicVoicesPage.tsx)
 - 角色庫：[`src/StoryVoice.Web/src/pages/CharacterLibraryPage.tsx`](../src/StoryVoice.Web/src/pages/CharacterLibraryPage.tsx)
-- 舊聲線管理：[`src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx`](../src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx)
+- 私人 Clone 聲線管理：[`src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx`](../src/StoryVoice.Web/src/CharacterVoiceProfilesPanel.tsx)
 - 系列卡司：[`src/StoryVoice.Web/src/SeriesCastPanel.tsx`](../src/StoryVoice.Web/src/SeriesCastPanel.tsx)
 - Public catalog endpoints：[`src/StoryVoice.Api/PublicVoiceCatalogEndpoints.cs`](../src/StoryVoice.Api/PublicVoiceCatalogEndpoints.cs)
 - External speech endpoint：[`src/StoryVoice.Api/ExternalVoiceEndpoints.cs`](../src/StoryVoice.Api/ExternalVoiceEndpoints.cs)
@@ -556,4 +563,4 @@ StoryVoice 必須保留的差異：
 
 ## Handoff 結論
 
-UI/UX 可以立即開始 Phase A 的完整設計，以及 Phase B 的公開目錄／詳情視覺探索。Phase A 除 API 文件外，多數畫面還需要新 backend；Phase B 的 catalog shell 已有 source，可直接沿用與改版，但 production 沒有公開資料。Phase C、D 先做產品流程與 prototype，不應標成工程可接或 production ready。
+Phase A 的 overview、project detail、credential、docs、usage、Playground 與近 24 小時摘要均已完成；後續是 owner 授權下的 production mutation smoke 與多副本營運 hardening。Phase B 的 catalog shell 已部署但功能關閉、沒有公開資料，需先完成 publication contract、核准 entry 與固定 demo 才能啟用。Phase C、D 仍只適合產品流程與 prototype，不應標成 engineering-ready 或 production-ready。

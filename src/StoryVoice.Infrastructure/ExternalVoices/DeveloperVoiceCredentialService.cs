@@ -13,9 +13,10 @@ public sealed class DeveloperVoiceCredentialService(
     StoryVoiceDbContext dbContext,
     IOptions<ExternalVoiceApiOptions> options,
     ICurrentUser currentUser,
-    TimeProvider timeProvider) : IDeveloperVoiceCredentialService
+    TimeProvider timeProvider,
+    DeveloperVoiceCredentialMutationCoordinator mutationCoordinator) : IDeveloperVoiceCredentialService
 {
-    private const int MaximumActiveCredentialsPerProject = 5;
+    private const int MaximumActiveManagedCredentialsPerProject = 5;
     private const int MaximumOverlapMinutes = 24 * 60;
     private const int MaximumAuditEntries = 100;
     private const string OneTimeNotice =
@@ -57,31 +58,39 @@ public sealed class DeveloperVoiceCredentialService(
             return null;
         }
 
-        var now = timeProvider.GetUtcNow();
-        EnsureProjectCanIssue(project.Value.Consumer, now);
-        await EnsureCredentialCapacityAsync(
-            project.Value.KeyId,
-            exceptCredentialId: null,
-            now,
-            cancellationToken);
+        var ownerId = currentUser.UserId;
+        return await mutationCoordinator.ExecuteAsync(
+            dbContext,
+            ownerId,
+            async operationToken =>
+            {
+                var now = timeProvider.GetUtcNow();
+                EnsureProjectCanIssue(project.Value.Consumer, now);
+                await EnsureCredentialCapacityAsync(
+                    project.Value.KeyId,
+                    exceptCredentialId: null,
+                    now,
+                    operationToken);
 
-        var issued = await CreateCredentialAsync(
-            project.Value.KeyId,
-            project.Value.Consumer,
-            name,
-            now,
-            cancellationToken);
-        dbContext.ExternalVoiceCredentials.Add(issued.Credential);
-        dbContext.ExternalVoiceCredentialAudits.Add(ExternalVoiceCredentialAudit.Create(
-            issued.Credential,
-            ExternalVoiceCredentialAuditActions.Created,
-            now));
-        await dbContext.SaveChangesAsync(cancellationToken);
+                var issued = await CreateCredentialAsync(
+                    project.Value.KeyId,
+                    project.Value.Consumer,
+                    name,
+                    now,
+                    operationToken);
+                dbContext.ExternalVoiceCredentials.Add(issued.Credential);
+                dbContext.ExternalVoiceCredentialAudits.Add(ExternalVoiceCredentialAudit.Create(
+                    issued.Credential,
+                    ExternalVoiceCredentialAuditActions.Created,
+                    now));
+                await dbContext.SaveChangesAsync(operationToken);
 
-        return new IssuedDeveloperVoiceCredential(
-            CreateManagedSummary(issued.Credential, project.Value.Consumer, now),
-            issued.AccessToken,
-            OneTimeNotice);
+                return new IssuedDeveloperVoiceCredential(
+                    CreateManagedSummary(issued.Credential, project.Value.Consumer, now),
+                    issued.AccessToken,
+                    OneTimeNotice);
+            },
+            cancellationToken);
     }
 
     public async Task<IssuedDeveloperVoiceCredential?> RotateAsync(
@@ -98,84 +107,100 @@ public sealed class DeveloperVoiceCredentialService(
         }
 
         var ownerId = currentUser.UserId;
-        var credential = await dbContext.ExternalVoiceCredentials.SingleOrDefaultAsync(
-            candidate => candidate.Id == credentialId && candidate.OwnerId == ownerId,
+        return await mutationCoordinator.ExecuteAsync<IssuedDeveloperVoiceCredential?>(
+            dbContext,
+            ownerId,
+            async operationToken =>
+            {
+                var credential = await dbContext.ExternalVoiceCredentials.SingleOrDefaultAsync(
+                    candidate => candidate.Id == credentialId && candidate.OwnerId == ownerId,
+                    operationToken);
+                if (credential is null)
+                {
+                    return null;
+                }
+
+                var value = options.Value;
+                if (!value.Consumers.TryGetValue(credential.ConsumerKeyId, out var consumer)
+                    || consumer.OwnerId != ownerId)
+                {
+                    throw new InvalidOperationException("這個金鑰所屬專案已不可用，無法換發。");
+                }
+
+                var now = timeProvider.GetUtcNow();
+                EnsureProjectCanIssue(consumer, now);
+                if (credential.ExpiresAtUtc <= now
+                    || credential.RevokedAtUtc is not null)
+                {
+                    throw new InvalidOperationException("只有仍有效且尚未排程撤銷的金鑰可以換發。");
+                }
+
+                // Immediate rotation makes the old credential inactive in this transaction;
+                // an overlap keeps it active, so it must continue to occupy one of the slots.
+                await EnsureCredentialCapacityAsync(
+                    credential.ConsumerKeyId,
+                    request.OverlapMinutes == 0 ? credential.Id : null,
+                    now,
+                    operationToken);
+                var issued = await CreateCredentialAsync(
+                    credential.ConsumerKeyId,
+                    consumer,
+                    credential.Name,
+                    now,
+                    operationToken);
+                var revokeAt = now.AddMinutes(request.OverlapMinutes);
+                credential.Revoke(revokeAt, issued.Credential.Id);
+                dbContext.ExternalVoiceCredentials.Add(issued.Credential);
+                dbContext.ExternalVoiceCredentialAudits.AddRange(
+                    ExternalVoiceCredentialAudit.Create(
+                        credential,
+                        ExternalVoiceCredentialAuditActions.Rotated,
+                        now,
+                        issued.Credential),
+                    ExternalVoiceCredentialAudit.Create(
+                        issued.Credential,
+                        ExternalVoiceCredentialAuditActions.Created,
+                        now,
+                        credential));
+                await dbContext.SaveChangesAsync(operationToken);
+
+                return new IssuedDeveloperVoiceCredential(
+                    CreateManagedSummary(issued.Credential, consumer, now),
+                    issued.AccessToken,
+                    OneTimeNotice);
+            },
             cancellationToken);
-        if (credential is null)
-        {
-            return null;
-        }
-
-        var value = options.Value;
-        if (!value.Consumers.TryGetValue(credential.ConsumerKeyId, out var consumer)
-            || consumer.OwnerId != ownerId)
-        {
-            throw new InvalidOperationException("這個金鑰所屬專案已不可用，無法換發。");
-        }
-
-        var now = timeProvider.GetUtcNow();
-        EnsureProjectCanIssue(consumer, now);
-        if (credential.ExpiresAtUtc <= now
-            || credential.RevokedAtUtc is not null)
-        {
-            throw new InvalidOperationException("只有仍有效且尚未排程撤銷的金鑰可以換發。");
-        }
-
-        await EnsureCredentialCapacityAsync(
-            credential.ConsumerKeyId,
-            credential.Id,
-            now,
-            cancellationToken);
-        var issued = await CreateCredentialAsync(
-            credential.ConsumerKeyId,
-            consumer,
-            credential.Name,
-            now,
-            cancellationToken);
-        var revokeAt = now.AddMinutes(request.OverlapMinutes);
-        credential.Revoke(revokeAt, issued.Credential.Id);
-        dbContext.ExternalVoiceCredentials.Add(issued.Credential);
-        dbContext.ExternalVoiceCredentialAudits.AddRange(
-            ExternalVoiceCredentialAudit.Create(
-                credential,
-                ExternalVoiceCredentialAuditActions.Rotated,
-                now,
-                issued.Credential),
-            ExternalVoiceCredentialAudit.Create(
-                issued.Credential,
-                ExternalVoiceCredentialAuditActions.Created,
-                now,
-                credential));
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return new IssuedDeveloperVoiceCredential(
-            CreateManagedSummary(issued.Credential, consumer, now),
-            issued.AccessToken,
-            OneTimeNotice);
     }
 
     public async Task<bool> RevokeAsync(Guid credentialId, CancellationToken cancellationToken)
     {
         var ownerId = currentUser.UserId;
-        var credential = await dbContext.ExternalVoiceCredentials.SingleOrDefaultAsync(
-            candidate => candidate.Id == credentialId && candidate.OwnerId == ownerId,
+        return await mutationCoordinator.ExecuteAsync(
+            dbContext,
+            ownerId,
+            async operationToken =>
+            {
+                var credential = await dbContext.ExternalVoiceCredentials.SingleOrDefaultAsync(
+                    candidate => candidate.Id == credentialId && candidate.OwnerId == ownerId,
+                    operationToken);
+                if (credential is null)
+                {
+                    return false;
+                }
+
+                var now = timeProvider.GetUtcNow();
+                if (credential.Revoke(now))
+                {
+                    dbContext.ExternalVoiceCredentialAudits.Add(ExternalVoiceCredentialAudit.Create(
+                        credential,
+                        ExternalVoiceCredentialAuditActions.Revoked,
+                        now));
+                    await dbContext.SaveChangesAsync(operationToken);
+                }
+
+                return true;
+            },
             cancellationToken);
-        if (credential is null)
-        {
-            return false;
-        }
-
-        var now = timeProvider.GetUtcNow();
-        if (credential.Revoke(now))
-        {
-            dbContext.ExternalVoiceCredentialAudits.Add(ExternalVoiceCredentialAudit.Create(
-                credential,
-                ExternalVoiceCredentialAuditActions.Revoked,
-                now));
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        return true;
     }
 
     public async Task<IReadOnlyList<DeveloperVoiceCredentialAuditSummary>> ListAuditAsync(
@@ -231,10 +256,10 @@ public sealed class DeveloperVoiceCredentialService(
                 && credential.ExpiresAtUtc > now
                 && (credential.RevokedAtUtc == null || credential.RevokedAtUtc > now),
             cancellationToken);
-        if (activeCount >= MaximumActiveCredentialsPerProject)
+        if (activeCount >= MaximumActiveManagedCredentialsPerProject)
         {
             throw new InvalidOperationException(
-                $"每個專案最多只能有 {MaximumActiveCredentialsPerProject} 組有效金鑰。");
+                $"每個專案最多只能有 {MaximumActiveManagedCredentialsPerProject} 組有效受管金鑰。");
         }
     }
 

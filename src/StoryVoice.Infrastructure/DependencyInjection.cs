@@ -260,14 +260,13 @@ public static class DependencyInjection
         services.AddSingleton<ExternalVoiceConcurrencyGate>();
         services.AddScoped<LocalCloneProfileSynthesizer>();
         services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
-        services.AddSingleton<DeveloperVoicePlaygroundRateLimiter>();
+        services.AddSingleton<DeveloperVoiceCredentialMutationCoordinator>();
         services.AddSingleton<IPublicVoiceCatalogService, PublicVoiceCatalogService>();
         services.AddScoped<IDeveloperVoiceConsoleService, DeveloperVoiceConsoleService>();
+        services.AddScoped<ExternalVoiceCredentialUsageUpdater>();
         services.AddScoped<IDeveloperVoiceCredentialService, DeveloperVoiceCredentialService>();
         services.AddScoped<IDeveloperVoicePlaygroundService, DeveloperVoicePlaygroundService>();
         services.AddScoped<ExternalVoiceUsageService>();
-        services.AddScoped<IExternalVoiceUsageRecorder>(provider =>
-            provider.GetRequiredService<ExternalVoiceUsageService>());
         services.AddScoped<IDeveloperVoiceUsageService>(provider =>
             provider.GetRequiredService<ExternalVoiceUsageService>());
         services.AddScoped<ILocalClonePreviewService, LocalClonePreviewService>();

@@ -132,7 +132,11 @@ public sealed record ExternalVoiceUsageWrite(
 
 public interface IExternalVoiceUsageRecorder
 {
-    Task RecordAsync(ExternalVoiceUsageWrite usage, CancellationToken cancellationToken);
+    /// <summary>
+    /// Attempts to enqueue one best-effort usage record without waiting for durable storage.
+    /// Returns <see langword="false"/> when the bounded recorder cannot accept the item.
+    /// </summary>
+    bool TryEnqueue(ExternalVoiceUsageWrite usage);
 }
 
 public sealed record DeveloperVoiceUsageQuery(

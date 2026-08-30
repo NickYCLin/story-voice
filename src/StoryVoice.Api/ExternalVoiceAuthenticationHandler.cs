@@ -27,6 +27,7 @@ public sealed class ExternalVoiceAuthenticationHandler(
     UrlEncoder encoder,
     IOptions<ExternalVoiceApiOptions> apiOptions,
     StoryVoiceDbContext dbContext,
+    ExternalVoiceCredentialUsageUpdater credentialUsageUpdater,
     TimeProvider timeProvider)
     : AuthenticationHandler<AuthenticationSchemeOptions>(schemeOptions, logger, encoder)
 {
@@ -69,8 +70,10 @@ public sealed class ExternalVoiceAuthenticationHandler(
             return AuthenticateResult.Fail("External voice API key is invalid.");
         }
 
-        credential.RecordUse(now);
-        await dbContext.SaveChangesAsync(Context.RequestAborted);
+        await credentialUsageUpdater.RecordUseAsync(
+            credential,
+            now,
+            Context.RequestAborted);
         return CreateSuccess(credential.ConsumerKeyId, credential.KeyId, credential.OwnerId);
     }
 

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -23,6 +25,9 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
     private const string VoiceAlias = "private-synthetic-voice";
     private const string Password = "Moonlight!Story42";
     private const string InputText = "這段文字只用來產生聲音";
+    private const string Secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    private static readonly string AccessToken = $"svd1.{ConsumerKeyId}.{Secret}";
 
     [Fact]
     public async Task Playground_is_owner_scoped_csrf_protected_and_records_safe_usage()
@@ -63,6 +68,7 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
             success.Headers.GetValues("X-StoryVoice-Latency-Ms").Single(),
             CultureInfo.InvariantCulture) >= 0);
 
+        await WaitForUsageCountAsync(configuredFactory, ownerId, 1, cancellationToken);
         await using (var scope = configuredFactory.Services.CreateAsyncScope())
         {
             var usage = await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>()
@@ -132,6 +138,7 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
         Assert.False(string.IsNullOrWhiteSpace(
             fixedWindowLimited.Headers.GetValues("X-StoryVoice-Request-Id").Single()));
 
+        await WaitForUsageCountAsync(configuredFactory, ownerId, 4, cancellationToken);
         await using var scope = configuredFactory.Services.CreateAsyncScope();
         var records = await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>()
             .ExternalVoiceUsageRecords
@@ -145,9 +152,82 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
         Assert.All(records, record => Assert.True(record.TextCharacters > 0));
     }
 
+    [Fact]
+    public async Task Playground_and_external_api_share_the_consumer_rate_limit_budget()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var ownerId = Guid.NewGuid();
+        using var configuredFactory = CreateConfiguredFactory(
+            ownerId,
+            DateTimeOffset.UtcNow,
+            requestsPerMinute: 1);
+        using var ownerClient = await CreateOwnerClientAsync(
+            configuredFactory,
+            ownerId,
+            cancellationToken);
+        using var externalClient = configuredFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = false,
+        });
+        using var externalRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/external/v1/speech")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new { voice = VoiceAlias, text = InputText }),
+                Encoding.UTF8,
+                "application/json"),
+        };
+        externalRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+        externalRequest.Headers.Add("Idempotency-Key", "playground-shared-budget-0001");
+        using var externalResponse = await externalClient.SendAsync(
+            externalRequest,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, externalResponse.StatusCode);
+
+        using var playgroundResponse = await ownerClient.PostWithCsrfAsync(
+            "/api/developer/external-voice/playground",
+            CreateRequest(InputText, "playground-shared-budget-0002"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.TooManyRequests, playgroundResponse.StatusCode);
+        using var problem = JsonDocument.Parse(
+            await playgroundResponse.Content.ReadAsStreamAsync(cancellationToken));
+        Assert.Equal("rate_limited", problem.RootElement.GetProperty("code").GetString());
+    }
+
+    private static async Task WaitForUsageCountAsync(
+        WebApplicationFactory<Program> configuredFactory,
+        Guid ownerId,
+        int expectedCount,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            await using var scope = configuredFactory.Services.CreateAsyncScope();
+            var count = await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>()
+                .ExternalVoiceUsageRecords
+                .CountAsync(record => record.OwnerId == ownerId, cancellationToken);
+            if (count >= expectedCount)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Timed out waiting for {expectedCount} background usage records; found {count}.");
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+    }
+
     private WebApplicationFactory<Program> CreateConfiguredFactory(
         Guid ownerId,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        int requestsPerMinute = 3) =>
         factory.WithWebHostBuilder(builder =>
         {
             var profileId = Guid.NewGuid();
@@ -166,12 +246,17 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
             var consumerPrefix = $"ExternalVoiceApi:Consumers:{ConsumerKeyId}";
             var voicePrefix = $"{consumerPrefix}:AllowedVoices:{VoiceAlias}";
             builder.UseSetting("ExternalVoiceApi:Enabled", "true");
-            builder.UseSetting("ExternalVoiceApi:RequestsPerMinute", "3");
+            builder.UseSetting(
+                "ExternalVoiceApi:RequestsPerMinute",
+                requestsPerMinute.ToString(CultureInfo.InvariantCulture));
             builder.UseSetting($"{consumerPrefix}:AccessTier", ExternalVoiceAccessTiers.PrivateDevelopment);
             builder.UseSetting($"{consumerPrefix}:DisplayName", "playground test project");
             builder.UseSetting($"{consumerPrefix}:ProjectId", ProjectId);
             builder.UseSetting($"{consumerPrefix}:OwnerId", ownerId.ToString("D"));
-            builder.UseSetting($"{consumerPrefix}:TokenSha256", new string('a', 64));
+            builder.UseSetting(
+                $"{consumerPrefix}:TokenSha256",
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(AccessToken)))
+                    .ToLowerInvariant());
             builder.UseSetting(
                 $"{consumerPrefix}:EffectiveAtUtc",
                 now.AddMinutes(-5).ToString("O", CultureInfo.InvariantCulture));

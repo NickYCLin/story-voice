@@ -18,6 +18,11 @@ public interface IExternalVoiceSynthesisService
         CancellationToken cancellationToken);
 }
 
+public interface IExternalVoiceRequestRateLimiter
+{
+    bool TryAcquire(string consumerKeyId, out int retryAfterSeconds);
+}
+
 public enum ExternalVoiceSynthesisFailureKind
 {
     InvalidRequest = 0,

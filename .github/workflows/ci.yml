@@ -17,9 +17,21 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      - run: dotnet restore StoryVoice.sln
+      - run: dotnet tool restore
+      - run: >-
+          dotnet restore StoryVoice.sln
+          -p:NuGetAudit=true
+          -p:NuGetAuditMode=all
+          -p:WarningsAsErrors=NU1900%3BNU1901%3BNU1902%3BNU1903%3BNU1904%3BNU1905
       - run: dotnet build StoryVoice.sln --configuration Release --no-restore
       - run: dotnet test StoryVoice.sln --configuration Release --no-build --no-restore
+      - run: >-
+          dotnet ef migrations has-pending-model-changes
+          --project src/StoryVoice.Infrastructure
+          --startup-project src/StoryVoice.Api
+          --configuration Release
+          --no-build
+      - run: dotnet list StoryVoice.sln package --vulnerable --include-transitive --no-restore
       - run: python3 -m unittest discover -s tests/python -v
 
   frontend:
@@ -35,6 +47,7 @@ jobs:
           cache: npm
           cache-dependency-path: src/StoryVoice.Web/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm test
       - run: npm run lint
       - run: npm run build
@@ -53,9 +66,39 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: services/bluemagpie-gateway/requirements-test.txt
-      - run: python -m pip install -r requirements-test.txt
-      - run: python -m pytest
+          cache-dependency-path: |
+            services/bluemagpie-gateway/requirements.txt
+            services/bluemagpie-gateway/requirements-test.txt
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install pip==26.2.1
+      - run: .venv/bin/python -m pip install -r requirements-test.txt pip-audit==2.10.1
+      - run: .venv/bin/python -m pip check
+      - run: .venv/bin/python -m pytest
+      - run: .venv/bin/python -m compileall -q bluemagpie_gateway tests
+      - run: .venv/bin/python -m pip_audit --local --strict
+
+  local-clone-gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/local-clone-gateway
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            services/local-clone-gateway/requirements.txt
+            services/local-clone-gateway/requirements-test.txt
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install pip==26.2.1
+      - run: .venv/bin/python -m pip install -r requirements-test.txt pip-audit==2.10.1
+      - run: .venv/bin/python -m pip check
+      - run: .venv/bin/python -m pytest
+      - run: .venv/bin/python -m compileall -q local_clone_gateway tests
+      - run: .venv/bin/python -m pip_audit --local --strict
+      - run: docker build --tag storyvoice-local-clone-gateway:ci .
 
   compose:
     runs-on: ubuntu-latest

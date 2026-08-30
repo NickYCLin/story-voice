@@ -1,12 +1,31 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-27（完成開發者總覽近 24 小時用量摘要）
+最後更新：2026-08-30（repository／production 唯讀狀態、前後端、CI、可在本機驗證的相依安全與文件全面稽核）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-08-30 全面稽核與修正
+
+本輪從盤點基準 commit `f30166e`、production 唯讀 route、完整測試與實際本機 Web／API stack 重新盤點，已修正：
+
+- Playground 重試／取消／切換欄位時的 AbortController 與舊回應競態；產生期間鎖定輸入，Blob URL 也會獨立回收。
+- developer 頁面同時接受 `keyId` 與 `projectId` 時的正規化錯誤，避免 credential 下拉選單失配或 usage 被錯誤篩成 0 筆。
+- credential 一次性 secret 被下一次建立／換發覆蓋、mutation 成功但 refresh 失敗卻誤報失敗、service disabled 仍可建立，以及排程撤銷時間未顯示。
+- managed credential 的 `LastUsedAtUtc` 可被較舊的並行 request 倒寫；create／rotate／revoke 現在以 owner row lock 跨 process 序列化，滿額 overlap rotation 與並行換發不再突破每專案 5 組有效受管金鑰（既有 deployment-configured token 不計入此 managed 上限）。
+- usage summary 原本以多個 read-committed query 計算，流量寫入期間可能出現成功數大於總數，摘要與活動也可能跨 snapshot；現改為單一 aggregate statement，並以 repeatable-read snapshot 讀取同一份活動。整合測試會在兩次 SELECT 間刻意插入並行紀錄，也把共享測試資料 assertion 改成 owner-scoped。
+- Playground 與 bearer external API 原本各有一份 fixed-window bucket，可讓同一 consumer 合計超過 `RequestsPerMinute`；現在同一 process 共用同一 limiter。設定啟動時也會拒絕同 owner 的重複／歧義 project reference。
+- usage 寫入已改成不等待資料庫的 bounded background queue；滿載與落盤失敗都有 log／metric，且每筆以獨立 scope 寫入。external speech POST 也在 bearer 驗證查詢資料庫前加入固定記憶體的來源／全域防濫用 limiter，輪換無效 key 或來源位址不再能無界消耗 DB／記憶體。
+- developer 專案詳情、credential、Playground 與 usage 在 route／`?project=` 切換後會立即進入 transition loading，停用舊專案操作、資料與舊回應；未知 usage 專案不會退化成查詢全部 owner 資料，credential 的一次性 secret 在重新載入或錯誤畫面仍會保留到 owner 主動關閉。
+- 未知 SPA route 原本只得到 nginx 200 shell 後顯示空白；React 現在顯示可返回首頁／API 文件的 404 頁。主導覽也補上核心 `/series` 入口。
+- 書庫初次載入誤顯示 0 本、已移除流程仍寫「上傳並連結」、首頁把 email 分享寫成公開唯讀連結，以及首頁公開使用的舊書商同步截圖／文案均已校正；首頁兩張書庫圖已由本輪本機實際 UI 與合成資料重拍。
+- BlueMagpie／local-clone gateway 的 FastAPI、Starlette、multipart 與 pytest 已升到相容版本；測試環境加入 Starlette 官方轉向的 HTTPX2、正式 local-clone client 仍保留既有 HTTPX。CI 新增 EF pending-model、NuGet／npm audit、local-clone 51 tests、兩個 gateway 已安裝 contract／test 環境的 `pip check`／`pip-audit --strict`，並實際 build local-clone production image；BlueMagpie ARM64／CUDA production image 的完整相依仍受下方硬體邊界限制。
+- `DEVELOPMENT_PLAN.md` 的 Phase 1、3～9 核取狀態、舊 `talespeak-*` service 名稱、PDF 現況與歷史 bootstrap 任務，以及 UI/UX handoff 對已上線 portal／`/voices` 的矛盾敘述已同步真實狀態。
+
+本節描述 repository 的本輪修正，不代表 production 已部署；正式站仍須以合併後的確切 commit、人工部署與上線 smoke 為準。
 
 ## 目前可用
 
@@ -27,13 +46,13 @@
   tier、效期、rate／size limits、credential 識別摘要、last-used 及聲線授權／撤銷狀態；可為
   既有專案建立、換發（0／60／1,440 分鐘 overlap）或撤銷金鑰。完整 secret 只在建立／換發
   回應顯示一次，資料庫只保存 SHA-256；所有異動有 durable audit，跨 owner 一律回 404。
-  既有部署設定金鑰維持相容但仍由維運管理。durable usage ledger 已保存通過 API key 驗證後的
-  request ID、project、credential 識別、聲線、結果、latency 與 WAV 產出秒數／bytes，並提供
+  既有部署設定金鑰維持相容但仍由維運管理。durable usage ledger 會以 best-effort 保存 external API
+  與可可靠歸屬的 Playground request ID、project、credential 識別、聲線、結果、latency 與 WAV 產出秒數／bytes，並提供
   owner-scoped `/developer/usage` 篩選與活動頁；不保存輸入文字、token、冪等鍵、reference 或
   transcript。`/developer/playground` 已透過 owner-session、CSRF 與 same-origin backend-for-frontend
   安全代理既有合成服務，可選專案／聲線、檢查字元與 UTF-8 bytes、產生／取消／播放／下載 WAV，
   顯示 request ID、冪等鍵、latency、輸出大小與穩定錯誤，並寫入同一份安全 usage ledger；瀏覽器
-  不取得 external bearer。開發者總覽會以同一份 owner-scoped ledger 顯示最近 24 小時要求數、
+  不取得 external bearer。ledger 透過 bounded background queue 非阻塞寫入；queue 滿載或落盤失敗會留下 log／metric、但不等待或取代合成回應，因此不是 billing／hard quota 的唯一依據。開發者總覽會以同一份 owner-scoped ledger 顯示最近 24 小時要求數、
   成功、失敗、429 與平均耗時；摘要讀取失敗時不會連帶中斷專案卡。rate limit、single-flight 與
   idempotency 仍是單一 process memory。
 - 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
@@ -133,6 +152,26 @@ JSON/音訊回應大小。
   空值。Worker 只認獨立 opt-in 的 `VOAI_PAID_API_KEY`，避免舊 key 意外產生付費呼叫。
 - 沒有匿名／公開的角色或聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
 
+## 明確未完成／需要產品或營運決策
+
+下列是已知且有意保留的工作，不應被解讀成目前功能已上線：
+
+Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；本表不把本機或 GitHub
+測試結果當成已上線，也不保存容易在下一次交付後失真的「尚未 commit」暫態描述。
+
+| 區域 | 尚未完成 | 完成前的邊界 |
+|---|---|---|
+| Production credential | owner-session 的正式 create／rotate／revoke smoke | 涉及一次性正式 secret 與資料 mutation，須由 owner 明確授權操作 |
+| Public voice catalog | 核准 entry、固定 demo、detail DTO／route、creator publication／revoke workflow | `/voices` shell 已部署但 feature flag 關閉，public API 維持 404 |
+| 商業化／營運 | 申請、subscription、billing、invoice、billing-grade metering、hard quota、admin、usage retention／archive | 現有 best-effort ledger 不作唯一計費／硬額度來源；不顯示假價格、假訂閱或假用量 |
+| 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
+| 前端 runtime regression automation | ConfirmDialog focus trap、Playground stale response／Blob URL lifecycle 的完整 DOM／browser 自動化 | 本輪有 source-level regression tests、獨立 review 與實際 Chrome 核心流程驗證，但 CI 尚未模擬這些焦點與競態時序 |
+| 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
+| BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
+| 角色建立 | 角色基本資料的 AI 補完／全部重寫 | 目前 UI 明示尚未提供；3wa 沒有對應文字生成 mode |
+| 長期有聲書 UX | automatic casting、單片段重生、平行生成、cost logging、loudness normalize、章節／句子／角色同步、播放進度與 resume | 已完成的 private audio player 與 staged narration 不等於這些後續能力 |
+| AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
+
 ## 公開 repository 邊界
 
 提交前必須確認差異中沒有 API key、token、Cookie、真實書籍正文、使用者識別碼、
@@ -143,12 +182,33 @@ JSON/音訊回應大小。
 
 ```bash
 dotnet build StoryVoice.sln --configuration Release
-dotnet test StoryVoice.sln --configuration Release
+dotnet test StoryVoice.sln --configuration Release --no-build
+dotnet ef migrations has-pending-model-changes \
+  --project src/StoryVoice.Infrastructure --startup-project src/StoryVoice.Api \
+  --configuration Release --no-build
+dotnet list StoryVoice.sln package \
+  --vulnerable --include-transitive --no-restore
 python -m unittest discover -s tests/python -v
 
 cd services/bluemagpie-gateway
-python -m pip install -r requirements-test.txt
-python -m pytest
+python -m venv .venv
+.venv/bin/python -m pip install pip==26.2.1
+.venv/bin/python -m pip install -r requirements-test.txt pip-audit==2.10.1
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m compileall -q bluemagpie_gateway tests
+.venv/bin/python -m pip_audit --local --strict
+cd ../..
+
+cd services/local-clone-gateway
+python -m venv .venv
+.venv/bin/python -m pip install pip==26.2.1
+.venv/bin/python -m pip install -r requirements-test.txt pip-audit==2.10.1
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m compileall -q local_clone_gateway tests
+.venv/bin/python -m pip_audit --local --strict
+docker build --tag storyvoice-local-clone-gateway:verify .
 cd ../..
 
 cd src/StoryVoice.Web
@@ -156,7 +216,11 @@ npm ci
 npm test
 npm run lint
 npm run build
+npm audit --audit-level=high
+cd ../..
 
+docker compose config --quiet
+git diff --check
 ```
 
 PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。

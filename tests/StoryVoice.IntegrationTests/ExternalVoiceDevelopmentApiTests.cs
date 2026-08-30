@@ -89,7 +89,48 @@ public sealed class ExternalVoiceDevelopmentApiTests(ApiFactory factory) : IClas
         Assert.Equal(0, fixture.Gateway.Calls);
     }
 
-    private async Task<DevelopmentFixture> CreateFixtureAsync(DevelopmentState state)
+    [Fact]
+    public async Task Unknown_bearer_flood_is_limited_before_managed_credential_authentication()
+    {
+        await using var fixture = await CreateFixtureAsync(
+            DevelopmentState.Active,
+            preAuthenticationRequestsPerMinute: 2,
+            preAuthenticationGlobalRequestsPerMinute: 10);
+        using var client = fixture.Factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var unknownToken = $"svd1.unknown_credential_01.{new string('a', 43)}";
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var unauthorized = await client.SendAsync(
+                CreateSpeechRequest(unknownToken, "pre-authentication guard"),
+                cancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+            Assert.Equal("invalid_api_key", await ReadProblemCodeAsync(unauthorized, cancellationToken));
+        }
+
+        using var limited = await client.SendAsync(
+            CreateSpeechRequest(unknownToken, "pre-authentication guard"),
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.Equal("rate_limited", await ReadProblemCodeAsync(limited, cancellationToken));
+        Assert.True(limited.Headers.CacheControl?.Private);
+        Assert.True(limited.Headers.CacheControl?.NoStore);
+        Assert.Equal("no-cache", string.Join(",", limited.Headers.Pragma.Select(value => value.Name)));
+        Assert.Equal("nosniff", limited.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.InRange(
+            int.Parse(
+                limited.Headers.GetValues("Retry-After").Single(),
+                CultureInfo.InvariantCulture),
+            1,
+            60);
+        Assert.Equal(0, fixture.Gateway.Calls);
+    }
+
+    private async Task<DevelopmentFixture> CreateFixtureAsync(
+        DevelopmentState state,
+        int? preAuthenticationRequestsPerMinute = null,
+        int? preAuthenticationGlobalRequestsPerMinute = null)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var assetRoot = Path.Combine(
@@ -217,6 +258,20 @@ public sealed class ExternalVoiceDevelopmentApiTests(ApiFactory factory) : IClas
             var consumerPrefix = $"ExternalVoiceApi:Consumers:{KeyId}";
             var voicePrefix = $"{consumerPrefix}:AllowedVoices:{Alias}";
             builder.UseSetting("ExternalVoiceApi:Enabled", "true");
+            if (preAuthenticationRequestsPerMinute is not null)
+            {
+                builder.UseSetting(
+                    "ExternalVoiceApi:PreAuthenticationRequestsPerMinute",
+                    preAuthenticationRequestsPerMinute.Value.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (preAuthenticationGlobalRequestsPerMinute is not null)
+            {
+                builder.UseSetting(
+                    "ExternalVoiceApi:PreAuthenticationGlobalRequestsPerMinute",
+                    preAuthenticationGlobalRequestsPerMinute.Value.ToString(CultureInfo.InvariantCulture));
+            }
+
             builder.UseSetting(
                 $"{consumerPrefix}:AccessTier",
                 ExternalVoiceAccessTiers.PrivateDevelopment);

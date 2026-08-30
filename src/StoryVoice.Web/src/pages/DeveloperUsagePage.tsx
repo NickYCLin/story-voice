@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
+import {
+  findDeveloperProjectByReference,
+  normalizeDeveloperProjectReference,
+} from '../developerProjectReference'
 import {
   fetchDeveloperVoiceOverview,
   fetchDeveloperVoiceUsage,
@@ -11,7 +15,7 @@ import type {
   DeveloperVoiceUsageReport,
 } from '../developerVoiceConsole'
 
-type LoadState = 'loading' | 'ready' | 'error'
+type LoadState = 'loading' | 'ready' | 'error' | 'not-found'
 
 const OUTCOME_LABEL: Record<string, string> = {
   succeeded: '成功',
@@ -43,32 +47,82 @@ export function DeveloperUsagePage() {
   const [hours, setHours] = useState(24)
   const [projectId, setProjectId] = useState(requestedProject)
   const [voice, setVoice] = useState('')
+  const [loadedRequestedProject, setLoadedRequestedProject] = useState<string | null>(null)
+  const loadedRequestedProjectRef = useRef<string | null>(null)
+  const requestSequenceRef = useRef(0)
+  const routeTransitioning = loadedRequestedProject !== requestedProject
 
   useEffect(() => {
+    setProjectId(requestedProject)
+    setVoice('')
+  }, [requestedProject])
+
+  useEffect(() => {
+    const requestSequence = requestSequenceRef.current + 1
+    requestSequenceRef.current = requestSequence
     const controller = new AbortController()
     const toUtc = new Date()
     const fromUtc = new Date(toUtc.getTime() - hours * 60 * 60 * 1000)
+    const projectReference = loadedRequestedProjectRef.current !== requestedProject
+      ? requestedProject
+      : projectId
     setState('loading')
-    Promise.all([
-      fetchDeveloperVoiceOverview(controller.signal),
-      fetchDeveloperVoiceUsage({
-        fromUtc: fromUtc.toISOString(),
-        toUtc: toUtc.toISOString(),
-        projectId: projectId || undefined,
-        voice: voice || undefined,
-      }, controller.signal),
-    ])
-      .then(([nextOverview, nextReport]) => {
+    void (async () => {
+      try {
+        const nextOverview = await fetchDeveloperVoiceOverview(controller.signal)
+        if (controller.signal.aborted || requestSequenceRef.current !== requestSequence) return
+        const matchingProject = projectReference
+          ? findDeveloperProjectByReference(nextOverview.projects, projectReference)
+          : undefined
+        if (projectReference && !matchingProject) {
+          setOverview(nextOverview)
+          setReport(null)
+          setVoice('')
+          loadedRequestedProjectRef.current = requestedProject
+          setLoadedRequestedProject(requestedProject)
+          setState('not-found')
+          return
+        }
+
+        const normalizedProjectId = normalizeDeveloperProjectReference(
+          nextOverview.projects,
+          projectReference,
+        )
+        if (normalizedProjectId !== projectId) {
+          setOverview(nextOverview)
+          setReport(null)
+          setProjectId(normalizedProjectId)
+          setVoice('')
+          return
+        }
+
+        const nextReport = await fetchDeveloperVoiceUsage({
+          fromUtc: fromUtc.toISOString(),
+          toUtc: toUtc.toISOString(),
+          projectId: normalizedProjectId || undefined,
+          voice: voice || undefined,
+        }, controller.signal)
+        if (controller.signal.aborted || requestSequenceRef.current !== requestSequence) return
         setOverview(nextOverview)
         setReport(nextReport)
+        loadedRequestedProjectRef.current = requestedProject
+        setLoadedRequestedProject(requestedProject)
         setState('ready')
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        if (controller.signal.aborted || requestSequenceRef.current !== requestSequence) return
+        loadedRequestedProjectRef.current = requestedProject
+        setLoadedRequestedProject(requestedProject)
         setState('error')
-      })
-    return () => controller.abort()
-  }, [hours, projectId, voice])
+      }
+    })()
+    return () => {
+      controller.abort()
+      if (requestSequenceRef.current === requestSequence) {
+        requestSequenceRef.current += 1
+      }
+    }
+  }, [hours, projectId, requestedProject, voice])
 
   const voices = useMemo(() => {
     if (!overview) return []
@@ -81,10 +135,42 @@ export function DeveloperUsagePage() {
 
   const selectedProject = overview?.projects.find((project) =>
     project.projectId === projectId || project.keyId === projectId)
-  const nearestExpiry = overview?.projects
+  const relevantProjects = overview?.projects
     .filter((project) => !projectId || project.projectId === projectId || project.keyId === projectId)
+    ?? []
+  const nearestUpcomingExpiry = relevantProjects
+    .filter((project) => project.status !== 'expired')
     .map((project) => project.expiresAtUtc)
     .sort()[0]
+  const expirySummary = selectedProject?.status === 'expired'
+    ? `${selectedProject.displayName} 已於 ${formatUtc(selectedProject.expiresAtUtc)} 到期。`
+    : nearestUpcomingExpiry
+      ? `最近一個尚未到期的專案將於 ${formatUtc(nearestUpcomingExpiry)} 到期。`
+      : relevantProjects.length > 0
+        ? '目前沒有尚未到期的專案。'
+        : ''
+
+  if (routeTransitioning) {
+    return (
+      <main className="library-state mx-auto my-12 max-w-7xl">
+        <span role="status">{loadedRequestedProject === null ? '正在整理使用量…' : '正在切換 API 專案…'}</span>
+      </main>
+    )
+  }
+
+  if (state === 'not-found') {
+    return (
+      <main className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
+        <div className="library-state min-h-52">
+          <div>
+            <h1 className="font-serif text-2xl text-stone-800">找不到這個 API 專案。</h1>
+            <p className="mt-3 text-sm text-stone-500">專案不存在，或目前登入的帳號沒有檢視權限；未執行全部專案的用量查詢。</p>
+            <Link className="mt-5 inline-flex font-semibold text-amber-800 underline" to="/developer/usage">查看全部專案用量</Link>
+          </div>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
@@ -93,7 +179,7 @@ export function DeveloperUsagePage() {
           <p className="eyebrow">Usage and activity</p>
           <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">用量與活動</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-stone-600">
-            查看通過 API key 驗證後的合成要求。活動紀錄不保存輸入文字、完整金鑰、冪等鍵、參考音檔或逐字稿。
+            查看 external API 與可歸屬到目前 owner／project 的 Playground 合成要求。活動紀錄不保存輸入文字、完整金鑰、冪等鍵、參考音檔或逐字稿；寫入採 best-effort，不能作為計費或 hard quota 的唯一依據。
           </p>
         </div>
         <Link className="font-semibold text-amber-800 underline" to="/developer">返回開發者總覽</Link>
@@ -126,8 +212,8 @@ export function DeveloperUsagePage() {
         </label>
       </section>
 
-      {state === 'loading' && <div className="library-state mt-8">正在整理使用量…</div>}
-      {state === 'error' && <div className="library-state mt-8 border-rose-300 text-rose-700">使用量讀取失敗，請重新整理頁面。</div>}
+      {state === 'loading' && <div className="library-state mt-8" role="status">正在整理使用量…</div>}
+      {state === 'error' && <div className="library-state mt-8 border-rose-300 text-rose-700" role="alert">使用量讀取失敗，請重新整理頁面。</div>}
 
       {state === 'ready' && overview && report && (
         <>
@@ -149,7 +235,7 @@ export function DeveloperUsagePage() {
 
           <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950">
             {selectedProject ? `${selectedProject.displayName}：` : '目前專案：'}每分鐘上限 {overview.requestsPerMinute} 次。
-            {nearestExpiry && <> 最近到期時間為 {formatUtc(nearestExpiry)}。</>}
+            {expirySummary && <> {expirySummary}</>}
           </div>
 
           <section className="mt-10 overflow-hidden rounded-2xl border border-stone-200 bg-white/80">

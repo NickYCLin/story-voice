@@ -19,6 +19,7 @@ using StoryVoice.Api;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Books;
+using StoryVoice.Application.ExternalVoices;
 using StoryVoice.Application.Narrations;
 using StoryVoice.Infrastructure;
 using StoryVoice.Infrastructure.ExternalVoices;
@@ -46,6 +47,15 @@ builder.Services.AddScoped<IBookImportService, BookImportService>();
 builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = CharacterVoiceProfileLimits.MaximumReferenceAudioBytes + 64 * 1024);
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<ExternalVoiceUsageBackgroundQueue>();
+builder.Services.AddSingleton<IExternalVoiceUsageRecorder>(provider =>
+    provider.GetRequiredService<ExternalVoiceUsageBackgroundQueue>());
+builder.Services.AddHostedService(provider =>
+    provider.GetRequiredService<ExternalVoiceUsageBackgroundQueue>());
+builder.Services.AddSingleton<ExternalVoiceRequestRateLimiter>();
+builder.Services.AddSingleton<IExternalVoiceRequestRateLimiter>(provider =>
+    provider.GetRequiredService<ExternalVoiceRequestRateLimiter>());
+builder.Services.AddSingleton<ExternalVoicePreAuthenticationRateLimiter>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 builder.Services.AddAntiforgery(options =>
@@ -125,18 +135,9 @@ builder.Services.AddRateLimiter(options =>
             return RateLimitPartition.GetNoLimiter("unauthenticated");
         }
 
-        var apiOptions = httpContext.RequestServices
-            .GetRequiredService<IOptions<ExternalVoiceApiOptions>>()
-            .Value;
-        return RateLimitPartition.GetFixedWindowLimiter(consumerKeyId, _ =>
-            new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = Math.Max(1, apiOptions.RequestsPerMinute),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                AutoReplenishment = true,
-            });
+        return httpContext.RequestServices
+            .GetRequiredService<ExternalVoiceRequestRateLimiter>()
+            .GetPartition(consumerKeyId);
     });
 });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -201,6 +202,10 @@ if (!string.IsNullOrWhiteSpace(configuredPathBase))
 app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
 app.UseRouting();
+// Reject unauthenticated floods before the bearer handler performs a managed
+// credential database lookup. Forwarded headers have already resolved the
+// trusted client address at this point.
+app.UseMiddleware<ExternalVoicePreAuthenticationRateLimitMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<ExternalVoiceUsageMiddleware>();

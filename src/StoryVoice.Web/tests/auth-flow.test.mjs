@@ -17,6 +17,11 @@ test('StoryVoice 先建立自己的帳號工作階段，再顯示個人書庫', 
   assert.match(authSource, /authenticated/)
 })
 
+test('登入狀態載入與錯誤可由輔助科技辨識', () => {
+  assert.match(appLayoutSource, /authState\.status === 'loading'[\s\S]*role="status"/)
+  assert.match(appLayoutSource, /authState\.status === 'error'[\s\S]*role="alert"/)
+})
+
 test('所有 Cookie 寫入都帶 CSRF，登出會整個卸載私人書庫殼層', () => {
   assert.match(authScreenSource, /X-CSRF-TOKEN/)
   assert.match(authSource, /\/api\/auth\/logout/)
