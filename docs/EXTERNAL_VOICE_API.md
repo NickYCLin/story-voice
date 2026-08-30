@@ -54,10 +54,19 @@ curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE
 | 409 | idempotency_conflict | 同一 key 已綁定不同 request |
 | 413 | request_too_large | body 超過上限 |
 | 415 | unsupported_media_type | 不是 application/json 或帶 Content-Encoding |
-| 429 | rate_limited | consumer 速率／冪等視窗或 GPU 併發限制（皆按 consumer 各自計算），依 Retry-After |
+| 429 | rate_limited | 驗證前來源／全域防濫用額度或 consumer 額度已滿；GPU single-flight 是全服務共用的資源安全閘，依 Retry-After |
 | 503 | synthesis_unavailable | gateway 或合成服務暫時不可用，帶 Retry-After |
 
 失敗的請求不會被冪等快取釘住：收到 429／503 後用同一個 Idempotency-Key 重試會真正重新執行；只有成功的音訊會在 TTL 內以同一 key 重播。
+
+精確的 speech POST 在 bearer authentication 與受管金鑰資料庫查詢前，會先通過一層
+process-local 防濫用閘門：預設每個來源網段 60 次／分鐘、全 process 600 次／分鐘，分別可用
+`ExternalVoiceApi__PreAuthenticationRequestsPerMinute` 與
+`ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute` 調整。來源只採用可信代理鏈已解析的
+remote address；IPv4-mapped IPv6 會歸回 IPv4，native IPv6 以 `/64` 分組，並雜湊到固定 256 個
+bucket，攻擊者輪換地址不會讓記憶體無界增長。這層 429 尚未可靠歸屬 owner／consumer，因此不寫
+usage ledger；通過驗證後，Playground 與 external API 才共同消耗既有 consumer 額度。兩層目前
+皆為單一 process 狀態，多 replica 仍須改用共用協調。
 
 ## 安全產生 credential
 
@@ -223,9 +232,16 @@ Entries 與全部 supporting files；private grant 不能拿來繞過這條鏈�
 5. 緊急停止可設定 voice grant 的 `RevokedAtUtc`、移除 grant／consumer，或關閉 global
    `Enabled`，再確認舊呼叫回 401 或 404。
 
-通過 API key 驗證後的呼叫會寫入 owner-scoped durable usage ledger，保存 server-generated
-request ID、project／credential 識別、已知聲線、HTTP 結果、latency 與 WAV 秒數／bytes；不保存
-輸入文字、token、冪等鍵、reference 或 transcript。owner 可由
+通過 API key 驗證的 external call，以及可可靠歸屬到 owner／project 的 Playground 合成，
+會以 best-effort 寫入 owner-scoped durable usage ledger，保存 server-generated request ID、
+project／credential 識別、已知聲線、HTTP 結果、latency 與 WAV 秒數／bytes；不保存輸入文字、
+token、冪等鍵、reference 或 transcript。request path 只會以非阻塞 `TryEnqueue` 放入單一
+API process 內的 bounded background queue，不持有 request-scoped `DbContext`；背景服務為每筆
+紀錄建立獨立 DI scope 後才寫入資料庫。queue 滿載會直接丟棄該筆紀錄，記 warning 並累加
+`storyvoice.external_voice_usage.dropped` metric；背景寫入失敗會記 error、累加
+`storyvoice.external_voice_usage.persistence_failures`，並繼續處理下一筆。兩者都不等待或取代
+合成回應，因此這份 ledger 不能作為 billing／hard quota 的唯一依據。queue 預設容量為 1024，
+可用 `ExternalVoiceApi__UsageLedgerQueueCapacity` 調整為 1 至 10000。owner 可由
 `GET /api/developer/external-voice/usage` 或 `/developer/usage` 查詢最多 90 天的使用量。
 
 目前 rate limit、single-flight 與 idempotency cache 仍是單一 API process 內的有界狀態，

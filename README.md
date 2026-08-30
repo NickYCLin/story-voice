@@ -74,7 +74,9 @@ multi-speaker narration and supports self-hosted or pluggable speech-synthesis p
 - 書冊（獨立於角色配音系列之外的單純書本分類收藏）與冊次排序
 - 書庫分類統一使用書冊；舊的瀏覽器「此裝置標籤」已移除
 - 書冊唯讀分享：依 email 分享給其他已註冊使用者，可隨時撤銷
-- React Router 多頁面前端（書庫／書冊／分享給我的），取代原本的單頁式版面
+- React Router 多頁面前端（書庫／書冊／角色／系列配音／分享／開發者控制台／公開聲線 shell），取代原本的單頁式版面；未知 route 有明確 404 畫面
+- 登入後的 external voice developer portal：總覽、專案詳情、受管 credential、Playground、durable usage 與近 24 小時摘要；瀏覽器不持有 external bearer
+- `/voices` 公開聲線 shell 與安全的 disabled／empty 狀態；catalog 預設關閉且 repository 不含公開 entry 或固定 demo
 - Serilog, OpenAPI, liveness/readiness health checks
 - Docker Compose development stack
 - Unit and integration tests + GitHub Actions CI
@@ -183,13 +185,18 @@ The external API does not enable browser preview and does not change formal narr
 active audiobooks.
 Provisioning, request/idempotency rules, stable errors, activation, and credential
 rotation are documented in [`docs/EXTERNAL_VOICE_API.md`](docs/EXTERNAL_VOICE_API.md).
-Authenticated calls also feed an owner-scoped durable usage ledger and the
-`/developer/usage` dashboard without retaining request text, bearer tokens, idempotency
-keys, reference audio or transcripts. Rate limiting and idempotency coordination remain
+Eligible calls are placed without waiting into a bounded background queue for an owner-scoped
+durable usage ledger and the `/developer/usage` dashboard, without retaining request text,
+bearer tokens, idempotency keys, reference audio or transcripts. Queue saturation or a ledger
+persistence failure is logged and metered but does not replace or delay a synthesis response,
+so this ledger is not the sole source for billing or hard quota enforcement. Before bearer
+authentication can query managed credentials, a bounded source/global anti-abuse limiter also
+protects the database; authenticated consumer rate limiting and idempotency coordination remain
 single-process until the documented multi-replica work is completed.
 Signed-in owners can also use `/developer/playground`. It calls a CSRF-protected,
 same-origin backend-for-frontend, so the browser never receives an external bearer;
-successful and failed attempts use the same safe usage ledger.
+successful requests and failures that can be reliably attributed to an owner/project use the
+same best-effort safe usage ledger. Malformed or unknown project references do not create misleading records.
 The unified source/publication contract is documented in
 [`docs/VOICE_PUBLICATION_GRANT.md`](docs/VOICE_PUBLICATION_GRANT.md).
 
@@ -250,17 +257,15 @@ GET  /api/books
 GET  /api/books/{id}
 ```
 
-Import a UTF-8 TXT or DRM-free EPUB book (10 MiB maximum):
-
-```bash
-curl -X POST \
-  'http://localhost:8080/api/books/import?author=StoryVoice&language=zh-TW' \
-  -F 'file=@./story.txt;type=text/plain'
-
-curl -X POST \
-  'http://localhost:8080/api/books/import' \
-  -F 'file=@./story.epub;type=application/epub+zip'
-```
+Import a UTF-8 TXT or DRM-free EPUB book (10 MiB maximum) from the authenticated
+`/library` UI. Book uploads and other mutations require both the `StoryVoice.Auth` session
+cookie and the anti-forgery cookie/header pair (read-only book routes require the session), so an unauthenticated one-line `curl` upload
+will correctly return `401`. A non-browser client must first `GET /api/auth/session` and
+preserve the anonymous cookie jar plus returned CSRF token; send that token in
+`X-CSRF-TOKEN` when calling `/api/auth/login` (or `/api/auth/register`), then fetch
+`/api/auth/session` again to refresh the authenticated session and current CSRF token
+before uploading. Never paste session cookies or tokens into documentation, shell history,
+or logs.
 
 ### Book collections (書冊)
 
@@ -348,6 +353,11 @@ tests/
 ```
 
 ## Roadmap
+
+This is the long-term product direction, not a claim that every item is already
+available. See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for the verified
+current surface and [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) for the remaining
+item-level checklist.
 
 1. **Book Import** — DRM-free EPUB / UTF-8 TXT upload、TOC and chapter extraction
 2. **Story Analyzer** — narrator, dialogue, speaker, emotion and confidence

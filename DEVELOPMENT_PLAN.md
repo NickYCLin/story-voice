@@ -2,11 +2,15 @@
 
 > AI Story Director — 將電子書轉換成具有角色、旁白、情緒與多聲線演出的 AI 有聲書。
 
+> 文件定位（2026-08-30）：本文件是產品願景與長期工作分解，不是發佈狀態頁。
+> 下方 Phase 核取方塊已依目前 repository 校正；production 狀態、已驗證範圍與刻意保留的限制
+> 請以 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) 為準。
+
 ---
 
 ## 1. 專案目標
 
-StoryVoice 的目標不是單純把 EPUB / PDF / TXT 轉成語音，而是讓 AI 先理解故事內容，再將小說轉換成可供語音合成的「演出劇本」。
+StoryVoice 的目標不是單純把電子書轉成語音，而是讓 AI 先理解故事內容，再將小說轉換成可供語音合成的「演出劇本」。目前支援 EPUB／TXT；PDF、DOCX、MOBI 與 AZW3 仍是未來格式。
 
 系統需要能夠：
 
@@ -91,7 +95,7 @@ Text To Speech
 
 - DRM 破解
 - Kindle / Kobo DRM 解鎖
-- Voice Clone
+- Voice Clone（原始 MVP 不含；後續已加入受限的私人 Clone 流程，仍不等於公開產品）
 - 自動 BGM
 - 自動 Foley 音效
 - 多人協作
@@ -1313,9 +1317,9 @@ Users are responsible for ensuring they have the rights to process uploaded cont
 開發環境：
 
 ```text
-talespeak-api
-talespeak-web
-talespeak-worker
+api
+web
+worker
 postgres
 redis
 ```
@@ -1324,19 +1328,19 @@ redis
 
 # 34. Phase 1 — Project Foundation
 
-Codex 先完成：
+目前已完成：
 
-- [ ] 建立 .NET Solution
-- [ ] 建立 Domain / Application / Infrastructure / API / Worker
-- [ ] 建立 React Frontend
-- [ ] PostgreSQL
-- [ ] EF Core
-- [ ] Docker Compose
-- [ ] Serilog
-- [ ] Swagger
-- [ ] Health Check
-- [ ] Migration
-- [ ] Base Exception Handling
+- [x] 建立 .NET Solution
+- [x] 建立 Domain / Application / Infrastructure / API / Worker
+- [x] 建立 React Frontend
+- [x] PostgreSQL
+- [x] EF Core
+- [x] Docker Compose
+- [x] Serilog
+- [x] ASP.NET Core OpenAPI document
+- [x] Health Check
+- [x] Migration
+- [x] Base Exception Handling
 
 完成後：
 
@@ -1379,17 +1383,17 @@ Acceptance Criteria：
 
 # 36. Phase 3 — Story Analyzer
 
-- [ ] LLM Provider Interface
+- [x] 本機 LLM Provider Interface
 - [ ] OpenAI-compatible Provider
-- [ ] Chunking
-- [ ] StorySegment Entity
-- [ ] Narrator Detection
-- [ ] Dialogue Detection
-- [ ] Speaker Detection
-- [ ] Emotion Detection
-- [ ] Structured JSON Output
-- [ ] Confidence Score
-- [ ] Chapter Editor UI
+- [x] Deterministic speech segmentation（不是通用 LLM chunking）
+- [x] Draft／confirmed speech-plan segment model
+- [x] Narrator Detection
+- [x] Dialogue Detection
+- [x] Speaker Detection（規則優先、本機 LLM 補判）
+- [x] 合成階段的受限規則式情緒分類（不宣稱通用情感分析）
+- [x] Structured JSON Output
+- [x] Confidence Score
+- [x] Speech-plan review UI
 
 Acceptance Criteria：
 
@@ -1414,15 +1418,15 @@ Acceptance Criteria：
 
 # 37. Phase 4 — Character Bible
 
-- [ ] Character Entity
-- [ ] Character Alias
-- [ ] Character Extraction
-- [ ] Character Merge
-- [ ] Character Detail
-- [ ] Character Manager UI
-- [ ] Manual Merge
-- [ ] Manual Rename
-- [ ] Character Voice Binding
+- [x] Character Entity
+- [x] Character Alias
+- [x] Character Extraction
+- [x] Character Merge
+- [x] Character Detail
+- [x] Character Manager UI
+- [x] Manual Merge
+- [x] Manual Rename
+- [x] Character Voice Binding
 
 Acceptance Criteria：
 
@@ -1440,13 +1444,13 @@ AI 能合理判斷是否同一角色。
 
 # 38. Phase 5 — Voice Casting
 
-- [ ] VoiceProfile Entity
-- [ ] TTS Provider Interface
-- [ ] Voice Listing
-- [ ] Voice Sample
+- [x] VoiceProfile Entity
+- [x] TTS Provider Interface／registry
+- [x] Voice Listing
+- [x] Voice Sample
 - [ ] Automatic Casting
-- [ ] Manual Casting
-- [ ] Character Voice Lock
+- [x] Manual Casting
+- [x] Character Voice Lock（不可變 cast revision）
 
 Acceptance Criteria：
 
@@ -1464,10 +1468,10 @@ Chapter 50
 
 # 39. Phase 6 — TTS
 
-- [ ] TTS Queue
-- [ ] Segment Audio
-- [ ] Audio Cache
-- [ ] Retry
+- [x] TTS Queue
+- [x] Segment Audio
+- [x] Audio Cache（BlueMagpie durable chunk cache）
+- [x] Retry
 - [ ] Regenerate Segment
 - [ ] Parallel Generation
 - [ ] Cost Logging
@@ -1486,12 +1490,12 @@ Regenerate
 
 # 40. Phase 7 — Audio Composer
 
-- [ ] FFmpeg Integration
-- [ ] Silence
+- [x] FFmpeg Integration
+- [x] Silence／speaker and chapter pauses
 - [ ] Volume Normalize
-- [ ] MP3 Output
-- [ ] Chapter Audio
-- [ ] Duration
+- [x] MP3 Output
+- [x] Book／series narration audio composition
+- [x] Duration validation
 
 Acceptance Criteria：
 
@@ -1505,12 +1509,12 @@ chapter_001.mp3
 
 # 41. Phase 8 — Player
 
-- [ ] Audio Player
+- [x] Private HTML audio player
 - [ ] Chapter List
 - [ ] Current Sentence
 - [ ] Current Character
-- [ ] Seek
-- [ ] Speed
+- [x] Seek（browser native control）
+- [ ] 明確的播放倍速控制（目前 `<audio controls>` 是否顯示倍速由瀏覽器決定，不視為產品能力）
 - [ ] Listening Progress
 - [ ] Resume
 
@@ -1518,14 +1522,14 @@ chapter_001.mp3
 
 # 42. Phase 9 — AI Director
 
-MVP 穩定後加入。
+目前只有合成參數與受限的規則式情緒差值；完整導演語意仍是後續工作。
 
-- [ ] Tone
-- [ ] Speed
-- [ ] Pause
-- [ ] Volume
+- [x] Tone／pitch parameter
+- [x] Speed／rate parameter
+- [x] Pause parameter
+- [x] Volume parameter
 - [ ] Whisper
-- [ ] Emotional Context
+- [x] 受限規則式 Emotional Context（Edge only）
 - [ ] Dialogue Scene Context
 
 ---
@@ -1677,9 +1681,9 @@ Player
 
 ---
 
-# 47. Codex 第一個任務
+# 47. 歷史上的第一個 Codex 任務（已完成）
 
-請 Codex 不要一次開發整個系統。
+以下保留最初的 bootstrap 任務作為歷史紀錄；目前 Foundation 與其後多個 Phase 均已實作，不能把這段當成待辦。
 
 第一個 Task：
 
@@ -1692,7 +1696,7 @@ Backend:
 - PostgreSQL
 - EF Core
 - Serilog
-- Swagger
+- OpenAPI document
 - Health Checks
 
 Projects:
@@ -1726,7 +1730,7 @@ The application must run using:
 docker compose up
 ```
 
-完成 Foundation 後，再依 Phase 2 ~ Phase 10 開發。
+Foundation 已完成；目前缺口已直接標在上述 Phase 2～10 清單，並由 `docs/PROJECT_STATUS.md` 記錄驗證邊界。
 
 ---
 
