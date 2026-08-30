@@ -12,6 +12,7 @@ import { DeveloperProjectPage } from './pages/DeveloperProjectPage'
 import { DeveloperUsagePage } from './pages/DeveloperUsagePage'
 import { LandingPage } from './pages/LandingPage'
 import { LibraryPage } from './pages/LibraryPage'
+import { NotFoundPage } from './pages/NotFoundPage'
 import { PublicVoicesPage } from './pages/PublicVoicesPage'
 import { SharedCollectionPage } from './pages/SharedCollectionPage'
 import { SharedWithMePage } from './pages/SharedWithMePage'
@@ -38,6 +39,7 @@ function App() {
         <Route element={<SeriesCastPanel />} path="/series" />
         <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
       </Route>
+      <Route element={<NotFoundPage />} path="*" />
     </Routes>
   )
 }

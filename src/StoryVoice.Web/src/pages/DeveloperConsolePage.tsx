@@ -73,8 +73,8 @@ export function DeveloperConsolePage() {
         </p>
       </div>
 
-      {state === 'loading' && <div className="library-state">正在讀取 API 接用總覽…</div>}
-      {state === 'error' && <div className="library-state border-rose-300 text-rose-700">接用總覽讀取失敗，請重新整理頁面。</div>}
+      {state === 'loading' && <div className="library-state" role="status">正在讀取 API 接用總覽…</div>}
+      {state === 'error' && <div className="library-state border-rose-300 text-rose-700" role="alert">接用總覽讀取失敗，請重新整理頁面。</div>}
 
       {state === 'ready' && overview && (
         <>
@@ -96,10 +96,10 @@ export function DeveloperConsolePage() {
             </div>
 
             {usageState === 'loading' && (
-              <div className="library-state min-h-28">正在整理最近用量…</div>
+              <div className="library-state min-h-28" role="status">正在整理最近用量…</div>
             )}
             {usageState === 'error' && (
-              <div className="library-state min-h-28 border-amber-300 text-amber-800">
+              <div className="library-state min-h-28 border-amber-300 text-amber-800" role="alert">
                 最近用量暫時無法讀取，不影響下方專案與金鑰操作。
               </div>
             )}
@@ -163,7 +163,7 @@ export function DeveloperConsolePage() {
                       <dd><code className="text-xs">{project.tokenPrefix}{project.keyId}.…</code></dd>
                     </div>
                     <div>
-                      <dt className="text-xs text-stone-400">生效時間（UTC 起算）</dt>
+                      <dt className="text-xs text-stone-400">生效時間</dt>
                       <dd>{formatUtc(project.effectiveAtUtc)}</dd>
                     </div>
                     <div>

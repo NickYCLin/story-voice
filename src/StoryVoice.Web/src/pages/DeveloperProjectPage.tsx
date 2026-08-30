@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import {
@@ -36,32 +36,51 @@ const remainingLabel = (expiresAtUtc: string) => {
 export function DeveloperProjectPage() {
   const { projectId = '' } = useParams()
   const [state, setState] = useState<PageState>({ status: 'loading' })
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null)
+  const requestSequenceRef = useRef(0)
+  const routeTransitioning = loadedProjectId !== projectId
 
   useEffect(() => {
+    const requestSequence = requestSequenceRef.current + 1
+    requestSequenceRef.current = requestSequence
     const controller = new AbortController()
+    setState({ status: 'loading' })
     fetchDeveloperVoiceOverview(controller.signal)
       .then((overview) => {
+        if (controller.signal.aborted || requestSequenceRef.current !== requestSequence) return
         const project = overview.projects.find((candidate) =>
           candidate.projectId === projectId || candidate.keyId === projectId)
         setState(project
           ? { status: 'ready', overview, project }
           : { status: 'not-found' })
+        setLoadedProjectId(projectId)
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        if (controller.signal.aborted || requestSequenceRef.current !== requestSequence) return
         setState({ status: 'error' })
+        setLoadedProjectId(projectId)
       })
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      if (requestSequenceRef.current === requestSequence) {
+        requestSequenceRef.current += 1
+      }
+    }
   }, [projectId])
 
-  if (state.status === 'loading') {
-    return <main className="library-state mx-auto my-12 max-w-7xl">正在讀取專案詳情…</main>
+  if (routeTransitioning || state.status === 'loading') {
+    return (
+      <main className="library-state mx-auto my-12 max-w-7xl">
+        <span role="status">{loadedProjectId === null ? '正在讀取專案詳情…' : '正在切換 API 專案…'}</span>
+      </main>
+    )
   }
 
   if (state.status === 'error') {
     return (
       <main className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
-        <div className="library-state border-rose-300 text-rose-700">專案詳情讀取失敗，請重新整理頁面。</div>
+        <div className="library-state border-rose-300 text-rose-700" role="alert">專案詳情讀取失敗，請重新整理頁面。</div>
       </main>
     )
   }
@@ -161,7 +180,7 @@ export function DeveloperProjectPage() {
             <h2 className="font-serif text-2xl text-stone-900" id="credential-heading">Credential 摘要</h2>
             <p className="mt-4 text-xs text-stone-400">金鑰識別</p>
             <code className="mt-1 block break-all text-sm text-stone-800">{credentialLabel}</code>
-            <p className="mt-4 text-xs text-stone-400">最近使用</p>
+            <p className="mt-4 text-xs text-stone-400">用量與活動</p>
             <Link
               className="mt-1 inline-flex text-sm font-semibold text-amber-800 underline"
               to={`/developer/usage?project=${encodeURIComponent(project.projectId || project.keyId)}`}

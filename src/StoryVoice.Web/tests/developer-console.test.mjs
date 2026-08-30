@@ -57,6 +57,16 @@ test('總覽顯示真實的最近 24 小時成功、失敗、429 與耗時', () 
   assert.match(page, /\['平均耗時'/)
 })
 
+test('開發者時間顯示包含時區，不把瀏覽器本地時間誤標為 UTC', () => {
+  assert.match(shared, /timeZoneName: 'short'/)
+  assert.doesNotMatch(page, /UTC 起算/)
+})
+
+test('總覽與最近用量的載入、錯誤狀態可由輔助科技辨識', () => {
+  assert.ok((page.match(/role="status"/g) ?? []).length >= 2)
+  assert.ok((page.match(/role="alert"/g) ?? []).length >= 2)
+})
+
 test('最近用量讀取失敗時不會把專案總覽一起切成錯誤狀態', () => {
   const usageRequest = page.slice(page.indexOf('fetchDeveloperVoiceUsage({'), page.indexOf('return () => controller.abort()'))
   assert.match(usageRequest, /setUsageState\('error'\)/)

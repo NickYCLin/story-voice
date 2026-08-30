@@ -75,7 +75,7 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
     <details className="status-matrix">
       <summary>
         <span>全部書籍處理狀態矩陣</span>
-        <span className="status-matrix-count">{items.length} 本</span>
+        <span className="status-matrix-count">{loading && items.length === 0 ? '讀取中…' : `${items.length} 本`}</span>
       </summary>
       <div className="status-matrix-toolbar">
         <p>
@@ -85,7 +85,10 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
           {loading ? '更新中…' : '重新整理狀態'}
         </button>
       </div>
-      {error && <p className="px-1 text-xs text-rose-600">{error}</p>}
+      {error && <p className="px-1 text-xs text-rose-600" role="alert">{error}</p>}
+      {loading && items.length === 0 && (
+        <p className="library-state" role="status">正在讀取全部書籍的處理狀態…</p>
+      )}
       {!loading && !error && items.length === 0 && (
         <p className="library-state">目前沒有可顯示的書籍。</p>
       )}
@@ -99,12 +102,12 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
             <div className="status-matrix-facts">
               <span>{item.officialReaderAvailable ? '官方閱讀器：有' : '官方閱讀器：無'}</span>
               <span>{officialTtsLabel(item.officialTtsAvailable)}</span>
-              <span>{item.authorizedTextAvailable ? '合法正文：已連結' : '合法正文：未提供'}</span>
+              <span>{item.authorizedTextAvailable ? '可處理正文：已就緒' : '可處理正文：未提供'}</span>
               <span>你的筆記：{item.readingNoteCount} 則</span>
               <span>{narrationLabel(item)}</span>
             </div>
             {item.blockedReason === 'authorized_text_required' && (
-              <p className="status-matrix-blocked">Blocked：需由你明確上傳並連結合法、無 DRM 的 EPUB／TXT 正文。</p>
+              <p className="status-matrix-blocked">等待正文：這筆書籍資料沒有可處理內容；請匯入合法、無 DRM 的 EPUB／TXT，新匯入的書會直接可用。</p>
             )}
             {item.blockedReason === 'narration_failed' && (
               <p className="status-matrix-blocked">Blocked：最近一次 StoryVoice 音訊產製失敗，可在書籍詳情重新建立。</p>

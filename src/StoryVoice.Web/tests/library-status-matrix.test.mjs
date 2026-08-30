@@ -12,14 +12,18 @@ test('library status matrix separates source capabilities from StoryVoice proces
   assert.match(matrix, /storyVoiceNarrationMatchesAuthorizedText/)
   assert.match(matrix, /既有 StoryVoice 音訊（非目前合法正文）/)
   assert.doesNotMatch(matrix, /if \(!status\.authorizedTextAvailable\) return/)
-  assert.match(matrix, /合法正文：未提供/)
+  assert.match(matrix, /可處理正文：已就緒/)
+  assert.match(matrix, /可處理正文：未提供/)
   assert.doesNotMatch(matrix, /擷取式摘要/)
   assert.match(matrix, /你的筆記/)
   assert.match(matrix, /authorized_text_required/)
-  assert.match(matrix, /Blocked：需由你明確上傳並連結合法、無 DRM 的 EPUB／TXT 正文/)
+  assert.match(matrix, /等待正文：這筆書籍資料沒有可處理內容/)
+  assert.doesNotMatch(matrix, /上傳並連結/)
+  assert.match(matrix, /正在讀取全部書籍的處理狀態/)
+  assert.match(matrix, /role="status"/)
 })
 
-test('authenticated library renders the matrix and refreshes after explicit content link changes', () => {
+test('authenticated library renders the matrix and refreshes when imported-book identity changes', () => {
   assert.match(app, /<LibraryStatusMatrix/)
   assert.match(app, /book\.contentBookId/)
 })

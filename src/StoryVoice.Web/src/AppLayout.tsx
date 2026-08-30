@@ -13,11 +13,11 @@ export function AppLayout() {
   const { authState, loadAuthSession, logout } = useAuthSession()
 
   if (authState.status === 'loading') {
-    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] text-stone-500">正在確認 StoryVoice 登入狀態…</main>
+    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] text-stone-500"><span role="status">正在確認 StoryVoice 登入狀態…</span></main>
   }
 
   if (authState.status === 'error') {
-    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] px-6 text-center text-rose-700">無法連接登入服務，請重新整理頁面。</main>
+    return <main className="grid min-h-screen place-items-center bg-[#faf6ee] px-6 text-center text-rose-700"><span role="alert">無法連接登入服務，請重新整理頁面。</span></main>
   }
 
   if (authState.status === 'anonymous') {
@@ -45,6 +45,7 @@ export function AppLayout() {
           <NavLink className={navLinkClassName} to="/library">書庫</NavLink>
           <NavLink className={navLinkClassName} to="/collections">書冊</NavLink>
           <NavLink className={navLinkClassName} to="/characters">角色管理</NavLink>
+          <NavLink className={navLinkClassName} to="/series">系列配音</NavLink>
           <NavLink className={navLinkClassName} to="/voices">公開聲線</NavLink>
           <NavLink className={navLinkClassName} to="/developers/docs">API 文件</NavLink>
           <NavLink className={navLinkClassName} to="/developer">開發者</NavLink>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import type { BookDetails } from './types'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -82,6 +83,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
   const [applyState, setApplyState] = useState<LoadState>('idle')
   const [applyMessage, setApplyMessage] = useState('')
+  const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState<string | null>(null)
 
   const canAnalyzeText = book.authorizedTextAvailable
   const selectedSeries = seriesOptions.find((series) => series.id === selectedSeriesId)
@@ -104,6 +106,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
     setCandidateDrafts({})
     setApplyState('idle')
     setApplyMessage('')
+    setPendingDeleteNoteId(null)
 
     fetch(apiUrl(`/api/books/${book.id}/character-analysis`), {
       credentials: 'same-origin',
@@ -291,7 +294,6 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
   }
 
   async function handleDeleteNote(noteId: string) {
-    if (!window.confirm('確定刪除這則閱讀筆記？')) return
     setNotesState('loading')
     try {
       const response = await fetch(apiUrl(`/api/books/${book.id}/notes/${noteId}`), {
@@ -379,7 +381,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
                 <p className="whitespace-pre-wrap text-sm leading-7 text-stone-600">{note.body}</p>
                 <div className="mt-3 flex items-center justify-between gap-3 text-[10px] text-stone-400">
                   <time dateTime={note.updatedAt}>{new Date(note.updatedAt).toLocaleString('zh-TW')}</time>
-                  <button className="text-rose-500 transition hover:text-rose-700" onClick={() => handleDeleteNote(note.id)} type="button">刪除</button>
+                  <button className="text-rose-500 transition hover:text-rose-700" onClick={() => setPendingDeleteNoteId(note.id)} type="button">刪除</button>
                 </div>
               </li>
             ))}
@@ -388,6 +390,18 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
         {notesState === 'ready' && notes.length === 0 && <p className="mt-4 text-xs text-stone-400">尚未建立閱讀筆記。</p>}
         <p className={`mt-3 min-h-5 text-xs ${notesState === 'error' ? 'text-rose-600' : 'text-stone-500'}`} role="status">{notesState === 'loading' && !noteMessage ? '正在讀取筆記…' : noteMessage}</p>
       </section>
+      <ConfirmDialog
+        confirmLabel="刪除筆記"
+        description="刪除後無法復原。"
+        onCancel={() => setPendingDeleteNoteId(null)}
+        onConfirm={() => {
+          const noteId = pendingDeleteNoteId
+          setPendingDeleteNoteId(null)
+          if (noteId) void handleDeleteNote(noteId)
+        }}
+        open={pendingDeleteNoteId !== null}
+        title="確定刪除這則閱讀筆記？"
+      />
     </div>
   )
 }

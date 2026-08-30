@@ -390,7 +390,7 @@ internal sealed class BookInsightsService(
         if (!AuthorizedTextPolicy.IsProcessable(book))
         {
             throw new BookTextUnavailableException(
-                "這本書目前沒有可處理的合法正文；請先上傳你合法持有、無 DRM 的 EPUB 或 TXT，並明確連結後再使用正文功能。");
+                "這本書目前沒有可處理的合法正文；請先匯入你合法持有、無 DRM 的 EPUB 或 TXT，再從匯入後的書籍使用正文功能。");
         }
     }
 

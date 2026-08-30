@@ -3,6 +3,11 @@ import type { FormEvent } from 'react'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 
 import type { AuthedOutletContext } from '../authOutletContext'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import {
+  canonicalDeveloperProjectReference,
+  findDeveloperProjectByReference,
+} from '../developerProjectReference'
 import {
   CREDENTIAL_STATUS_LABEL,
   createDeveloperVoiceCredential,
@@ -21,6 +26,10 @@ import type {
 } from '../developerVoiceConsole'
 
 type LoadState = 'loading' | 'ready' | 'error'
+type PendingCredentialAction = {
+  kind: 'rotate' | 'revoke'
+  credential: DeveloperVoiceCredentialSummary
+}
 
 const AUDIT_LABEL: Record<DeveloperVoiceCredentialAuditSummary['action'], string> = {
   created: '建立金鑰',
@@ -42,8 +51,13 @@ export function DeveloperCredentialsPage() {
   const [issued, setIssued] = useState<IssuedDeveloperVoiceCredential | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pendingAction, setPendingAction] = useState<PendingCredentialAction | null>(null)
+  const [loadedRequestedProject, setLoadedRequestedProject] = useState<string | null>(null)
+  const routeTransitioning = loadedRequestedProject !== requestedProject
 
   useEffect(() => {
+    setState('loading')
+    setPendingAction(null)
     const controller = new AbortController()
     Promise.all([
       fetchDeveloperVoiceOverview(controller.signal),
@@ -51,19 +65,21 @@ export function DeveloperCredentialsPage() {
       fetchDeveloperVoiceCredentialAudit(controller.signal),
     ])
       .then(([nextOverview, nextCredentials, nextAudit]) => {
+        if (controller.signal.aborted) return
         setOverview(nextOverview)
         setCredentials(nextCredentials.credentials)
         setAudit(nextAudit)
-        const canUseRequested = nextOverview.projects.some((project) =>
-          project.projectId === requestedProject || project.keyId === requestedProject)
-        if (!canUseRequested) {
-          const firstAvailable = nextOverview.projects.find((project) => project.status !== 'expired')
-          setProjectId(firstAvailable?.projectId || firstAvailable?.keyId || '')
-        }
+        const requested = findDeveloperProjectByReference(nextOverview.projects, requestedProject)
+        const firstAvailable = nextOverview.projects.find((project) => project.status !== 'expired')
+        const selected = requested && requested.status !== 'expired' ? requested : firstAvailable
+        setProjectId(selected ? canonicalDeveloperProjectReference(selected) : '')
+        setLoadedRequestedProject(requestedProject)
         setState('ready')
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        if (controller.signal.aborted) return
+        setLoadedRequestedProject(requestedProject)
         setState('error')
       })
     return () => controller.abort()
@@ -78,15 +94,41 @@ export function DeveloperCredentialsPage() {
     setAudit(nextAudit)
   }
 
+  async function refreshAfterMutation(successMessage: string) {
+    setMessage(successMessage)
+    try {
+      await refresh()
+    } catch {
+      setMessage(`${successMessage} 但金鑰清單與異動紀錄重新整理失敗；畫面內容可能仍是舊資料，請稍後重新載入頁面。`)
+    }
+  }
+
   async function createCredential(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (routeTransitioning || state !== 'ready') {
+      setMessage('正在切換 API 專案，請等資料更新完成後再操作。')
+      return
+    }
+    if (pendingAction) return
+    if (issued) {
+      setMessage('請先保存並關閉目前的一次性金鑰，再建立另一組金鑰。')
+      return
+    }
+    if (!overview?.serviceEnabled) {
+      setMessage('語音 API 目前未啟用，無法建立金鑰。')
+      return
+    }
+    const selectedProject = findDeveloperProjectByReference(overview.projects, projectId)
+    if (!selectedProject || selectedProject.status === 'expired') {
+      setMessage('請選擇尚未到期的 API 專案。')
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
       const nextIssued = await createDeveloperVoiceCredential(projectId, name, csrfToken)
       setIssued(nextIssued)
-      setMessage('金鑰已建立；完整 secret 關閉後不會再次顯示。')
-      await refresh()
+      await refreshAfterMutation('金鑰已建立；完整 secret 關閉後不會再次顯示。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '金鑰建立失敗。')
     } finally {
@@ -95,7 +137,19 @@ export function DeveloperCredentialsPage() {
   }
 
   async function rotateCredential(credential: DeveloperVoiceCredentialSummary) {
-    if (!credential.id || !window.confirm(`確定換發「${credential.name}」？`)) return
+    if (!credential.id) return
+    if (routeTransitioning || state !== 'ready') {
+      setMessage('正在切換 API 專案，請等資料更新完成後再操作。')
+      return
+    }
+    if (issued) {
+      setMessage('請先保存並關閉目前的一次性金鑰，再換發另一組金鑰。')
+      return
+    }
+    if (!overview?.serviceEnabled) {
+      setMessage('語音 API 目前未啟用，無法換發金鑰；現有受管金鑰仍可撤銷。')
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
@@ -105,8 +159,7 @@ export function DeveloperCredentialsPage() {
         csrfToken,
       )
       setIssued(nextIssued)
-      setMessage(`新金鑰已建立；舊金鑰將在 ${overlapMinutes} 分鐘後撤銷。`)
-      await refresh()
+      await refreshAfterMutation(`新金鑰已建立；舊金鑰將在 ${overlapMinutes} 分鐘後撤銷。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '金鑰換發失敗。')
     } finally {
@@ -115,13 +168,16 @@ export function DeveloperCredentialsPage() {
   }
 
   async function revokeCredential(credential: DeveloperVoiceCredentialSummary) {
-    if (!credential.id || !window.confirm(`確定立即撤銷「${credential.name}」？這個動作無法復原。`)) return
+    if (!credential.id) return
+    if (routeTransitioning || state !== 'ready') {
+      setMessage('正在切換 API 專案，請等資料更新完成後再操作。')
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
       await revokeDeveloperVoiceCredential(credential.id, csrfToken)
-      setMessage('金鑰已撤銷。')
-      await refresh()
+      await refreshAfterMutation('金鑰已撤銷。')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '金鑰撤銷失敗。')
     } finally {
@@ -129,10 +185,25 @@ export function DeveloperCredentialsPage() {
     }
   }
 
+  function confirmPendingAction() {
+    const action = pendingAction
+    setPendingAction(null)
+    if (!action) return
+    if (action.kind === 'rotate') {
+      void rotateCredential(action.credential)
+    } else {
+      void revokeCredential(action.credential)
+    }
+  }
+
   async function copyIssuedToken() {
     if (!issued) return
-    await navigator.clipboard.writeText(issued.accessToken)
-    setMessage('完整金鑰已複製；請保存到伺服器端 secret store。')
+    try {
+      await navigator.clipboard.writeText(issued.accessToken)
+      setMessage('完整金鑰已複製；請保存到伺服器端 secret store。')
+    } catch {
+      setMessage('瀏覽器無法自動複製；請手動選取上方完整金鑰，或下載 .env。')
+    }
   }
 
   function downloadEnv() {
@@ -148,12 +219,49 @@ export function DeveloperCredentialsPage() {
     URL.revokeObjectURL(objectUrl)
   }
 
-  if (state === 'loading') {
-    return <main className="library-state mx-auto my-12 max-w-7xl">正在讀取 API 金鑰…</main>
+  const selectedProject = overview
+    ? findDeveloperProjectByReference(overview.projects, projectId)
+    : undefined
+  const issuableProjects = overview?.projects.filter((project) => project.status !== 'expired') ?? []
+  const issuedCredentialPanel = issued && (
+    <section aria-label="一次性金鑰" className="mt-6 rounded-2xl border-2 border-amber-400 bg-white p-6 shadow-lg">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="eyebrow">只顯示這一次</p>
+          <h2 className="mt-2 font-serif text-2xl text-stone-900">立即保存完整金鑰</h2>
+          <p className="mt-2 text-sm text-rose-700">關閉後無法重新查看；遺失時只能換發。</p>
+          <p className="mt-2 text-xs leading-5 text-stone-500">保存並關閉這組金鑰前，建立與換發功能會暫停，避免完整 secret 被下一組金鑰取代。</p>
+        </div>
+        <button className="secondary-button" onClick={() => setIssued(null)} type="button">我已保存，關閉</button>
+      </div>
+      <code className="mt-5 block break-all rounded-xl bg-stone-950 p-4 text-sm text-amber-100">{issued.accessToken}</code>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button className="primary-button" onClick={() => void copyIssuedToken()} type="button">複製完整金鑰</button>
+        <button className="secondary-button" onClick={downloadEnv} type="button">下載 .env</button>
+      </div>
+    </section>
+  )
+
+  if (routeTransitioning || state === 'loading') {
+    return (
+      <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
+        {issuedCredentialPanel}
+        <div className="library-state mt-6">
+          <span role="status">{loadedRequestedProject === null ? '正在讀取 API 金鑰…' : '正在切換 API 專案…'}</span>
+        </div>
+      </main>
+    )
   }
 
   if (state === 'error' || !overview) {
-    return <main className="library-state mx-auto my-12 max-w-7xl border-rose-300 text-rose-700">API 金鑰讀取失敗，請重新整理頁面。</main>
+    return (
+      <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
+        {issuedCredentialPanel}
+        <div className="library-state mt-6 border-rose-300 text-rose-700">
+          <span role="alert">API 金鑰讀取失敗，請重新整理頁面。</span>
+        </div>
+      </main>
+    )
   }
 
   return (
@@ -171,35 +279,22 @@ export function DeveloperCredentialsPage() {
 
       {message && <div aria-live="polite" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-950">{message}</div>}
 
-      {issued && (
-        <section aria-label="一次性金鑰" className="mt-6 rounded-2xl border-2 border-amber-400 bg-white p-6 shadow-lg">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="eyebrow">只顯示這一次</p>
-              <h2 className="mt-2 font-serif text-2xl text-stone-900">立即保存完整金鑰</h2>
-              <p className="mt-2 text-sm text-rose-700">關閉後無法重新查看；遺失時只能換發。</p>
-            </div>
-            <button className="secondary-button" onClick={() => setIssued(null)} type="button">我已保存，關閉</button>
-          </div>
-          <code className="mt-5 block break-all rounded-xl bg-stone-950 p-4 text-sm text-amber-100">{issued.accessToken}</code>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button className="primary-button" onClick={() => void copyIssuedToken()} type="button">複製完整金鑰</button>
-            <button className="secondary-button" onClick={downloadEnv} type="button">下載 .env</button>
-          </div>
-        </section>
-      )}
+      {issuedCredentialPanel}
 
       <section className="mt-8 rounded-2xl border border-stone-200 bg-white/80 p-6">
         <h2 className="font-serif text-2xl text-stone-900">建立金鑰</h2>
-        {overview.projects.length === 0 ? (
-          <p className="mt-4 text-sm text-stone-500">目前沒有可建立金鑰的 API 專案。</p>
+        {!overview.serviceEnabled && (
+          <p className="mt-4 text-sm text-amber-800" role="status">語音 API 目前未啟用，暫時無法建立或換發金鑰；現有受管金鑰仍可撤銷。</p>
+        )}
+        {issuableProjects.length === 0 ? (
+          <p className="mt-4 text-sm text-stone-500">目前沒有尚未到期、可建立金鑰的 API 專案。</p>
         ) : (
           <form className="mt-5 grid gap-4 md:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_auto] md:items-end" onSubmit={(event) => void createCredential(event)}>
             <label className="text-sm text-stone-600">
               API 專案
               <select className="auth-input mt-2" onChange={(event) => setProjectId(event.target.value)} required value={projectId}>
-                {overview.projects.map((project) => (
-                  <option disabled={project.status === 'expired'} key={project.keyId} value={project.projectId || project.keyId}>
+                {issuableProjects.map((project) => (
+                  <option key={project.keyId} value={project.projectId || project.keyId}>
                     {project.displayName || project.projectId || project.keyId}
                   </option>
                 ))}
@@ -209,7 +304,7 @@ export function DeveloperCredentialsPage() {
               金鑰名稱
               <input className="auth-input mt-2" maxLength={80} minLength={2} onChange={(event) => setName(event.target.value)} required value={name} />
             </label>
-            <button className="primary-button" disabled={busy || !projectId} type="submit">建立金鑰</button>
+            <button className="primary-button" disabled={routeTransitioning || busy || Boolean(issued) || Boolean(pendingAction) || !overview.serviceEnabled || !selectedProject || selectedProject.status === 'expired'} type="submit">建立金鑰</button>
           </form>
         )}
       </section>
@@ -247,16 +342,22 @@ export function DeveloperCredentialsPage() {
                 <div><dt className="text-xs text-stone-400">最近使用</dt><dd className="mt-1 text-stone-700">{credential.lastUsedAtUtc ? formatUtc(credential.lastUsedAtUtc) : '尚無紀錄'}</dd></div>
                 <div><dt className="text-xs text-stone-400">建立時間</dt><dd className="mt-1 text-stone-700">{credential.createdAtUtc ? formatUtc(credential.createdAtUtc) : '由部署設定提供'}</dd></div>
                 <div><dt className="text-xs text-stone-400">到期時間</dt><dd className="mt-1 text-stone-700">{formatUtc(credential.expiresAtUtc)}</dd></div>
+                {credential.revokedAtUtc && (
+                  <div>
+                    <dt className="text-xs text-stone-400">{credential.status === 'revocation-scheduled' ? '預定撤銷' : '撤銷時間'}</dt>
+                    <dd className="mt-1 text-stone-700">{formatUtc(credential.revokedAtUtc)}</dd>
+                  </div>
+                )}
               </dl>
               {!credential.managed && <p className="mt-4 text-xs leading-5 text-stone-500">這是既有部署設定金鑰；可建立新的受管金鑰取代，撤銷仍由維運設定處理。</p>}
               {credential.managed && credential.status === 'active' && (
                 <div className="mt-5 flex flex-wrap gap-3">
-                  <button className="secondary-button" disabled={busy} onClick={() => void rotateCredential(credential)} type="button">換發</button>
-                  <button className="rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-700" disabled={busy} onClick={() => void revokeCredential(credential)} type="button">立即撤銷</button>
+                  <button className="secondary-button" disabled={routeTransitioning || busy || Boolean(issued) || Boolean(pendingAction) || !overview.serviceEnabled} onClick={() => setPendingAction({ kind: 'rotate', credential })} type="button">換發</button>
+                  <button className="rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-700" disabled={routeTransitioning || busy || Boolean(pendingAction)} onClick={() => setPendingAction({ kind: 'revoke', credential })} type="button">立即撤銷</button>
                 </div>
               )}
               {credential.managed && credential.status === 'revocation-scheduled' && (
-                <button className="mt-5 rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-700" disabled={busy} onClick={() => void revokeCredential(credential)} type="button">改成立即撤銷</button>
+                <button className="mt-5 rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-700" disabled={routeTransitioning || busy || Boolean(pendingAction)} onClick={() => setPendingAction({ kind: 'revoke', credential })} type="button">改成立即撤銷</button>
               )}
             </article>
           ))}
@@ -278,6 +379,21 @@ export function DeveloperCredentialsPage() {
           </ul>
         )}
       </section>
+
+      <ConfirmDialog
+        cancelLabel="取消"
+        confirmLabel={pendingAction?.kind === 'rotate' ? '確認換發' : '立即撤銷'}
+        description={pendingAction?.kind === 'rotate'
+          ? `StoryVoice 會建立新金鑰，舊金鑰將在 ${overlapMinutes} 分鐘後撤銷。`
+          : '撤銷後這組金鑰會立即失效，而且無法復原。'}
+        destructive={pendingAction?.kind === 'revoke'}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={confirmPendingAction}
+        open={pendingAction !== null}
+        title={pendingAction?.kind === 'rotate'
+          ? `確定換發「${pendingAction.credential.name}」？`
+          : `確定立即撤銷「${pendingAction?.credential.name ?? ''}」？`}
+      />
     </main>
   )
 }

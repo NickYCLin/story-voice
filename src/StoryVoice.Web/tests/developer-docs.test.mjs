@@ -40,6 +40,9 @@ test('Request／Response 契約與後端固定的 HTTP 合約一致', () => {
   assert.match(page, /idempotency_conflict/)
   assert.match(page, /rate_limited/)
   assert.match(page, /synthesis_unavailable/)
+  assert.match(page, /協定允許的文字硬上限/)
+  assert.match(page, /External speech POST 會先通過來源／全域防濫用額度/)
+  assert.match(page, /Playground 與 external API 會共同消耗同一 consumer 的每分鐘額度/)
 })
 
 test('所有範例都標示伺服器端執行，並警告不要把 token 放進瀏覽器', () => {

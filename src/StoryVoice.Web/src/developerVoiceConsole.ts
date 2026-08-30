@@ -166,7 +166,9 @@ export const CREDENTIAL_STATUS_LABEL: Record<DeveloperVoiceCredentialStatus, str
 
 export const formatUtc = (value: string) => {
   const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-TW', { hour12: false })
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString('zh-TW', { hour12: false, timeZoneName: 'short' })
 }
 
 export const fetchDeveloperVoiceOverview = (signal: AbortSignal) =>

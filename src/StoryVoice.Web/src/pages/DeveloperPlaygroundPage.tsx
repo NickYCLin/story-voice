@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 
 import type { AuthedOutletContext } from '../authOutletContext'
@@ -38,12 +38,14 @@ const EXAMPLE_TAB_LABEL: Record<ExampleTab, string> = {
   python: 'Python',
 }
 
+const EXAMPLE_TABS = Object.keys(EXAMPLE_TAB_LABEL) as ExampleTab[]
+
 const exampleCode = (tab: ExampleTab, voice: string) => {
   const selectedVoice = voice || 'your-authorized-voice'
   if (tab === 'curl') {
     return [
       'curl --request POST "https://your-storyvoice-host.example/api/external/v1/speech" \\',
-      '  --header "Authorization: Bearer $STORYVOICE_TOKEN" \\',
+      '  --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" \\',
       '  --header "Content-Type: application/json" \\',
       '  --header "Idempotency-Key: $IDEMPOTENCY_KEY" \\',
       `  --data '{"voice":"${selectedVoice}","text":"請替換成要合成的文字"}'`,
@@ -54,7 +56,7 @@ const exampleCode = (tab: ExampleTab, voice: string) => {
       "import { writeFile } from 'node:fs/promises'",
       "const response = await fetch('https://your-storyvoice-host.example/api/external/v1/speech', {",
       "  method: 'POST',",
-      "  headers: { Authorization: `Bearer ${process.env.STORYVOICE_TOKEN}`,",
+      "  headers: { Authorization: `Bearer ${process.env.STORYVOICE_VOICE_TOKEN}`,",
       "    'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },",
       `  body: JSON.stringify({ voice: '${selectedVoice}', text: '請替換成要合成的文字' }),`,
       '})',
@@ -75,7 +77,7 @@ const exampleCode = (tab: ExampleTab, voice: string) => {
   }
   return [
     "response = requests.post(endpoint, headers={",
-    "    'Authorization': f'Bearer {os.environ[\"STORYVOICE_TOKEN\"]}',",
+    "    'Authorization': f'Bearer {os.environ[\"STORYVOICE_VOICE_TOKEN\"]}',",
     "    'Idempotency-Key': str(uuid.uuid4()),",
     `}, json={'voice': '${selectedVoice}', 'text': '請替換成要合成的文字'}, timeout=60)`,
     'response.raise_for_status()',
@@ -99,11 +101,28 @@ export function DeveloperPlaygroundPage() {
   const [message, setMessage] = useState('')
   const [exampleTab, setExampleTab] = useState<ExampleTab>('curl')
   const controllerRef = useRef<AbortController | null>(null)
+  const requestSequenceRef = useRef(0)
+  const [loadedRequestedProject, setLoadedRequestedProject] = useState<string | null>(null)
+  const routeTransitioning = loadedRequestedProject !== requestedProject
 
   useEffect(() => {
+    setLoadState('loading')
+    setOverview(null)
+    requestSequenceRef.current += 1
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    setGenerateState('idle')
+    setMessage('')
+    setAudioUrl('')
+    setResult(null)
+    setIdempotencyKey('')
+    setProjectId('')
+    setVoice('')
+
     const controller = new AbortController()
     fetchDeveloperVoiceOverview(controller.signal)
       .then((nextOverview) => {
+        if (controller.signal.aborted) return
         setOverview(nextOverview)
         const requested = nextOverview.projects.find((project) =>
           project.projectId === requestedProject || project.keyId === requestedProject)
@@ -112,45 +131,62 @@ export function DeveloperPlaygroundPage() {
         const selected = requested ?? firstAvailable ?? nextOverview.projects[0]
         setProjectId(selected?.projectId || selected?.keyId || '')
         setVoice(selected?.voices.find((grant) => grant.status === 'active')?.voiceAlias ?? '')
+        setLoadedRequestedProject(requestedProject)
         setLoadState('ready')
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        if (controller.signal.aborted) return
+        setOverview(null)
+        setLoadedRequestedProject(requestedProject)
         setLoadState('error')
       })
     return () => controller.abort()
   }, [requestedProject])
 
   useEffect(() => () => {
+    requestSequenceRef.current += 1
     controllerRef.current?.abort()
-    if (audioUrl) URL.revokeObjectURL(audioUrl)
+    controllerRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!audioUrl) return
+    return () => URL.revokeObjectURL(audioUrl)
   }, [audioUrl])
 
-  const selectedProject = overview?.projects.find((project) =>
+  const activeOverview = routeTransitioning ? null : overview
+  const selectedProject = activeOverview?.projects.find((project) =>
     project.projectId === projectId || project.keyId === projectId)
   const availableVoices = selectedProject?.voices.filter((grant) => grant.status === 'active') ?? []
   const textCharacters = Array.from(text.normalize('NFKC').trim()).length
   const textBytes = useMemo(() => new TextEncoder().encode(text.normalize('NFKC').trim()).length, [text])
   const invalidText = !text.trim()
-    || !overview
-    || textCharacters > overview.maximumTextCharacters
-    || textBytes > overview.maximumTextUtf8Bytes
-  const projectUnavailable = !overview?.serviceEnabled
+    || !activeOverview
+    || textCharacters > activeOverview.maximumTextCharacters
+    || textBytes > activeOverview.maximumTextUtf8Bytes
+  const projectUnavailable = !activeOverview?.serviceEnabled
     || !selectedProject
     || !['active', 'expiring-soon'].includes(selectedProject.status)
     || availableVoices.length === 0
 
+  function invalidatePendingGeneration() {
+    requestSequenceRef.current += 1
+    controllerRef.current?.abort()
+    controllerRef.current = null
+  }
+
   function clearResult() {
-    if (audioUrl) URL.revokeObjectURL(audioUrl)
     setAudioUrl('')
     setResult(null)
     setIdempotencyKey('')
   }
 
   function selectProject(nextProjectId: string) {
+    invalidatePendingGeneration()
     clearResult()
     setProjectId(nextProjectId)
-    const nextProject = overview?.projects.find((project) =>
+    const nextProject = activeOverview?.projects.find((project) =>
       project.projectId === nextProjectId || project.keyId === nextProjectId)
     setVoice(nextProject?.voices.find((grant) => grant.status === 'active')?.voiceAlias ?? '')
     setGenerateState('idle')
@@ -158,6 +194,7 @@ export function DeveloperPlaygroundPage() {
   }
 
   function selectVoice(nextVoice: string) {
+    invalidatePendingGeneration()
     clearResult()
     setVoice(nextVoice)
     setGenerateState('idle')
@@ -165,6 +202,7 @@ export function DeveloperPlaygroundPage() {
   }
 
   function updateText(nextText: string) {
+    invalidatePendingGeneration()
     clearResult()
     setText(nextText)
     setGenerateState('idle')
@@ -173,20 +211,21 @@ export function DeveloperPlaygroundPage() {
 
   async function generate(event?: FormEvent, reuseIdempotencyKey = false) {
     event?.preventDefault()
-    if (!overview || invalidText || projectUnavailable || !voice) return
+    if (routeTransitioning || loadState !== 'ready' || !activeOverview || invalidText || projectUnavailable || !voice) return
 
     const nextIdempotencyKey = reuseIdempotencyKey && idempotencyKey
       ? idempotencyKey
       : createIdempotencyKey()
-    setIdempotencyKey(nextIdempotencyKey)
-    setGenerateState('generating')
-    setMessage('')
-    if (audioUrl) URL.revokeObjectURL(audioUrl)
-    setAudioUrl('')
-    setResult(null)
+    const requestSequence = requestSequenceRef.current + 1
+    requestSequenceRef.current = requestSequence
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
+    setIdempotencyKey(nextIdempotencyKey)
+    setGenerateState('generating')
+    setMessage('')
+    setAudioUrl('')
+    setResult(null)
     try {
       const nextResult = await synthesizeDeveloperVoicePlayground(
         projectId,
@@ -196,13 +235,14 @@ export function DeveloperPlaygroundPage() {
         csrfToken,
         controller.signal,
       )
-      if (audioUrl) URL.revokeObjectURL(audioUrl)
+      if (requestSequenceRef.current !== requestSequence || controller.signal.aborted) return
       const nextAudioUrl = URL.createObjectURL(nextResult.audio)
       setAudioUrl(nextAudioUrl)
       setResult(nextResult)
       setGenerateState('success')
       setMessage('語音已產生，可直接播放或下載 WAV。')
     } catch (error) {
+      if (requestSequenceRef.current !== requestSequence) return
       if (error instanceof DOMException && error.name === 'AbortError') {
         setGenerateState('cancelled')
         setMessage('已取消這次要求；如果合成已送進 GPU，後端仍可能完成安全收尾。')
@@ -226,12 +266,27 @@ export function DeveloperPlaygroundPage() {
     controllerRef.current?.abort()
   }
 
-  if (loadState === 'loading') {
-    return <main className="library-state mx-auto my-12 max-w-7xl">正在準備 API Playground…</main>
+  function handleExampleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tab: ExampleTab) {
+    const currentIndex = EXAMPLE_TABS.indexOf(tab)
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % EXAMPLE_TABS.length
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + EXAMPLE_TABS.length) % EXAMPLE_TABS.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = EXAMPLE_TABS.length - 1
+    if (nextIndex === null) return
+
+    event.preventDefault()
+    const nextTab = EXAMPLE_TABS[nextIndex]
+    setExampleTab(nextTab)
+    document.getElementById(`playground-example-tab-${nextTab}`)?.focus()
+  }
+
+  if (routeTransitioning || loadState === 'loading') {
+    return <main className="library-state mx-auto my-12 max-w-7xl"><span role="status">{loadedRequestedProject === null ? '正在準備 API Playground…' : '正在切換 API 專案…'}</span></main>
   }
 
   if (loadState === 'error') {
-    return <main className="library-state mx-auto my-12 max-w-7xl border-rose-300 text-rose-700">Playground 資料讀取失敗，請重新整理頁面。</main>
+    return <main className="library-state mx-auto my-12 max-w-7xl border-rose-300 text-rose-700"><span role="alert">Playground 資料讀取失敗，請重新整理頁面。</span></main>
   }
 
   return (
@@ -247,25 +302,25 @@ export function DeveloperPlaygroundPage() {
         <Link className="font-semibold text-amber-800 underline" to="/developer">返回開發者總覽</Link>
       </div>
 
-      {overview?.projects.length === 0 && (
+      {activeOverview?.projects.length === 0 && (
         <div className="library-state mt-8 min-h-48">目前沒有可供 Playground 使用的 API 專案。</div>
       )}
 
-      {overview && overview.projects.length > 0 && (
+      {activeOverview && activeOverview.projects.length > 0 && (
         <form className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,.85fr)]" onSubmit={(event) => void generate(event)}>
           <section className="rounded-2xl border border-stone-200 bg-white/80 p-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm text-stone-600">
                 API 專案
-                <select className="auth-input mt-2" onChange={(event) => selectProject(event.target.value)} value={projectId}>
-                  {overview.projects.map((project) => (
+                <select className="auth-input mt-2" disabled={generateState === 'generating'} onChange={(event) => selectProject(event.target.value)} value={projectId}>
+                  {activeOverview.projects.map((project) => (
                     <option key={project.keyId} value={project.projectId || project.keyId}>{project.displayName}</option>
                   ))}
                 </select>
               </label>
               <label className="text-sm text-stone-600">
                 授權聲線
-                <select className="auth-input mt-2" onChange={(event) => selectVoice(event.target.value)} value={voice}>
+                <select className="auth-input mt-2" disabled={generateState === 'generating'} onChange={(event) => selectVoice(event.target.value)} value={voice}>
                   {availableVoices.length === 0 && <option value="">沒有可用聲線</option>}
                   {availableVoices.map((grant) => <option key={grant.voiceAlias} value={grant.voiceAlias}>{grant.voiceAlias}</option>)}
                 </select>
@@ -276,21 +331,22 @@ export function DeveloperPlaygroundPage() {
               試聽文字
               <textarea
                 className="auth-input mt-2 min-h-44 resize-y"
+                disabled={generateState === 'generating'}
                 onChange={(event) => updateText(event.target.value)}
                 spellCheck="false"
                 value={text}
               />
             </label>
             <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-stone-400">
-              <span className={textCharacters > overview.maximumTextCharacters ? 'text-rose-700' : ''}>
-                {textCharacters} / {overview.maximumTextCharacters} 字
+              <span className={textCharacters > activeOverview.maximumTextCharacters ? 'text-rose-700' : ''}>
+                {textCharacters} / {activeOverview.maximumTextCharacters} 字
               </span>
-              <span className={textBytes > overview.maximumTextUtf8Bytes ? 'text-rose-700' : ''}>
-                {textBytes} / {overview.maximumTextUtf8Bytes} UTF-8 bytes
+              <span className={textBytes > activeOverview.maximumTextUtf8Bytes ? 'text-rose-700' : ''}>
+                {textBytes} / {activeOverview.maximumTextUtf8Bytes} UTF-8 bytes
               </span>
             </div>
 
-            {!overview.serviceEnabled && <p className="mt-4 text-sm text-amber-800">語音 API 目前未啟用。</p>}
+            {!activeOverview.serviceEnabled && <p className="mt-4 text-sm text-amber-800">語音 API 目前未啟用。</p>}
             {selectedProject && !['active', 'expiring-soon'].includes(selectedProject.status) && (
               <p className="mt-4 text-sm text-amber-800">所選專案目前不在有效期間內。</p>
             )}
@@ -331,7 +387,7 @@ export function DeveloperPlaygroundPage() {
             </section>
 
             <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
-              每分鐘上限 {overview.requestsPerMinute} 次。401、404、409、429、503 都會顯示可理解的狀態；活動只記錄字數與輸出 metadata，不保存文字內容。
+              每分鐘上限 {activeOverview.requestsPerMinute} 次；Playground 與同一 consumer 的 external API 共用這份額度。401、404、409、429、503 都會顯示可理解的狀態；活動只記錄字數與輸出 metadata，不保存文字內容。
               <div className="mt-3 flex flex-wrap gap-4">
                 <Link className="font-semibold underline" to={`/developer/usage?project=${encodeURIComponent(projectId)}`}>查看用量</Link>
                 <Link className="font-semibold underline" to="/developers/docs">查看 API 文件</Link>
@@ -344,20 +400,36 @@ export function DeveloperPlaygroundPage() {
             <h2 className="mt-2 font-serif text-2xl text-stone-900" id="playground-examples-heading">帶回後端串接</h2>
             <p className="mt-2 text-sm leading-6 text-stone-500">範例只使用環境變數或伺服器端 secret store；不要把 token 貼進瀏覽器程式碼。</p>
             <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="API 範例語言">
-              {(Object.keys(EXAMPLE_TAB_LABEL) as ExampleTab[]).map((tab) => (
+              {EXAMPLE_TABS.map((tab) => (
                 <button
+                  aria-controls={`playground-example-panel-${tab}`}
                   aria-selected={exampleTab === tab}
                   className={exampleTab === tab ? 'rounded-full bg-stone-900 px-4 py-2 text-xs text-white' : 'rounded-full border border-stone-300 px-4 py-2 text-xs text-stone-600'}
+                  id={`playground-example-tab-${tab}`}
                   key={tab}
                   onClick={() => setExampleTab(tab)}
+                  onKeyDown={(event) => handleExampleTabKeyDown(event, tab)}
                   role="tab"
+                  tabIndex={exampleTab === tab ? 0 : -1}
                   type="button"
                 >
                   {EXAMPLE_TAB_LABEL[tab]}
                 </button>
               ))}
             </div>
-            <pre className="mt-4 overflow-x-auto rounded-2xl bg-stone-950 p-5 text-xs leading-6 text-stone-200"><code>{exampleCode(exampleTab, voice)}</code></pre>
+            {EXAMPLE_TABS.map((tab) => (
+              <pre
+                aria-labelledby={`playground-example-tab-${tab}`}
+                className="mt-4 overflow-x-auto rounded-2xl bg-stone-950 p-5 text-xs leading-6 text-stone-200"
+                hidden={exampleTab !== tab}
+                id={`playground-example-panel-${tab}`}
+                key={tab}
+                role="tabpanel"
+                tabIndex={0}
+              >
+                <code>{exampleCode(tab, voice)}</code>
+              </pre>
+            ))}
           </section>
         </form>
       )}
