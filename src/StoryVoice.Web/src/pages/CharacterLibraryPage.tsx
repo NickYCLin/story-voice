@@ -311,8 +311,8 @@ export function CharacterLibraryPage() {
     }
   }
 
-  async function saveCharacter(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function saveCharacter(event?: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) {
+    event?.preventDefault()
     if (!selected || !form.canonicalName.trim()) return
     setSaveState('loading')
     try {

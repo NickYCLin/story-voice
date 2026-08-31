@@ -32,3 +32,10 @@ test('計畫未確認時禁止建立 staged 多角色工作，並顯示缺口數
   assert.match(review, /私人本機自架或外部供應商/)
   assert.doesNotMatch(review, /交給 Edge 神經語音服務/)
 })
+
+test('劇本審核支援單句語音試聽與合成效果預覽', () => {
+  assert.match(review, /previewSegmentAudio/)
+  assert.match(review, /試聽此句/)
+  assert.match(review, /\/api\/developer\/playground\/synthesize/)
+})
+

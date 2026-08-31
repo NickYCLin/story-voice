@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 
-import { fetchJson } from './api'
+import { apiUrl, fetchJson } from './api'
 import type { BookDetails, Chapter } from './types'
 
 export type SeriesCharacterChoice = {
@@ -73,6 +73,7 @@ export function SpeechPlanReview({
   const [message, setMessage] = useState('')
   const [busyChapterId, setBusyChapterId] = useState<string | null>(null)
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
+  const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null)
   const [rightsAttested, setRightsAttested] = useState(false)
   const [stageState, setStageState] = useState<'idle' | 'loading'>('idle')
 
@@ -80,6 +81,44 @@ export function SpeechPlanReview({
     () => entries.filter((entry) => entry.draft?.confirmedRevisionId === null || entry.draft === null).length,
     [entries],
   )
+
+  async function previewSegmentAudio(entry: SpeechPlanReviewEntry, segment: SpeechPlanSegment) {
+    const text = segmentText(entry.chapter, segment)
+    if (!text.trim()) return
+    setBusySegmentId(segment.id)
+    setMessage(`正在產生「${text.slice(0, 15)}…」語音試聽…`)
+    try {
+      const char = characters.find((c) => c.id === segment.characterId)
+      const voice = char?.voice || 'zh-TW-HsiaoChenNeural'
+      const response = await fetch(apiUrl('/api/developer/playground/synthesize'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ voice, text }),
+      })
+      if (!response.ok) {
+        throw new Error('單段語音試聽合成失敗。')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      setPlayingSegmentId(segment.id)
+      audio.onended = () => {
+        setPlayingSegmentId(null)
+        URL.revokeObjectURL(url)
+      }
+      audio.onerror = () => {
+        setPlayingSegmentId(null)
+        URL.revokeObjectURL(url)
+      }
+      await audio.play()
+      setMessage('正在播放該句語音。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '單段語音試聽失敗。')
+    } finally {
+      setBusySegmentId(null)
+    }
+  }
 
   async function buildDraft(entry: SpeechPlanReviewEntry) {
     setBusyChapterId(entry.chapter.id)
@@ -187,15 +226,26 @@ export function SpeechPlanReview({
                     <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3" key={segment.id}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <p className="min-w-0 flex-1 text-sm leading-6 text-stone-700">{segmentText(entry.chapter, segment)}</p>
-                        <span className={`shrink-0 text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                          {segment.kind === 'Dialogue' && `${segment.characterName ?? '無法判定'} · `}
-                          {segment.kind === 'InnerMonologue' && `內心／默讀：${segment.characterName ?? '無法判定'} · `}
-                          {segment.reviewStatus === 'Confirmed'
-                            ? '已確認'
-                            : segment.reviewStatus === 'Rejected'
-                              ? `已拒絕，請重新指派 · 信心 ${segment.confidence}%`
-                              : `待審核 · 信心 ${segment.confidence}%`}
-                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-600 transition hover:bg-stone-100 disabled:opacity-50"
+                            disabled={busySegmentId === segment.id}
+                            onClick={() => void previewSegmentAudio(entry, segment)}
+                            title="單獨試聽此句語音合成效果"
+                            type="button"
+                          >
+                            {playingSegmentId === segment.id ? '播放中 🔊' : '試聽此句 ▶'}
+                          </button>
+                          <span className={`text-xs ${segment.reviewStatus === 'Confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            {segment.kind === 'Dialogue' && `${segment.characterName ?? '無法判定'} · `}
+                            {segment.kind === 'InnerMonologue' && `內心／默讀：${segment.characterName ?? '無法判定'} · `}
+                            {segment.reviewStatus === 'Confirmed'
+                              ? '已確認'
+                              : segment.reviewStatus === 'Rejected'
+                                ? `已拒絕，請重新指派 · 信心 ${segment.confidence}%`
+                                : `待審核 · 信心 ${segment.confidence}%`}
+                          </span>
+                        </div>
                       </div>
                       {segment.kind === 'Dialogue' && segment.reviewStatus !== 'Confirmed' && (
                         <div className="mt-3 flex flex-wrap items-end gap-2">
