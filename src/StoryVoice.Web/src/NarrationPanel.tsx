@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
+import { AudioPlayer } from './components/AudioPlayer'
 
 type NarrationBook = {
   id: string
@@ -117,7 +118,6 @@ export function NarrationPanel({ book, csrfToken }: Props) {
     }
   }, [active, loadJobs])
 
-
   async function cancelNarration(jobId: string) {
     setMessage('正在取消朗讀工作…')
     try {
@@ -209,9 +209,12 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </button>
             )}
             {job.status === 'Completed' && (
-              <audio className="mt-4 w-full" controls preload="metadata" src={apiUrl(`/api/narrations/${job.id}/audio`)}>
-                你的瀏覽器不支援音訊播放。
-              </audio>
+              <AudioPlayer
+                className="mt-4"
+                src={apiUrl(`/api/narrations/${job.id}/audio`)}
+                storageKey={`narration-${job.id}`}
+                title={`${job.voice} · ${job.rate}`}
+              />
             )}
             {job.status === 'Failed' && (
               <p className="mt-3 text-sm text-rose-600">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>

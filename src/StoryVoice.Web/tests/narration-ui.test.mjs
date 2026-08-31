@@ -44,7 +44,7 @@ test('narration mutations use CSRF, poll durable jobs, support cancel and privat
   assert.ok(panel.includes('window.setTimeout'))
   assert.ok(panel.includes('/cancel`'))
   assert.ok(panel.includes('/audio`)}'))
-  assert.ok(panel.includes('<audio'))
+  assert.ok(panel.includes('<AudioPlayer') || panel.includes('<audio'))
   assert.ok(libraryPage.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={csrfToken} />'))
   assert.ok(bookInsightsPanel.includes('const canAnalyzeText = book.authorizedTextAvailable'))
 })
