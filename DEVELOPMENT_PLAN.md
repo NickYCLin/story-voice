@@ -1472,7 +1472,7 @@ Chapter 50
 - [x] Segment Audio
 - [x] Audio Cache（BlueMagpie durable chunk cache）
 - [x] Retry
-- [ ] Regenerate Segment
+- [x] Regenerate / Preview Segment（單段語音試聽與生成效果預覽）
 - [ ] Parallel Generation
 - [ ] Cost Logging
 
@@ -1514,9 +1514,9 @@ chapter_001.mp3
 - [ ] Current Sentence
 - [ ] Current Character
 - [x] Seek（browser native control）
-- [ ] 明確的播放倍速控制（目前 `<audio controls>` 是否顯示倍速由瀏覽器決定，不視為產品能力）
-- [ ] Listening Progress
-- [ ] Resume
+- [x] 明確的播放倍速控制（0.75x ~ 2.0x 顯式倍速切換控制項）
+- [x] Listening Progress（播放時間記憶與進度持久化）
+- [x] Resume（自動續播與接續上次進度）
 
 ---
 
