@@ -25,7 +25,7 @@ For runtime changes, also run `docker compose up --build` and verify `/health/re
 
 ## Commit style
 
-使用繁體中文 Conventional Commits：
+Use Conventional Commits:
 
 ```text
 <type>(<scope>): <subject>
@@ -35,13 +35,20 @@ For runtime changes, also run `docker compose up --build` and verify `/health/re
 <footer>
 ```
 
-- `type` 使用 `feat`、`fix`、`docs`、`style`、`refactor`、`test` 或 `chore`。
-- `scope` 為選填，應指出實際影響範圍，例如 `series`、`narration`、`web`。
-- `subject` 使用直接、現在式的繁體中文敘述，最多 50 個字元，結尾不加句點。
-- 標題與內文以空行分隔；內文說明變更的 What 與 Why，單行最多 100 個字元。
-- 有 issue 時在 footer 使用 `Closes #123`；不相容變更使用 `BREAKING CHANGE:`。
+- Use `feat`, `fix`, `docs`, `style`, `refactor`, `test`, or `chore` as the `type`.
+- The optional `scope` should identify the affected area, such as `series`,
+  `narration`, or `web`.
+- Maintainer-authored subjects normally use direct, present-tense Traditional Chinese,
+  stay within 50 characters, and omit the final period.
+- International contributors may discuss issues and pull requests, write code, tests,
+  comments, and documentation, and describe changes in English. If you cannot write
+  Traditional Chinese, use a clear English Conventional Commit subject; maintainers may
+  normalize the final squash title before merge.
+- Separate the subject and body with a blank line. Explain what changed and why, keeping
+  body lines within 100 characters where practical.
+- Use `Closes #123` in the footer for an issue and `BREAKING CHANGE:` for an incompatible change.
 
-範例：
+Traditional Chinese example:
 
 ```text
 feat(series): 新增系列配音管理 API
@@ -50,4 +57,13 @@ feat(series): 新增系列配音管理 API
 並限制只能選擇伺服器允許的聲線，避免任意 provider ID 進入持久層。
 ```
 
-格式參考：[Git Commit Message 規範](https://ithelp.ithome.com.tw/articles/10310628)。
+English example:
+
+```text
+fix(web): preserve the configured base path in voice demo links
+
+Route public demo requests through the shared URL helper so deployments below
+/StoryVoice/ do not fall back to the site root.
+```
+
+Traditional Chinese reference: [Git Commit Message 規範](https://ithelp.ithome.com.tw/articles/10310628).

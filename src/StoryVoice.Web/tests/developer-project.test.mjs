@@ -36,8 +36,8 @@ test('呈現 entitlement、限制、credential 摘要與必要降級狀態', () 
 })
 
 test('專案頁不會把用量入口誤標成最近使用時間', () => {
-  assert.match(page, />用量與活動</)
-  assert.doesNotMatch(page, />最近使用</)
+  assert.match(page, /t\('用量與活動', 'Usage and activity'\)/)
+  assert.doesNotMatch(page, /t\('最近使用', 'Recent usage'\)/)
 })
 
 test('專案頁載入與錯誤狀態可由輔助科技辨識', () => {
@@ -60,4 +60,13 @@ test('project route 切換會立即隱藏舊詳情，且舊 overview 回應不�
 
 test('不顯示 token 雜湊、evidence、內部資產路徑或 owner GUID', () => {
   assert.doesNotMatch(page, /TokenSha256|AuthorizationEvidence|AssetRootPath|ownerId/i)
+})
+
+test('專案詳情的狀態、空狀態與時間會跟隨目前語系', () => {
+  assert.match(page, /const \{ locale, numberLocale \} = useLocale\(\)/)
+  assert.match(page, /projectStatusLabel\(project\.status, locale\)/)
+  assert.match(page, /tierLabel\(project\.accessTier, locale\)/)
+  assert.match(page, /formatUtc\(project\.expiresAtUtc, locale\)/)
+  assert.match(page, /The project does not exist, or your account does not have access to it/)
+  assert.match(page, /Complete secrets are never shown again/)
 })

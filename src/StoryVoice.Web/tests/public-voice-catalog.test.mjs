@@ -14,8 +14,8 @@ test('公開聲線館位於登入殼層外，並可從私人導覽開啟', () =>
   assert.notEqual(publicRoute, -1)
   assert.notEqual(privateLayout, -1)
   assert.ok(publicRoute < privateLayout, '公開路由必須獨立於需要登入的 AppLayout')
-  assert.match(layout, /to="\/voices">公開聲線/)
-  assert.match(authScreen, /to="\/voices">瀏覽公開聲線館/)
+  assert.match(layout, /to="\/voices">\{t\('公開聲線', 'Voices'\)\}/)
+  assert.match(authScreen, /to="\/voices">\{t\('瀏覽公開聲線館', 'Browse public voices'\)\}/)
 })
 
 test('目錄匿名讀取公開 API，並將 404 與空目錄安全呈現', () => {

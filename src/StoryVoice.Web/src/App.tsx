@@ -21,6 +21,7 @@ import { SeriesCastPanel } from './SeriesCastPanel'
 function App() {
   return (
     <Routes>
+      <Route element={<LandingPage publicMode />} path="/about" />
       <Route element={<PublicVoicesPage />} path="/voices" />
       <Route element={<DeveloperDocsPage />} path="/developers/docs" />
       <Route element={<AppLayout />} path="/">

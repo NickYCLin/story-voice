@@ -8,6 +8,7 @@ import {
   fetchDeveloperVoiceOverview,
   synthesizeDeveloperVoicePlayground,
 } from '../developerVoiceConsole'
+import { localize, useLocale, type SupportedLocale } from '../i18n'
 import type {
   DeveloperVoiceConsoleOverview,
   DeveloperVoicePlaygroundAudio,
@@ -25,9 +26,20 @@ const OUTCOME_LABEL: Record<string, string> = {
   synthesis_unavailable: '語音服務暫時無法使用，請稍後再試。',
 }
 
-const formatBytes = (bytes: number) => bytes < 1024
-  ? `${bytes} B`
-  : `${(bytes / 1024).toFixed(1)} KiB`
+const OUTCOME_LABEL_EN: Record<string, string> = {
+  invalid_request: 'Check the text, voice, and idempotency-key format.',
+  voice_not_available: 'The selected voice is not available to this project.',
+  idempotency_conflict: 'This idempotency key is already bound to different input. Create a new request.',
+  rate_limited: 'The rate limit was reached. Try again later.',
+  synthesis_unavailable: 'Voice synthesis is temporarily unavailable. Try again later.',
+}
+
+const outcomeLabel = (code: string, locale: SupportedLocale) =>
+  localize(locale, OUTCOME_LABEL[code], OUTCOME_LABEL_EN[code])
+
+const formatBytes = (bytes: number, numberLocale: string) => bytes < 1024
+  ? `${bytes.toLocaleString(numberLocale)} B`
+  : `${(bytes / 1024).toLocaleString(numberLocale, { maximumFractionDigits: 1 })} KiB`
 
 const createIdempotencyKey = () => `play_${crypto.randomUUID().replaceAll('-', '')}`
 
@@ -40,15 +52,16 @@ const EXAMPLE_TAB_LABEL: Record<ExampleTab, string> = {
 
 const EXAMPLE_TABS = Object.keys(EXAMPLE_TAB_LABEL) as ExampleTab[]
 
-const exampleCode = (tab: ExampleTab, voice: string) => {
+const exampleCode = (tab: ExampleTab, voice: string, locale: SupportedLocale) => {
   const selectedVoice = voice || 'your-authorized-voice'
+  const sampleText = localize(locale, '請替換成要合成的文字', 'Replace with the text you want to synthesize')
   if (tab === 'curl') {
     return [
       'curl --request POST "https://your-storyvoice-host.example/api/external/v1/speech" \\',
       '  --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" \\',
       '  --header "Content-Type: application/json" \\',
       '  --header "Idempotency-Key: $IDEMPOTENCY_KEY" \\',
-      `  --data '{"voice":"${selectedVoice}","text":"請替換成要合成的文字"}'`,
+      `  --data '{"voice":"${selectedVoice}","text":"${sampleText}"}'`,
     ].join('\n')
   }
   if (tab === 'javascript') {
@@ -58,7 +71,7 @@ const exampleCode = (tab: ExampleTab, voice: string) => {
       "  method: 'POST',",
       "  headers: { Authorization: `Bearer ${process.env.STORYVOICE_VOICE_TOKEN}`,",
       "    'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },",
-      `  body: JSON.stringify({ voice: '${selectedVoice}', text: '請替換成要合成的文字' }),`,
+      `  body: JSON.stringify({ voice: '${selectedVoice}', text: '${sampleText}' }),`,
       '})',
       "if (!response.ok) throw new Error(`StoryVoice ${response.status}`)",
       "await writeFile('speech.wav', Buffer.from(await response.arrayBuffer()))",
@@ -69,7 +82,7 @@ const exampleCode = (tab: ExampleTab, voice: string) => {
       'using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);',
       'request.Headers.Authorization = new("Bearer", token);',
       'request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));',
-      `request.Content = JsonContent.Create(new { voice = "${selectedVoice}", text = "請替換成要合成的文字" });`,
+      `request.Content = JsonContent.Create(new { voice = "${selectedVoice}", text = "${sampleText}" });`,
       'using var response = await client.SendAsync(request);',
       'response.EnsureSuccessStatusCode();',
       'await File.WriteAllBytesAsync("speech.wav", await response.Content.ReadAsByteArrayAsync());',
@@ -79,13 +92,15 @@ const exampleCode = (tab: ExampleTab, voice: string) => {
     "response = requests.post(endpoint, headers={",
     "    'Authorization': f'Bearer {os.environ[\"STORYVOICE_VOICE_TOKEN\"]}',",
     "    'Idempotency-Key': str(uuid.uuid4()),",
-    `}, json={'voice': '${selectedVoice}', 'text': '請替換成要合成的文字'}, timeout=60)`,
+    `}, json={'voice': '${selectedVoice}', 'text': '${sampleText}'}, timeout=60)`,
     'response.raise_for_status()',
     "Path('speech.wav').write_bytes(response.content)",
   ].join('\n')
 }
 
 export function DeveloperPlaygroundPage() {
+  const { locale, numberLocale } = useLocale()
+  const t = (zh: string, en: string) => localize(locale, zh, en)
   const { csrfToken } = useOutletContext<AuthedOutletContext>()
   const [searchParams] = useSearchParams()
   const requestedProject = searchParams.get('project') ?? ''
@@ -94,7 +109,7 @@ export function DeveloperPlaygroundPage() {
   const [overview, setOverview] = useState<DeveloperVoiceConsoleOverview | null>(null)
   const [projectId, setProjectId] = useState(requestedProject)
   const [voice, setVoice] = useState('')
-  const [text, setText] = useState('歡迎使用 StoryVoice 聲線測試。')
+  const [text, setText] = useState(() => t('歡迎使用 StoryVoice 聲線測試。', 'Welcome to the StoryVoice voice playground.'))
   const [idempotencyKey, setIdempotencyKey] = useState('')
   const [result, setResult] = useState<DeveloperVoicePlaygroundAudio | null>(null)
   const [audioUrl, setAudioUrl] = useState('')
@@ -154,6 +169,13 @@ export function DeveloperPlaygroundPage() {
     if (!audioUrl) return
     return () => URL.revokeObjectURL(audioUrl)
   }, [audioUrl])
+
+  useEffect(() => {
+    setText((current) => current === '歡迎使用 StoryVoice 聲線測試。'
+      || current === 'Welcome to the StoryVoice voice playground.'
+      ? localize(locale, '歡迎使用 StoryVoice 聲線測試。', 'Welcome to the StoryVoice voice playground.')
+      : current)
+  }, [locale])
 
   const activeOverview = routeTransitioning ? null : overview
   const selectedProject = activeOverview?.projects.find((project) =>
@@ -240,22 +262,24 @@ export function DeveloperPlaygroundPage() {
       setAudioUrl(nextAudioUrl)
       setResult(nextResult)
       setGenerateState('success')
-      setMessage('語音已產生，可直接播放或下載 WAV。')
+      setMessage(t('語音已產生，可直接播放或下載 WAV。', 'Voice generated. You can play it now or download the WAV file.'))
     } catch (error) {
       if (requestSequenceRef.current !== requestSequence) return
       if (error instanceof DOMException && error.name === 'AbortError') {
         setGenerateState('cancelled')
-        setMessage('已取消這次要求；如果合成已送進 GPU，後端仍可能完成安全收尾。')
+        setMessage(t('已取消這次要求；如果合成已送進 GPU，後端仍可能完成安全收尾。', 'This request was cancelled. If synthesis had already reached the GPU, the server may still complete its safe cleanup.'))
         return
       }
 
       setGenerateState('error')
       if (error instanceof DeveloperVoicePlaygroundError) {
-        const retry = error.retryAfterSeconds ? ` 建議 ${error.retryAfterSeconds} 秒後重試。` : ''
-        const request = error.requestId ? ` Request ID：${error.requestId}。` : ''
-        setMessage(`${OUTCOME_LABEL[error.code] ?? error.message}${retry}${request}`)
+        const retry = error.retryAfterSeconds
+          ? localize(locale, ` 建議 ${error.retryAfterSeconds} 秒後重試。`, ` Retry after ${error.retryAfterSeconds} seconds.`)
+          : ''
+        const request = error.requestId ? ` Request ID: ${error.requestId}.` : ''
+        setMessage(`${outcomeLabel(error.code, locale) ?? t('語音產生失敗，請稍後再試。', 'Voice synthesis failed. Try again later.')}${retry}${request}`)
       } else {
-        setMessage('語音產生失敗，請稍後再試。')
+        setMessage(t('語音產生失敗，請稍後再試。', 'Voice synthesis failed. Try again later.'))
       }
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null
@@ -282,11 +306,13 @@ export function DeveloperPlaygroundPage() {
   }
 
   if (routeTransitioning || loadState === 'loading') {
-    return <main className="library-state mx-auto my-12 max-w-7xl"><span role="status">{loadedRequestedProject === null ? '正在準備 API Playground…' : '正在切換 API 專案…'}</span></main>
+    return <main className="library-state mx-auto my-12 max-w-7xl"><span role="status">{loadedRequestedProject === null
+      ? t('正在準備 API Playground…', 'Preparing the API Playground…')
+      : t('正在切換 API 專案…', 'Switching API projects…')}</span></main>
   }
 
   if (loadState === 'error') {
-    return <main className="library-state mx-auto my-12 max-w-7xl border-rose-300 text-rose-700"><span role="alert">Playground 資料讀取失敗，請重新整理頁面。</span></main>
+    return <main className="library-state mx-auto my-12 max-w-7xl border-rose-300 text-rose-700"><span role="alert">{t('Playground 資料讀取失敗，請重新整理頁面。', 'We could not load the Playground. Refresh the page to try again.')}</span></main>
   }
 
   return (
@@ -294,16 +320,16 @@ export function DeveloperPlaygroundPage() {
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div>
           <p className="eyebrow">API Playground</p>
-          <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">用你的授權聲線試聽。</h1>
+          <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">{t('用你的授權聲線試聽。', 'Try your authorized voices.')}</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-stone-600">
-            Playground 使用目前登入的 owner session，由同站後端代理合成。瀏覽器不會取得、保存或傳送 external bearer。
+            {t('Playground 使用目前登入的 owner session，由同站後端代理合成。瀏覽器不會取得、保存或傳送 external bearer。', 'The Playground uses your signed-in owner session and a same-origin backend-for-frontend. Your browser never receives, stores, or sends an external bearer token.')}
           </p>
         </div>
-        <Link className="font-semibold text-amber-800 underline" to="/developer">返回開發者總覽</Link>
+        <Link className="font-semibold text-amber-800 underline" to="/developer">{t('返回開發者總覽', 'Back to developer overview')}</Link>
       </div>
 
       {activeOverview?.projects.length === 0 && (
-        <div className="library-state mt-8 min-h-48">目前沒有可供 Playground 使用的 API 專案。</div>
+        <div className="library-state mt-8 min-h-48">{t('目前沒有可供 Playground 使用的 API 專案。', 'No API project is currently available in the Playground.')}</div>
       )}
 
       {activeOverview && activeOverview.projects.length > 0 && (
@@ -311,7 +337,7 @@ export function DeveloperPlaygroundPage() {
           <section className="rounded-2xl border border-stone-200 bg-white/80 p-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm text-stone-600">
-                API 專案
+                {t('API 專案', 'API project')}
                 <select className="auth-input mt-2" disabled={generateState === 'generating'} onChange={(event) => selectProject(event.target.value)} value={projectId}>
                   {activeOverview.projects.map((project) => (
                     <option key={project.keyId} value={project.projectId || project.keyId}>{project.displayName}</option>
@@ -319,16 +345,16 @@ export function DeveloperPlaygroundPage() {
                 </select>
               </label>
               <label className="text-sm text-stone-600">
-                授權聲線
+                {t('授權聲線', 'Authorized voice')}
                 <select className="auth-input mt-2" disabled={generateState === 'generating'} onChange={(event) => selectVoice(event.target.value)} value={voice}>
-                  {availableVoices.length === 0 && <option value="">沒有可用聲線</option>}
+                  {availableVoices.length === 0 && <option value="">{t('沒有可用聲線', 'No voice available')}</option>}
                   {availableVoices.map((grant) => <option key={grant.voiceAlias} value={grant.voiceAlias}>{grant.voiceAlias}</option>)}
                 </select>
               </label>
             </div>
 
             <label className="mt-5 block text-sm text-stone-600">
-              試聽文字
+              {t('試聽文字', 'Preview text')}
               <textarea
                 className="auth-input mt-2 min-h-44 resize-y"
                 disabled={generateState === 'generating'}
@@ -339,28 +365,28 @@ export function DeveloperPlaygroundPage() {
             </label>
             <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-stone-400">
               <span className={textCharacters > activeOverview.maximumTextCharacters ? 'text-rose-700' : ''}>
-                {textCharacters} / {activeOverview.maximumTextCharacters} 字
+                {textCharacters.toLocaleString(numberLocale)} / {activeOverview.maximumTextCharacters.toLocaleString(numberLocale)} {t('字', 'characters')}
               </span>
               <span className={textBytes > activeOverview.maximumTextUtf8Bytes ? 'text-rose-700' : ''}>
-                {textBytes} / {activeOverview.maximumTextUtf8Bytes} UTF-8 bytes
+                {textBytes.toLocaleString(numberLocale)} / {activeOverview.maximumTextUtf8Bytes.toLocaleString(numberLocale)} UTF-8 bytes
               </span>
             </div>
 
-            {!activeOverview.serviceEnabled && <p className="mt-4 text-sm text-amber-800">語音 API 目前未啟用。</p>}
+            {!activeOverview.serviceEnabled && <p className="mt-4 text-sm text-amber-800">{t('語音 API 目前未啟用。', 'The voice API is currently disabled.')}</p>}
             {selectedProject && !['active', 'expiring-soon'].includes(selectedProject.status) && (
-              <p className="mt-4 text-sm text-amber-800">所選專案目前不在有效期間內。</p>
+              <p className="mt-4 text-sm text-amber-800">{t('所選專案目前不在有效期間內。', 'The selected project is outside its active access window.')}</p>
             )}
 
             <div className="mt-6 flex flex-wrap gap-3">
               <button className="auth-submit" disabled={invalidText || projectUnavailable || !voice || generateState === 'generating'} type="submit">
-                {generateState === 'generating' ? '正在產生…' : '產生語音'}
+                {generateState === 'generating' ? t('正在產生…', 'Generating…') : t('產生語音', 'Generate voice')}
               </button>
               {generateState === 'generating' && (
-                <button className="rounded-full border border-stone-300 px-5 py-3 text-sm text-stone-700" onClick={cancel} type="button">取消</button>
+                <button className="rounded-full border border-stone-300 px-5 py-3 text-sm text-stone-700" onClick={cancel} type="button">{t('取消', 'Cancel')}</button>
               )}
               {result && generateState !== 'generating' && (
                 <button className="rounded-full border border-amber-300 px-5 py-3 text-sm font-semibold text-amber-800" onClick={() => void generate(undefined, true)} type="button">
-                  用相同冪等鍵重送
+                  {t('用相同冪等鍵重送', 'Retry with the same idempotency key')}
                 </button>
               )}
             </div>
@@ -369,37 +395,37 @@ export function DeveloperPlaygroundPage() {
           <aside className="space-y-5">
             <section aria-live="polite" className="rounded-2xl border border-stone-200 bg-stone-900 p-6 text-stone-100">
               <p className="eyebrow text-amber-300">Result</p>
-              <h2 className="mt-2 font-serif text-2xl">合成結果</h2>
-              {generateState === 'idle' && <p className="mt-4 text-sm leading-6 text-stone-400">送出後會在這裡顯示播放器、下載與安全的要求 metadata。</p>}
+              <h2 className="mt-2 font-serif text-2xl">{t('合成結果', 'Synthesis result')}</h2>
+              {generateState === 'idle' && <p className="mt-4 text-sm leading-6 text-stone-400">{t('送出後會在這裡顯示播放器、下載與安全的要求 metadata。', 'After submission, the player, download, and safe request metadata will appear here.')}</p>}
               {message && <p className={`mt-4 text-sm leading-6 ${generateState === 'error' ? 'text-rose-300' : 'text-stone-300'}`}>{message}</p>}
               {audioUrl && result && (
                 <>
-                  <audio className="mt-5 w-full" controls src={audioUrl}>你的瀏覽器不支援音訊播放。</audio>
-                  <a className="mt-4 inline-flex font-semibold text-amber-200 underline" download={`storyvoice-${voice}-${result.requestId}.wav`} href={audioUrl}>下載 WAV</a>
+                  <audio className="mt-5 w-full" controls src={audioUrl}>{t('你的瀏覽器不支援音訊播放。', 'Your browser does not support audio playback.')}</audio>
+                  <a className="mt-4 inline-flex font-semibold text-amber-200 underline" download={`storyvoice-${voice}-${result.requestId}.wav`} href={audioUrl}>{t('下載 WAV', 'Download WAV')}</a>
                   <dl className="mt-5 space-y-2 border-t border-stone-700 pt-5 text-xs text-stone-400">
-                    <div><dt className="inline">Request ID：</dt><dd className="inline break-all text-stone-200">{result.requestId}</dd></div>
-                    <div><dt className="inline">Idempotency key：</dt><dd className="inline break-all text-stone-200">{result.idempotencyKey}</dd></div>
-                    <div><dt className="inline">耗時：</dt><dd className="inline text-stone-200">{result.latencyMilliseconds} ms</dd></div>
-                    <div><dt className="inline">音訊：</dt><dd className="inline text-stone-200">{(result.audioDurationMilliseconds / 1000).toFixed(1)} 秒 · {formatBytes(result.responseBytes)}</dd></div>
+                    <div><dt className="inline">{t('Request ID：', 'Request ID: ')}</dt><dd className="inline break-all text-stone-200">{result.requestId}</dd></div>
+                    <div><dt className="inline">{t('Idempotency key：', 'Idempotency key: ')}</dt><dd className="inline break-all text-stone-200">{result.idempotencyKey}</dd></div>
+                    <div><dt className="inline">{t('耗時：', 'Latency: ')}</dt><dd className="inline text-stone-200">{result.latencyMilliseconds.toLocaleString(numberLocale)} ms</dd></div>
+                    <div><dt className="inline">{t('音訊：', 'Audio: ')}</dt><dd className="inline text-stone-200">{(result.audioDurationMilliseconds / 1000).toLocaleString(numberLocale, { maximumFractionDigits: 1 })} {t('秒', 'seconds')} · {formatBytes(result.responseBytes, numberLocale)}</dd></div>
                   </dl>
                 </>
               )}
             </section>
 
             <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
-              每分鐘上限 {activeOverview.requestsPerMinute} 次；Playground 與同一 consumer 的 external API 共用這份額度。401、404、409、429、503 都會顯示可理解的狀態；活動只記錄字數與輸出 metadata，不保存文字內容。
+              {localize(locale, <>每分鐘上限 {activeOverview.requestsPerMinute.toLocaleString(numberLocale)} 次；Playground 與同一 consumer 的 external API 共用這份額度。401、404、409、429、503 都會顯示可理解的狀態；活動只記錄字數與輸出 metadata，不保存文字內容。</>, <>Limit: {activeOverview.requestsPerMinute.toLocaleString(numberLocale)} requests per minute. The Playground and external API share this allowance for the same consumer. Responses 401, 404, 409, 429, and 503 are shown as clear states. Activity records only character counts and output metadata, never the input text.</>)}
               <div className="mt-3 flex flex-wrap gap-4">
-                <Link className="font-semibold underline" to={`/developer/usage?project=${encodeURIComponent(projectId)}`}>查看用量</Link>
-                <Link className="font-semibold underline" to="/developers/docs">查看 API 文件</Link>
+                <Link className="font-semibold underline" to={`/developer/usage?project=${encodeURIComponent(projectId)}`}>{t('查看用量', 'View usage')}</Link>
+                <Link className="font-semibold underline" to="/developers/docs">{t('查看 API 文件', 'View API docs')}</Link>
               </div>
             </section>
           </aside>
 
           <section className="rounded-2xl border border-stone-200 bg-white/80 p-6 lg:col-span-2" aria-labelledby="playground-examples-heading">
             <p className="eyebrow">Server-side examples</p>
-            <h2 className="mt-2 font-serif text-2xl text-stone-900" id="playground-examples-heading">帶回後端串接</h2>
-            <p className="mt-2 text-sm leading-6 text-stone-500">範例只使用環境變數或伺服器端 secret store；不要把 token 貼進瀏覽器程式碼。</p>
-            <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="API 範例語言">
+            <h2 className="mt-2 font-serif text-2xl text-stone-900" id="playground-examples-heading">{t('帶回後端串接', 'Integrate from your backend')}</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-500">{t('範例只使用環境變數或伺服器端 secret store；不要把 token 貼進瀏覽器程式碼。', 'These examples use environment variables or a server-side secret store. Never embed the token in browser code.')}</p>
+            <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label={t('API 範例語言', 'API example languages')}>
               {EXAMPLE_TABS.map((tab) => (
                 <button
                   aria-controls={`playground-example-panel-${tab}`}
@@ -427,7 +453,7 @@ export function DeveloperPlaygroundPage() {
                 role="tabpanel"
                 tabIndex={0}
               >
-                <code>{exampleCode(tab, voice)}</code>
+                <code>{exampleCode(tab, voice, locale)}</code>
               </pre>
             ))}
           </section>

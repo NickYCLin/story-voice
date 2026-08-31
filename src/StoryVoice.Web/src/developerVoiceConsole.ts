@@ -1,4 +1,5 @@
 import { apiUrl, fetchJson } from './api'
+import { localize, type SupportedLocale } from './i18n'
 
 export type DeveloperVoiceGrantSummary = {
   voiceAlias: string
@@ -144,6 +145,18 @@ export const PROJECT_STATUS_LABEL: Record<DeveloperVoiceProjectSummary['status']
   expired: '已到期',
 }
 
+const PROJECT_STATUS_LABEL_EN: Record<DeveloperVoiceProjectSummary['status'], string> = {
+  'not-yet-effective': 'Not yet effective',
+  active: 'Active',
+  'expiring-soon': 'Expiring soon',
+  expired: 'Expired',
+}
+
+export const projectStatusLabel = (
+  status: DeveloperVoiceProjectSummary['status'],
+  locale: SupportedLocale,
+) => localize(locale, PROJECT_STATUS_LABEL[status], PROJECT_STATUS_LABEL_EN[status])
+
 export const PROJECT_STATUS_CLASS: Record<DeveloperVoiceProjectSummary['status'], string> = {
   'not-yet-effective': 'border-stone-300 bg-stone-50 text-stone-600',
   active: 'border-emerald-300 bg-emerald-50 text-emerald-700',
@@ -156,6 +169,14 @@ export const TIER_LABEL: Record<string, string> = {
   'subscription-commercial': '訂閱商用（subscription-commercial）',
 }
 
+const TIER_LABEL_EN: Record<string, string> = {
+  'private-development': 'Private development',
+  'subscription-commercial': 'Commercial subscription',
+}
+
+export const tierLabel = (accessTier: string, locale: SupportedLocale) =>
+  localize(locale, TIER_LABEL[accessTier] ?? accessTier, TIER_LABEL_EN[accessTier] ?? accessTier)
+
 export const CREDENTIAL_STATUS_LABEL: Record<DeveloperVoiceCredentialStatus, string> = {
   'not-yet-effective': '尚未生效',
   active: '有效',
@@ -164,11 +185,27 @@ export const CREDENTIAL_STATUS_LABEL: Record<DeveloperVoiceCredentialStatus, str
   revoked: '已撤銷',
 }
 
-export const formatUtc = (value: string) => {
+const CREDENTIAL_STATUS_LABEL_EN: Record<DeveloperVoiceCredentialStatus, string> = {
+  'not-yet-effective': 'Not yet effective',
+  active: 'Active',
+  'revocation-scheduled': 'Revocation scheduled',
+  expired: 'Expired',
+  revoked: 'Revoked',
+}
+
+export const credentialStatusLabel = (
+  status: DeveloperVoiceCredentialStatus,
+  locale: SupportedLocale,
+) => localize(locale, CREDENTIAL_STATUS_LABEL[status], CREDENTIAL_STATUS_LABEL_EN[status])
+
+export const formatUtc = (value: string, locale: SupportedLocale = 'zh-TW') => {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime())
     ? value
-    : parsed.toLocaleString('zh-TW', { hour12: false, timeZoneName: 'short' })
+    : parsed.toLocaleString(locale === 'en' ? 'en-US' : 'zh-TW', {
+      hour12: false,
+      timeZoneName: 'short',
+    })
 }
 
 export const fetchDeveloperVoiceOverview = (signal: AbortSignal) =>

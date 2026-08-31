@@ -13,7 +13,7 @@ test('API 文件位於登入殼層外，並可從公開聲線館與私人導覽�
   assert.notEqual(docsRoute, -1)
   assert.notEqual(privateLayout, -1)
   assert.ok(docsRoute < privateLayout, 'API 文件路由必須獨立於需要登入的 AppLayout')
-  assert.match(layout, /to="\/developers\/docs">API 文件/)
+  assert.match(layout, /to="\/developers\/docs">\{t\('API 文件', 'API docs'\)\}/)
   assert.match(publicVoicesPage, /to="\/developers\/docs">/)
 })
 
@@ -32,6 +32,7 @@ test('清楚區分 private-development 與 subscription-commercial 兩種存取�
 test('Request／Response 契約與後端固定的 HTTP 合約一致', () => {
   assert.match(page, /POST \/api\/external\/v1\/speech/)
   assert.match(page, /Idempotency-Key/)
+  assert.match(page, /16-64 letters, digits, underscores, or hyphens/)
   assert.match(page, /"voice": "<authorized-voice-alias>"/)
   assert.match(page, /audio\/wav/)
   assert.match(page, /invalid_request/)

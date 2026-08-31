@@ -139,7 +139,7 @@ test('書庫朗讀面板不再建立單聲線工作，而是導向系列配音�
 test('App 可開啟系列配音控制台', () => {
   assert.match(app, /path="\/series"/)
   assert.match(app, /SeriesCastPanel/)
-  assert.match(appLayout, /to="\/series">系列配音<\/NavLink>/)
+  assert.match(appLayout, /to="\/series">\{t\('系列配音', 'Series'\)\}<\/NavLink>/)
 })
 
 test('角色分析套用後可由 query string 直接開啟指定系列', () => {

@@ -96,3 +96,13 @@ test('playground example tabs expose complete ARIA relationships and keyboard na
   assert.match(page, /event\.key === 'Home'/)
   assert.match(page, /event\.key === 'End'/)
 })
+
+test('playground results, errors and examples follow the active locale', () => {
+  assert.match(page, /const \{ locale, numberLocale \} = useLocale\(\)/)
+  assert.match(page, /OUTCOME_LABEL_EN/)
+  assert.match(page, /Welcome to the StoryVoice voice playground/)
+  assert.match(page, /Your browser never receives, stores, or sends an external bearer token/)
+  assert.match(page, /Voice generated\. You can play it now or download the WAV file/)
+  assert.match(page, /exampleCode\(tab, voice, locale\)/)
+  assert.match(page, /toLocaleString\(numberLocale/)
+})

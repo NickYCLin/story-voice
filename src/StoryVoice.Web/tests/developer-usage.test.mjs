@@ -79,11 +79,21 @@ test('project query 切換會立即隱藏舊用量並拒絕 stale response', () 
 test('到期摘要排除已過期專案，單選過期專案時改用已到期語意', () => {
   assert.match(page, /filter\(\(project\) => project\.status !== 'expired'\)/)
   assert.match(page, /selectedProject\?\.status === 'expired'/)
-  assert.match(page, /已於 \$\{formatUtc\(selectedProject\.expiresAtUtc\)\} 到期/)
+  assert.match(page, /已於 \$\{formatUtc\(selectedProject\.expiresAtUtc, locale\)\} 到期/)
   assert.match(page, /目前沒有尚未到期的專案/)
 })
 
 test('用量載入與錯誤狀態可由輔助科技辨識', () => {
   assert.match(page, /state === 'loading'[\s\S]*role="status"/)
   assert.match(page, /state === 'error'[\s\S]*role="alert"/)
+})
+
+test('用量摘要與活動表提供英文狀態並依語系格式化', () => {
+  assert.match(page, /const \{ locale, numberLocale \} = useLocale\(\)/)
+  assert.match(page, /OUTCOME_LABEL_EN/)
+  assert.match(page, /Usage filters/)
+  assert.match(page, /Review synthesis requests authenticated with an API key/)
+  assert.match(page, /formatUtc\(activity\.occurredAtUtc, locale\)/)
+  assert.match(page, /durationMilliseconds\.toLocaleString\(numberLocale\)/)
+  assert.match(page, /Project \/ voice/)
 })
