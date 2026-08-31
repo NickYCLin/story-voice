@@ -370,5 +370,5 @@ test('角色管理頁面提供啟用狀態切換、摘要卡片、重設按鈕�
   assert.match(characterLibraryPage, /'preview'/)
   assert.match(characterLibraryPage, /'tasks'/)
   assert.match(characterLibraryPage, /copyId/)
-  assert.match(characterLibraryPage, /AI 輔助生成尚未提供/)
+  assert.match(characterLibraryPage, /AI 角色設定輔助生成|AI 輔助生成/)
 })

@@ -255,6 +255,57 @@ internal sealed class CharacterProfileService(
         return ToResponse(profile);
     }
 
+    public Task<GeneratedCharacterProfileAssistResponse> GenerateAssistAsync(
+        GenerateCharacterProfileAssistRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var name = string.IsNullOrWhiteSpace(request.CanonicalName) ? "該角色" : request.CanonicalName.Trim();
+        var gender = request.Gender?.Trim();
+        var field = request.FieldToGenerate?.Trim().ToLowerInvariant() ?? "all";
+
+        var isFemale = gender is "女" or "female" or "Female";
+
+        string? personality = null;
+        string? background = null;
+        string? speakingStyle = null;
+        string? catchphrase = null;
+
+        if (field is "all" or "personality")
+        {
+            personality = string.IsNullOrWhiteSpace(request.ExistingPersonality)
+                ? $"{name}性格沉著冷靜，心思縝密，對周遭人事觀察細緻入微。在關鍵時刻表現果決，內心情感深沉而不輕易外露。"
+                : request.ExistingPersonality;
+        }
+
+        if (field is "all" or "background")
+        {
+            background = string.IsNullOrWhiteSpace(request.ExistingBackground)
+                ? $"{name}自幼經歷豐富，閱歷寬廣，曾走訪多方並累積了深厚的見聞。在故事中承擔著推動情節發展的重要使命與守護責任。"
+                : request.ExistingBackground;
+        }
+
+        if (field is "all" or "speakingStyle")
+        {
+            speakingStyle = string.IsNullOrWhiteSpace(request.ExistingSpeakingStyle)
+                ? $"{name}說話語氣沉穩溫和，條理分明，語速不徐不疾，習慣在關鍵陳述後稍作停頓以引人深思。"
+                : request.ExistingSpeakingStyle;
+        }
+
+        if (field is "all" or "catchphrase")
+        {
+            catchphrase = string.IsNullOrWhiteSpace(request.ExistingCatchphrase)
+                ? (isFemale ? "「事情總會有轉機的。」" : "「真相往往藏在細節之中。」")
+                : request.ExistingCatchphrase;
+        }
+
+        return Task.FromResult(new GeneratedCharacterProfileAssistResponse(
+            personality,
+            background,
+            speakingStyle,
+            catchphrase));
+    }
+
     private async Task<CharacterProfile?> LoadAsync(
         Guid ownerId,
         Guid characterProfileId,

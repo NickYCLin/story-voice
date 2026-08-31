@@ -37,6 +37,22 @@ public sealed record CharacterProfileResponse(
 
 public sealed record CharacterProfileAvatar(string AbsolutePath, string ContentType);
 
+public sealed record GenerateCharacterProfileAssistRequest(
+    string CanonicalName,
+    string? Gender,
+    string? Age,
+    string? ExistingPersonality,
+    string? ExistingBackground,
+    string? ExistingCatchphrase,
+    string? ExistingSpeakingStyle,
+    string? FieldToGenerate);
+
+public sealed record GeneratedCharacterProfileAssistResponse(
+    string? Personality,
+    string? Background,
+    string? SpeakingStyle,
+    string? Catchphrase);
+
 /// <summary>
 /// The character library: owner-scoped character identities that are reusable across every
 /// series, independent of <see cref="StoryVoice.Application.Series.ISeriesService"/>. A series
@@ -69,4 +85,8 @@ public interface ICharacterProfileService
     Task<CharacterProfileAvatar?> GetAvatarAsync(Guid characterProfileId, CancellationToken cancellationToken);
 
     Task<CharacterProfileResponse?> SetActiveAsync(Guid characterProfileId, bool isActive, CancellationToken cancellationToken);
+
+    Task<GeneratedCharacterProfileAssistResponse> GenerateAssistAsync(
+        GenerateCharacterProfileAssistRequest request,
+        CancellationToken cancellationToken);
 }

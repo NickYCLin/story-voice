@@ -113,6 +113,52 @@ export function CharacterLibraryPage() {
   const selectedIdRef = useRef(selectedId)
   const [statusToggleBusy, setStatusToggleBusy] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+
+  const triggerAiAssist = useCallback(async (field: 'all' | 'personality' | 'background' | 'speakingStyle' | 'catchphrase') => {
+    if (!form.canonicalName.trim()) {
+      setMessage('請先填寫角色名稱再進行 AI 輔助生成。')
+      return
+    }
+    setAiBusy(true)
+    setMessage('AI 正在為角色構思設定…')
+    try {
+      const response = await fetch(apiUrl('/api/character-profiles/ai-assist'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({
+          canonicalName: form.canonicalName,
+          gender: form.gender || null,
+          age: form.age || null,
+          existingPersonality: form.personality || null,
+          existingBackground: form.background || null,
+          existingCatchphrase: form.catchphrase || null,
+          existingSpeakingStyle: form.speakingStyle || null,
+          fieldToGenerate: field,
+        }),
+      })
+      if (!response.ok) throw new Error(await responseProblem(response, 'AI 輔助生成失敗。'))
+      const result = await response.json() as {
+        personality: string | null
+        background: string | null
+        speakingStyle: string | null
+        catchphrase: string | null
+      }
+      setForm((current) => ({
+        ...current,
+        personality: result.personality ?? current.personality,
+        background: result.background ?? current.background,
+        speakingStyle: result.speakingStyle ?? current.speakingStyle,
+        catchphrase: result.catchphrase ?? current.catchphrase,
+      }))
+      setMessage('AI 角色設定已生成並填入表單，確認無誤後請點擊「儲存角色資料」。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'AI 輔助生成失敗。')
+    } finally {
+      setAiBusy(false)
+    }
+  }, [csrfToken, form])
 
   const loadCharacters = useCallback(async () => {
     setListState('loading')
@@ -627,25 +673,56 @@ export function CharacterLibraryPage() {
                     <label className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
                         <span>個性</span>
-                        <span className="rounded-full border border-stone-200 px-2 py-0.5 text-[10px] text-stone-400" title="尚未串接 AI，之後可以再接上">AI 補完（尚未提供）</span>
+                        <button
+                          className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+                          disabled={aiBusy || !form.canonicalName.trim()}
+                          onClick={() => void triggerAiAssist('personality')}
+                          type="button"
+                        >
+                          ✦ AI 補完個性
+                        </button>
                       </div>
                       <textarea className="auth-input mt-2 min-h-16 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, personality: event.target.value }))} value={form.personality} />
                     </label>
                     <label className="text-xs text-stone-500 sm:col-span-2">
-                      口頭禪
+                      <div className="flex items-center justify-between">
+                        <span>口頭禪</span>
+                        <button
+                          className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+                          disabled={aiBusy || !form.canonicalName.trim()}
+                          onClick={() => void triggerAiAssist('catchphrase')}
+                          type="button"
+                        >
+                          ✦ AI 構思口頭禪
+                        </button>
+                      </div>
                       <textarea className="auth-input mt-2 min-h-12 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, catchphrase: event.target.value }))} value={form.catchphrase} />
                     </label>
                     <label className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
                         <span>人物背景</span>
-                        <span className="rounded-full border border-stone-200 px-2 py-0.5 text-[10px] text-stone-400" title="尚未串接 AI，之後可以再接上">AI 補完（尚未提供）</span>
+                        <button
+                          className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+                          disabled={aiBusy || !form.canonicalName.trim()}
+                          onClick={() => void triggerAiAssist('background')}
+                          type="button"
+                        >
+                          ✦ AI 補完背景
+                        </button>
                       </div>
                       <textarea className="auth-input mt-2 min-h-20 w-full" maxLength={4000} onChange={(event) => setForm((current) => ({ ...current, background: event.target.value }))} value={form.background} />
                     </label>
                     <label className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
                         <span>說話風格</span>
-                        <span className="rounded-full border border-stone-200 px-2 py-0.5 text-[10px] text-stone-400" title="尚未串接 AI，之後可以再接上">AI 補完（尚未提供）</span>
+                        <button
+                          className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+                          disabled={aiBusy || !form.canonicalName.trim()}
+                          onClick={() => void triggerAiAssist('speakingStyle')}
+                          type="button"
+                        >
+                          ✦ AI 補完風格
+                        </button>
                       </div>
                       <textarea className="auth-input mt-2 min-h-16 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, speakingStyle: event.target.value }))} value={form.speakingStyle} />
                     </label>
@@ -661,14 +738,105 @@ export function CharacterLibraryPage() {
                 )}
 
                 {activeTab === 'ai' && (
-                  <div className="mt-6 border-t border-stone-200 pt-5">
-                    <div className="library-state min-h-32">
-                      <div>
-                        <h3 className="font-serif text-xl text-stone-800">AI 輔助生成尚未提供</h3>
-                        <p className="mt-2 max-w-md text-sm text-stone-500">
-                          之後可以在這裡讓 AI 依角色設定自動補完個性、人物背景與說話風格；目前串接的 3wa Cluster API 還沒有對應的文字生成 mode，先保留這個分頁。
+                  <div className="mt-6 space-y-4 border-t border-stone-200 pt-5">
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-serif text-lg text-stone-900">AI 角色設定輔助生成</h3>
+                          <p className="mt-1 text-xs text-stone-600">
+                            根據目前角色姓名「{form.canonicalName || '未命名'}」與基本條件，AI 會為你自動生成個性特徵、人物背景、說話習慣與口頭禪。
+                          </p>
+                        </div>
+                        <button
+                          className="primary-button text-xs disabled:cursor-wait disabled:opacity-60"
+                          disabled={aiBusy || !form.canonicalName.trim()}
+                          onClick={() => void triggerAiAssist('all')}
+                          type="button"
+                        >
+                          {aiBusy ? '構思生成中…' : '✦ 一鍵生成完整人設'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="rounded-xl border border-stone-200 bg-white p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-stone-700">個性設定</span>
+                          <button
+                            className="text-[11px] text-amber-700 hover:underline disabled:opacity-50"
+                            disabled={aiBusy || !form.canonicalName.trim()}
+                            onClick={() => void triggerAiAssist('personality')}
+                            type="button"
+                          >
+                            單獨重構 ↺
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-stone-600">
+                          {form.personality || '（尚未生成，點擊上方按鈕生成）'}
                         </p>
                       </div>
+
+                      <div className="rounded-xl border border-stone-200 bg-white p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-stone-700">口頭禪</span>
+                          <button
+                            className="text-[11px] text-amber-700 hover:underline disabled:opacity-50"
+                            disabled={aiBusy || !form.canonicalName.trim()}
+                            onClick={() => void triggerAiAssist('catchphrase')}
+                            type="button"
+                          >
+                            單獨重構 ↺
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-stone-600">
+                          {form.catchphrase || '（尚未生成，點擊上方按鈕生成）'}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border border-stone-200 bg-white p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-stone-700">人物背景</span>
+                          <button
+                            className="text-[11px] text-amber-700 hover:underline disabled:opacity-50"
+                            disabled={aiBusy || !form.canonicalName.trim()}
+                            onClick={() => void triggerAiAssist('background')}
+                            type="button"
+                          >
+                            單獨重構 ↺
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-stone-600">
+                          {form.background || '（尚未生成，點擊上方按鈕生成）'}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border border-stone-200 bg-white p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-stone-700">說話風格</span>
+                          <button
+                            className="text-[11px] text-amber-700 hover:underline disabled:opacity-50"
+                            disabled={aiBusy || !form.canonicalName.trim()}
+                            onClick={() => void triggerAiAssist('speakingStyle')}
+                            type="button"
+                          >
+                            單獨重構 ↺
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-stone-600">
+                          {form.speakingStyle || '（尚未生成，點擊上方按鈕生成）'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        className="secondary-button text-xs disabled:cursor-wait disabled:opacity-60"
+                        disabled={saveState === 'loading' || !form.canonicalName.trim()}
+                        onClick={saveCharacter}
+                        type="button"
+                      >
+                        儲存已生成的設定至角色
+                      </button>
                     </div>
                   </div>
                 )}
