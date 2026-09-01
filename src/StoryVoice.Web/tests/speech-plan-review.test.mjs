@@ -33,9 +33,52 @@ test('計畫未確認時禁止建立 staged 多角色工作，並顯示缺口數
   assert.doesNotMatch(review, /交給 Edge 神經語音服務/)
 })
 
-test('劇本審核支援單句語音試聽與合成效果預覽', () => {
+test('單句試聽走伺服器端 segment 試聽端點，不再呼叫不存在的 playground 路由', () => {
   assert.match(review, /previewSegmentAudio/)
   assert.match(review, /試聽此句/)
-  assert.match(review, /\/api\/developer\/playground\/synthesize/)
+  assert.match(review, /segments\/\$\{segment\.id\}\/preview/)
+  assert.doesNotMatch(review, /\/api\/developer\/playground\/synthesize/)
+  assert.doesNotMatch(review, /zh-TW-HsiaoChenNeural/)
 })
 
+test('不支援單句試聽的供應商會停用按鈕並說明原因，而不是丟出 404', () => {
+  assert.match(review, /previewDisabledReason/)
+  assert.match(review, /previewDisabled !== null/)
+  assert.match(review, /整批合成工作中執行/)
+})
+
+test('已自動確認的判定可以修改：任何正文片段都能重新指派朗讀方式與說話者', () => {
+  assert.match(review, /修改指派/)
+  assert.match(review, /segments\/\$\{segment\.id\}\/reassign/)
+  assert.match(review, /segment\.sourceKind === 'Body'/)
+  assert.match(review, /內心／默讀片段必須指定角色/)
+})
+
+test('支援批次操作：接受全部建議、批次同角色確認、為缺草稿章節產生草稿', () => {
+  assert.match(review, /confirm-suggested/)
+  assert.match(review, /接受全部建議/)
+  assert.match(review, /全部確認為/)
+  assert.match(review, /buildMissingDrafts/)
+  assert.match(review, /為缺草稿的/)
+})
+
+test('審核中可直接補建角色，聲線建立後固定', () => {
+  assert.match(review, /onAddCharacter/)
+  assert.match(review, /新角色名稱/)
+  assert.match(review, /聲線建立後即固定/)
+})
+
+test('顯示統計與決策來源，狀態以中文呈現並解釋 Stale', () => {
+  assert.match(review, /DRAFT_STATUS_LABELS/)
+  assert.match(review, /DECISION_SOURCE_LABELS/)
+  assert.match(review, /旁白 fallback/)
+  assert.match(review, /已過期；請重新產生草稿後再審核/)
+})
+
+test('逐章摺疊：分段只在展開時渲染，指派下拉為受控元件', () => {
+  assert.match(review, /expandedChapterId/)
+  assert.match(review, /draft && isExpanded &&/)
+  assert.match(review, /assignSelections/)
+  assert.doesNotMatch(review, /document\.getElementById/)
+  assert.doesNotMatch(review, /defaultValue/)
+})

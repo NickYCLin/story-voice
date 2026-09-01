@@ -32,6 +32,19 @@ public interface ISpeechPlanService
         Guid segmentId,
         CancellationToken cancellationToken);
 
+    Task<ChapterSpeechPlanDraftResponse?> ConfirmSuggestedSegmentsAsync(
+        Guid seriesId,
+        Guid draftId,
+        ConfirmSuggestedSpeechSegmentsRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ChapterSpeechPlanDraftResponse?> ReassignSegmentAsync(
+        Guid seriesId,
+        Guid draftId,
+        Guid segmentId,
+        ReassignSpeechSegmentRequest request,
+        CancellationToken cancellationToken);
+
     Task<ConfirmedSpeechPlanRevisionResponse?> ConfirmPlanAsync(
         Guid seriesId,
         Guid draftId,

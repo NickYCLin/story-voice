@@ -81,6 +81,10 @@ async def concat_audio(
     parts: list[Path],
     output_path: Path,
     *,
+    normalize_loudness: bool = False,
+    target_i: float = -16.0,
+    target_tp: float = -1.5,
+    target_lra: float = 11.0,
     ffmpeg_bin: str = "ffmpeg",
     runner: SubprocessRunner | None = None,
 ) -> None:
@@ -94,10 +98,17 @@ async def concat_audio(
             handle.write(f"file '{escaped}'\n")
 
     run = runner or run_subprocess
-    await run([
-        ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
-        "-c", "copy", str(output_path),
-    ])
+    if normalize_loudness:
+        await run([
+            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-af", f"loudnorm=I={target_i:.1f}:TP={target_tp:.1f}:LRA={target_lra:.1f}",
+            "-c:a", "libmp3lame", "-q:a", "2", str(output_path),
+        ])
+    else:
+        await run([
+            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-c", "copy", str(output_path),
+        ])
 
 
 async def probe_duration_seconds(
@@ -121,6 +132,7 @@ async def synthesize_multi_voice(
     turns: list[dict[str, Any]],
     output_path: str,
     *,
+    normalize_loudness: bool = False,
     max_chars: int = DEFAULT_MAX_CHARS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     communicator_factory: Callable[..., Any] | None = None,
@@ -191,7 +203,13 @@ async def synthesize_multi_voice(
                     progress_reporter(completed, total_chunks)
 
         candidate = work / "complete.mp3"
-        await concat_audio(sequence, candidate, ffmpeg_bin=ffmpeg_bin, runner=run)
+        await concat_audio(
+            sequence,
+            candidate,
+            normalize_loudness=normalize_loudness,
+            ffmpeg_bin=ffmpeg_bin,
+            runner=run,
+        )
         duration = await probe_duration_seconds(candidate, ffprobe_bin=ffprobe_bin, runner=run)
         if duration <= 0 or not candidate.exists() or candidate.stat().st_size < 1:
             raise RuntimeError("multi-voice synthesis produced no usable audio")
@@ -201,6 +219,7 @@ async def synthesize_multi_voice(
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
+    parser.add_argument("--no-loudness-norm", action="store_true", help="Disable EBU R128 loudness normalization")
     args = parser.parse_args()
 
     manifest = json.loads(sys.stdin.read())
@@ -212,6 +231,7 @@ async def main() -> None:
     await synthesize_multi_voice(
         manifest["turns"],
         args.output,
+        normalize_loudness=not args.no_loudness_norm,
         progress_reporter=lambda completed, total: print(
             f"STORYVOICE_PROGRESS {completed}/{total}",
             file=sys.stderr,

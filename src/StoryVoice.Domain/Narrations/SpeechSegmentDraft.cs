@@ -140,6 +140,35 @@ public sealed class SpeechSegmentDraft
         ReviewStatus = SpeechSegmentReviewStatus.Rejected;
     }
 
+    /// <summary>
+    /// Explicit user override of the segmenter's turn kind. The segmenter can misread unusual
+    /// quoting (dashes, unclosed quotes) as narration, or promote narration to dialogue; this is
+    /// the correction path. Chapter-title turns keep their derived kind and cannot be reassigned.
+    /// </summary>
+    internal void Reassign(SpeechSegmentTurnKind kind, Guid? characterId)
+    {
+        if (SourceKind != SpeechSegmentSourceKind.Body)
+        {
+            throw new InvalidOperationException("章名片段的朗讀方式由系列敘事設定決定，不可個別改指派。");
+        }
+
+        if (kind == SpeechSegmentTurnKind.Narrator && characterId is not null)
+        {
+            throw new ArgumentException("旁白片段不可指定角色。", nameof(characterId));
+        }
+
+        if (kind == SpeechSegmentTurnKind.InnerMonologue && characterId is null)
+        {
+            throw new ArgumentException("內心／默讀片段必須指定角色。", nameof(characterId));
+        }
+
+        Kind = kind;
+        CharacterId = characterId;
+        Confidence = 100;
+        DecisionSource = SpeechSegmentDecisionSource.User;
+        ReviewStatus = SpeechSegmentReviewStatus.Confirmed;
+    }
+
     private static string RequireHash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length is < 1 or > 128)

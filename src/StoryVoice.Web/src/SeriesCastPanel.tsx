@@ -57,12 +57,10 @@ type SeriesBook = {
 
 type SeriesCharacter = SeriesCharacterChoice & {
   role: 'Main' | 'Supporting' | 'Minor'
-  voiceProvider: string
   rate: string
   pitch: string
   volume: string
   notes: string | null
-  characterProfileId: string | null
   aliases: Array<{ id: string; value: string }>
 }
 
@@ -1128,7 +1126,37 @@ export function SeriesCastPanel() {
                 </section>
               </div>
 
-              {reviewEntries.length > 0 && <SpeechPlanReview characters={details.characters} csrfToken={csrfToken} entries={reviewEntries} onDraftUpdated={(draft) => setDraftsByChapter((current) => ({ ...current, [draft.chapterId]: draft }))} onRebuildCreated={(created) => { setBatch({ ...created, members: [] }); void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`).then(setBatch).catch(() => undefined) }} seriesId={details.id} />}
+              {reviewEntries.length > 0 && (
+                <SpeechPlanReview
+                  characterVoiceOptions={manualCharacterVoiceOptions}
+                  characters={details.characters}
+                  csrfToken={csrfToken}
+                  entries={reviewEntries}
+                  narratorProvider={details.narratorProvider}
+                  onAddCharacter={async (request) => {
+                    const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters`, {
+                      method: 'POST',
+                      csrfToken,
+                      body: {
+                        canonicalName: request.canonicalName,
+                        role: request.role,
+                        voiceProvider: request.voiceProvider,
+                        voice: request.voice,
+                        rate: profileDefaults.rate,
+                        pitch: profileDefaults.pitch,
+                        volume: profileDefaults.volume,
+                        notes: null,
+                        characterProfileId: null,
+                      },
+                    })
+                    setDetails(updated)
+                    return updated.characters.find((character) => character.canonicalName === request.canonicalName) ?? null
+                  }}
+                  onDraftUpdated={(draft) => setDraftsByChapter((current) => ({ ...current, [draft.chapterId]: draft }))}
+                  onRebuildCreated={(created) => { setBatch({ ...created, members: [] }); void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`).then(setBatch).catch(() => undefined) }}
+                  seriesId={details.id}
+                />
+              )}
               {details.books.length > 0 && reviewEntries.length === 0 && <div className="library-state mt-8">正在讀取僅屬於你的章節與劇本狀態…</div>}
 
               {batch && <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="staged rebuild 狀態"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-700">Staged rebuild</p><h2 className="mt-1 font-serif text-2xl text-stone-900">{batch.status}</h2></div>{batch.status === 'ReadyToActivate' && <button className="secondary-button" onClick={() => setActivateDialogOpen(true)} type="button">人工啟用完整系列音訊</button>}</div><ul className="mt-4 space-y-2">{batch.members.map((member) => <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}><span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span><span className="text-xs text-stone-500">{member.status}</span></li>)}</ul></section>}

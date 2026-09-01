@@ -6,7 +6,8 @@ namespace StoryVoice.Worker;
 
 public sealed class FfmpegVoAiAudioComposer(
     IOptions<VoAiOptions> options,
-    ILogger<FfmpegVoAiAudioComposer> logger) : IVoAiAudioComposer, IFfmpegAudioComposer
+    ILogger<FfmpegVoAiAudioComposer> logger,
+    IOptions<AudioComposerOptions>? composerOptions = null) : IVoAiAudioComposer, IFfmpegAudioComposer
 {
     public Task ComposeAsync(
         IReadOnlyList<VoAiAudioSegment> segments,
@@ -99,14 +100,24 @@ public sealed class FfmpegVoAiAudioComposer(
             await File.WriteAllLinesAsync(concatListPath, concatLines, cancellationToken);
 
             var candidatePath = Path.Combine(workDirectory, "complete.mp3");
-            await RunFfmpegAsync(
-                [
-                    "-y", "-hide_banner", "-loglevel", "error",
-                    "-f", "concat", "-safe", "0", "-i", concatListPath,
-                    "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3",
-                    candidatePath
-                ],
-                cancellationToken);
+            var compositionArguments = new List<string>
+            {
+                "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "concat", "-safe", "0", "-i", concatListPath
+            };
+
+            var normalization = composerOptions?.Value;
+            if (normalization is null || normalization.EnableLoudnessNormalization)
+            {
+                var targetI = normalization?.TargetIntegratedLoudness ?? -16.0;
+                var targetTp = normalization?.TargetTruePeak ?? -1.5;
+                var targetLra = normalization?.TargetLoudnessRange ?? 11.0;
+                compositionArguments.Add("-af");
+                compositionArguments.Add(BuildLoudnessNormalizationFilter(targetI, targetTp, targetLra));
+            }
+
+            compositionArguments.AddRange(["-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", candidatePath]);
+            await RunFfmpegAsync(compositionArguments, cancellationToken);
             if (!File.Exists(candidatePath) || new FileInfo(candidatePath).Length < 1)
             {
                 throw new InvalidOperationException("Audio composition produced no MP3 output.");
@@ -126,6 +137,40 @@ public sealed class FfmpegVoAiAudioComposer(
         {
             TryDeleteDirectory(workDirectory);
         }
+    }
+
+    internal static string BuildLoudnessNormalizationFilter(
+        double integratedLoudness = -16.0,
+        double truePeak = -1.5,
+        double loudnessRange = 11.0)
+    {
+        if (integratedLoudness is < -70.0 or > -5.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(integratedLoudness),
+                "Target integrated loudness must be between -70.0 and -5.0 LUFS.");
+        }
+
+        if (truePeak is < -9.0 or > 0.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(truePeak),
+                "Target true peak must be between -9.0 and 0.0 dBFS.");
+        }
+
+        if (loudnessRange is < 1.0 or > 50.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(loudnessRange),
+                "Target loudness range must be between 1.0 and 50.0 LU.");
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "loudnorm=I={0:0.#}:TP={1:0.#}:LRA={2:0.#}",
+            integratedLoudness,
+            truePeak,
+            loudnessRange);
     }
 
     internal static string BuildAudioFilter(string volume, int pauseBeforeMs)

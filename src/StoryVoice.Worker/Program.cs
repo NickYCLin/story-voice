@@ -48,6 +48,15 @@ builder.Services.AddOptions<VoAiOptions>()
     .Validate(options => options.SampleRate == 32_000,
         "VoAI synthesis currently requires a 32000 Hz WAV response.")
     .ValidateOnStart();
+builder.Services.AddOptions<AudioComposerOptions>()
+    .Bind(builder.Configuration.GetSection(AudioComposerOptions.SectionName))
+    .Validate(options => options.TargetIntegratedLoudness is >= -70.0 and <= -5.0,
+        "Target integrated loudness must be between -70.0 and -5.0 LUFS.")
+    .Validate(options => options.TargetTruePeak is >= -9.0 and <= 0.0,
+        "Target true peak must be between -9.0 and 0.0 dBFS.")
+    .Validate(options => options.TargetLoudnessRange is >= 1.0 and <= 50.0,
+        "Target loudness range must be between 1.0 and 50.0 LU.")
+    .ValidateOnStart();
 builder.Services.AddHttpClient(VoAiTtsClient.HttpClientName, client =>
         client.Timeout = Timeout.InfiniteTimeSpan)
     .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler

@@ -324,6 +324,119 @@ public sealed class ChapterSpeechPlanDraftTests
         Assert.NotEqual(first.Fingerprint, differentCharacter.Fingerprint);
     }
 
+    [Fact]
+    public void Confirming_suggested_segments_accepts_only_suggestions_that_carry_a_character()
+    {
+        var bobId = Guid.NewGuid();
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+            Dialogue(2, bobId, SpeechSegmentReviewStatus.Suggested),
+            Dialogue(3, null, SpeechSegmentReviewStatus.Suggested),
+        ]);
+
+        var confirmedCount = draft.ConfirmSuggestedSegments(characterId: null);
+
+        Assert.Equal(2, confirmedCount);
+        Assert.Equal(SpeechSegmentReviewStatus.Confirmed, draft.Segments[1].ReviewStatus);
+        Assert.Equal(AliceId, draft.Segments[1].CharacterId);
+        Assert.Equal(SpeechSegmentDecisionSource.User, draft.Segments[1].DecisionSource);
+        Assert.Equal(SpeechSegmentReviewStatus.Confirmed, draft.Segments[2].ReviewStatus);
+        Assert.Equal(SpeechSegmentReviewStatus.Suggested, draft.Segments[3].ReviewStatus);
+        Assert.Equal(ChapterSpeechPlanDraftStatus.NeedsReview, draft.Status);
+    }
+
+    [Fact]
+    public void Confirming_suggested_segments_for_one_character_leaves_other_suggestions_pending()
+    {
+        var bobId = Guid.NewGuid();
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+            Dialogue(2, bobId, SpeechSegmentReviewStatus.Suggested),
+        ]);
+
+        var confirmedCount = draft.ConfirmSuggestedSegments(AliceId);
+
+        Assert.Equal(1, confirmedCount);
+        Assert.Equal(SpeechSegmentReviewStatus.Confirmed, draft.Segments[1].ReviewStatus);
+        Assert.Equal(SpeechSegmentReviewStatus.Suggested, draft.Segments[2].ReviewStatus);
+    }
+
+    [Fact]
+    public void Reassigning_turns_a_misread_narrator_segment_into_confirmed_dialogue_and_back()
+    {
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 0, 5, Hash("misread"), SpeechSegmentTurnKind.Narrator, null, 100, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
+        ]);
+
+        draft.ReassignSegment(draft.Segments[1].Id, SpeechSegmentTurnKind.Dialogue, AliceId);
+
+        var segment = draft.Segments[1];
+        Assert.Equal(SpeechSegmentTurnKind.Dialogue, segment.Kind);
+        Assert.Equal(AliceId, segment.CharacterId);
+        Assert.Equal(SpeechSegmentDecisionSource.User, segment.DecisionSource);
+        Assert.Equal(SpeechSegmentReviewStatus.Confirmed, segment.ReviewStatus);
+        Assert.Equal(ChapterSpeechPlanDraftStatus.ReadyToConfirm, draft.Status);
+
+        draft.ReassignSegment(segment.Id, SpeechSegmentTurnKind.Narrator, null);
+
+        Assert.Equal(SpeechSegmentTurnKind.Narrator, draft.Segments[1].Kind);
+        Assert.Null(draft.Segments[1].CharacterId);
+    }
+
+    [Fact]
+    public void Reassigning_can_correct_an_auto_confirmed_rule_decision()
+    {
+        var bobId = Guid.NewGuid();
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            new DraftSegmentInput(1, SpeechSegmentSourceKind.Body, 10, 6, Hash("auto"), SpeechSegmentTurnKind.Dialogue, AliceId, 92, SpeechSegmentDecisionSource.Rule, SpeechSegmentReviewStatus.Confirmed),
+        ]);
+
+        draft.ReassignSegment(draft.Segments[1].Id, SpeechSegmentTurnKind.Dialogue, bobId);
+
+        Assert.Equal(bobId, draft.Segments[1].CharacterId);
+        Assert.Equal(SpeechSegmentDecisionSource.User, draft.Segments[1].DecisionSource);
+    }
+
+    [Fact]
+    public void Reassigning_enforces_kind_invariants_and_rejects_chapter_title_segments()
+    {
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+        ]);
+
+        Assert.Throws<InvalidOperationException>(
+            () => draft.ReassignSegment(draft.Segments[0].Id, SpeechSegmentTurnKind.Dialogue, AliceId));
+        Assert.Throws<ArgumentException>(
+            () => draft.ReassignSegment(draft.Segments[1].Id, SpeechSegmentTurnKind.Narrator, AliceId));
+        Assert.Throws<ArgumentException>(
+            () => draft.ReassignSegment(draft.Segments[1].Id, SpeechSegmentTurnKind.InnerMonologue, null));
+    }
+
+    [Fact]
+    public void Stale_draft_rejects_bulk_confirmation_and_reassignment()
+    {
+        var draft = CreateDraft(
+        [
+            TitleTurn(),
+            Dialogue(1, AliceId, SpeechSegmentReviewStatus.Suggested),
+        ]);
+        draft.MarkStale();
+
+        Assert.Throws<InvalidOperationException>(() => draft.ConfirmSuggestedSegments(null));
+        Assert.Throws<InvalidOperationException>(
+            () => draft.ReassignSegment(draft.Segments[1].Id, SpeechSegmentTurnKind.Narrator, null));
+    }
+
     private static ChapterSpeechPlanDraft CreateDraft(IReadOnlyList<DraftSegmentInput> segments) =>
         ChapterSpeechPlanDraft.Create(OwnerId, SeriesId, BookId, ChapterId, Hash("chapter-v1"), segments);
 

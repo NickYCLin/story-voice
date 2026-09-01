@@ -290,6 +290,7 @@ public static class DependencyInjection
         });
         services.AddScoped<IChapterSpeechPlanRepository, ChapterSpeechPlanRepository>();
         services.AddScoped<ISpeechPlanService, SpeechPlanService>();
+        services.AddScoped<ISpeechSegmentPreviewService, SpeechSegmentPreviewService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();

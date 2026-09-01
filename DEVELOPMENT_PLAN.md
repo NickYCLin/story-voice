@@ -1492,7 +1492,7 @@ Regenerate
 
 - [x] FFmpeg Integration
 - [x] Silence／speaker and chapter pauses
-- [ ] Volume Normalize
+- [x] Volume Normalize（EBU R128 loudnorm 響度標準化）
 - [x] MP3 Output
 - [x] Book／series narration audio composition
 - [x] Duration validation

@@ -54,11 +54,23 @@ type CandidateDraft = {
   selected: boolean
   canonicalName: string
   aliases: string
-  role: 'Main' | 'Supporting' | 'Minor'
   voiceKey: string
 }
 
+type SeriesCharacterDetail = {
+  id: string
+  canonicalName: string
+  role: 'Main' | 'Supporting' | 'Minor'
+  voiceProvider: string
+  voice: string
+  rate: string
+  pitch: string
+  volume: string
+  aliases: Array<{ id: string; value: string }>
+}
+
 const voiceKey = (voice: SeriesVoiceOption) => `${voice.provider}\n${voice.voice}`
+const identityKey = (value: string) => value.normalize('NFKC').trim().toUpperCase()
 const splitAliases = (value: string) => value
   .split(/[、,，\n]/)
   .map((alias) => alias.normalize('NFKC').trim())
@@ -80,6 +92,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
   const [seriesOptions, setSeriesOptions] = useState<StorySeriesSummary[]>([])
   const [voiceOptions, setVoiceOptions] = useState<SeriesVoiceOption[]>([])
   const [selectedSeriesId, setSelectedSeriesId] = useState('')
+  const [seriesCharacters, setSeriesCharacters] = useState<SeriesCharacterDetail[]>([])
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
   const [applyState, setApplyState] = useState<LoadState>('idle')
   const [applyMessage, setApplyMessage] = useState('')
@@ -153,14 +166,58 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
       const voices = await voicesResponse.json() as SeriesVoiceOption[]
       setSeriesOptions(series)
       setVoiceOptions(voices)
-      setSelectedSeriesId((current) => current || series[0]?.id || '')
+      // Prefer the series this book already belongs to; the alphabetical first
+      // entry is often an unrelated series and makes the cast lookup miss.
+      const memberships = await Promise.all(series.map(async (item) => {
+        try {
+          const response = await fetch(apiUrl(`/api/series/${item.id}`), { credentials: 'same-origin', signal: controller.signal })
+          if (!response.ok) return null
+          const details = await response.json() as { books: Array<{ bookId: string }> }
+          return details.books.some((member) => member.bookId === book.id) ? item.id : null
+        } catch {
+          return null
+        }
+      }))
+      const owningSeriesId = memberships.find((id) => id !== null) ?? null
+      setSelectedSeriesId((current) => owningSeriesId ?? (current || series[0]?.id || ''))
     }).catch((error) => {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setApplyState('error')
       setApplyMessage('系列與聲線清單讀取失敗，請重新整理。')
     })
     return () => controller.abort()
-  }, [])
+  }, [book.id])
+
+  useEffect(() => {
+    setSeriesCharacters([])
+    if (!selectedSeriesId) return
+    const controller = new AbortController()
+    fetch(apiUrl(`/api/series/${selectedSeriesId}`), { credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('series_detail_failed')
+        return response.json() as Promise<{ characters: SeriesCharacterDetail[] }>
+      })
+      .then((details) => setSeriesCharacters(details.characters))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setSeriesCharacters([])
+      })
+    return () => controller.abort()
+  }, [selectedSeriesId, applyState])
+
+  const seriesCharacterByIdentity = useMemo(() => {
+    const map = new Map<string, SeriesCharacterDetail>()
+    for (const character of seriesCharacters) {
+      map.set(identityKey(character.canonicalName), character)
+      for (const alias of character.aliases) map.set(identityKey(alias.value), character)
+    }
+    return map
+  }, [seriesCharacters])
+
+  const voiceDisplayName = (provider: string, voice: string) => {
+    const option = voiceOptions.find((item) => item.provider === provider && item.voice === voice)
+    return option ? `${option.displayName} · ${option.locale}` : voice
+  }
 
   useEffect(() => {
     if (!characterAnalysis) return
@@ -171,7 +228,6 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
         selected: existing?.selected ?? candidate.confidence === 'high',
         canonicalName: existing?.canonicalName ?? candidate.name,
         aliases: existing?.aliases ?? (candidate.aliases ?? []).join('、'),
-        role: existing?.role ?? (candidate.confidence === 'high' ? 'Supporting' : 'Minor'),
         voiceKey: existing && applicableVoiceOptions.some((voice) => voiceKey(voice) === existing.voiceKey)
           ? existing.voiceKey
           : fallbackVoice ? voiceKey(fallbackVoice) : '',
@@ -213,7 +269,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
       sourceName: string
       canonicalName: string
       aliases: string[]
-      role: CandidateDraft['role']
+      role: 'Main' | 'Supporting' | 'Minor'
       voiceProvider: string
       voice: string
       rate: string
@@ -225,13 +281,30 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
         .filter((candidate) => candidateDrafts[candidate.name]?.selected)
         .map((candidate) => {
           const draft = candidateDrafts[candidate.name]
+          if (!draft.canonicalName.trim()) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱。`)
+          const existingCharacter = seriesCharacterByIdentity.get(identityKey(draft.canonicalName))
+          if (existingCharacter) {
+            // Already cast in the series: the backend keeps the existing character's
+            // role/voice and only merges missing aliases, so echo its current values.
+            return {
+              sourceName: candidate.name,
+              canonicalName: draft.canonicalName.trim(),
+              aliases: splitAliases(draft.aliases),
+              role: existingCharacter.role,
+              voiceProvider: existingCharacter.voiceProvider,
+              voice: existingCharacter.voice,
+              rate: existingCharacter.rate,
+              pitch: existingCharacter.pitch,
+              volume: existingCharacter.volume,
+            }
+          }
           const voice = applicableVoiceOptions.find((option) => voiceKey(option) === draft.voiceKey)
-          if (!draft.canonicalName.trim() || !voice) throw new Error(`請補齊「${candidate.name}」的 canonical 名稱與聲線。`)
+          if (!voice) throw new Error(`請補齊「${candidate.name}」的聲線。`)
           return {
             sourceName: candidate.name,
             canonicalName: draft.canonicalName.trim(),
             aliases: splitAliases(draft.aliases),
-            role: draft.role,
+            role: candidate.confidence === 'high' ? 'Supporting' as const : 'Minor' as const,
             voiceProvider: voice.provider,
             voice: voice.voice,
             rate: '+0%',
@@ -327,24 +400,30 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
             <p className="mt-3 text-[10px] tracking-wide text-stone-400">模型 {characterAnalysis.model} · {characterAnalysis.promptVersion} · {new Date(characterAnalysis.generatedAt).toLocaleString('zh-TW')}</p>
             {characterAnalysis.candidates.length > 0 && (
               <div className="mt-4 space-y-3">
-                {characterAnalysis.candidates.map((candidate) => (
-                  <article className="rounded-xl border border-rose-100 bg-white p-3" key={candidate.name}>
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <label className="flex items-center gap-2 font-medium text-stone-800">
-                        <input checked={candidateDrafts[candidate.name]?.selected ?? false} onChange={(event) => updateCandidate(candidate.name, { selected: event.target.checked })} type="checkbox" />
-                        {candidate.name}
-                      </label>
-                      <span className={candidate.confidence === 'high' ? 'text-rose-700' : 'text-amber-700'}>{candidate.confidence === 'high' ? '高信心' : '中信心'}</span>
-                      <span className="text-stone-400">{candidate.dialogueEvidenceCount} 句 · 第 {candidate.evidenceChapterNumbers.join('、')} 章</span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-                      <label className="text-[10px] text-stone-500">Canonical 名稱<input className="auth-input mt-1" maxLength={80} onChange={(event) => updateCandidate(candidate.name, { canonicalName: event.target.value })} value={candidateDrafts[candidate.name]?.canonicalName ?? candidate.name} /></label>
-                      <label className="text-[10px] text-stone-500">Aliases（以、分隔）<input className="auth-input mt-1" maxLength={500} onChange={(event) => updateCandidate(candidate.name, { aliases: event.target.value })} value={candidateDrafts[candidate.name]?.aliases ?? (candidate.aliases ?? []).join('、')} /></label>
-                      <label className="text-[10px] text-stone-500">角色層級<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { role: event.target.value as CandidateDraft['role'] })} value={candidateDrafts[candidate.name]?.role ?? 'Minor'}><option value="Main">主要角色</option><option value="Supporting">次要角色</option><option value="Minor">小角色</option></select></label>
-                      <label className="text-[10px] text-stone-500">聲線<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { voiceKey: event.target.value })} value={candidateDrafts[candidate.name]?.voiceKey ?? ''}><option value="">選擇聲線</option>{applicableVoiceOptions.map((voice) => <option key={voiceKey(voice)} value={voiceKey(voice)}>{voice.displayName} · {voice.locale}</option>)}</select></label>
-                    </div>
-                  </article>
-                ))}
+                {characterAnalysis.candidates.map((candidate) => {
+                  const draftName = candidateDrafts[candidate.name]?.canonicalName ?? candidate.name
+                  const existingCharacter = seriesCharacterByIdentity.get(identityKey(draftName))
+                  return (
+                    <article className="rounded-xl border border-rose-100 bg-white p-3" key={candidate.name}>
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <label className="flex items-center gap-2 font-medium text-stone-800">
+                          <input checked={candidateDrafts[candidate.name]?.selected ?? false} onChange={(event) => updateCandidate(candidate.name, { selected: event.target.checked })} type="checkbox" />
+                          {candidate.name}
+                        </label>
+                        <span className={candidate.confidence === 'high' ? 'text-rose-700' : 'text-amber-700'}>{candidate.confidence === 'high' ? '高信心' : '中信心'}</span>
+                        <span className="text-stone-400">{candidate.dialogueEvidenceCount} 句 · 第 {candidate.evidenceChapterNumbers.join('、')} 章</span>
+                        {existingCharacter && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">已在系列角色表</span>}
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        <label className="text-[10px] text-stone-500">Canonical 名稱<input className="auth-input mt-1" maxLength={80} onChange={(event) => updateCandidate(candidate.name, { canonicalName: event.target.value })} value={candidateDrafts[candidate.name]?.canonicalName ?? candidate.name} /></label>
+                        <label className="text-[10px] text-stone-500">Aliases（以、分隔）<input className="auth-input mt-1" maxLength={500} onChange={(event) => updateCandidate(candidate.name, { aliases: event.target.value })} value={candidateDrafts[candidate.name]?.aliases ?? (candidate.aliases ?? []).join('、')} /></label>
+                        {existingCharacter
+                          ? <p className="text-[10px] leading-6 text-stone-500 lg:col-span-2">目前聲線：<span className="font-medium text-stone-700">{voiceDisplayName(existingCharacter.voiceProvider, existingCharacter.voice)}</span><span className="ml-2 text-stone-400">{existingCharacter.rate} · {existingCharacter.pitch} · {existingCharacter.volume}</span><span className="ml-2 text-stone-400">套用只會補齊 alias，不會變更聲線；要調整請到系列配音頁。</span></p>
+                          : <label className="text-[10px] text-stone-500">聲線<select className="auth-input mt-1" onChange={(event) => updateCandidate(candidate.name, { voiceKey: event.target.value })} value={candidateDrafts[candidate.name]?.voiceKey ?? ''}><option value="">選擇聲線</option>{applicableVoiceOptions.map((voice) => <option key={voiceKey(voice)} value={voiceKey(voice)}>{voice.displayName} · {voice.locale}</option>)}</select></label>}
+                      </div>
+                    </article>
+                  )
+                })}
                 <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                   <label className="text-xs text-stone-500">套用到系列<select className="auth-input mt-2" onChange={(event) => setSelectedSeriesId(event.target.value)} value={selectedSeriesId}><option value="">選擇系列</option>{seriesOptions.map((series) => <option key={series.id} value={series.id}>{series.name} · {series.characterCount} 位角色</option>)}</select></label>
                   {selectedSeries && <p className="mt-2 text-xs text-stone-500">角色聲線已限制為系列 provider：{selectedSeries.narratorProvider}，避免建立無法合成的混用 cast。</p>}
