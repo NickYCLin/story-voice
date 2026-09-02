@@ -28,7 +28,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
     private const int MaxPollAttempts = 150;
     private const string BreakCharacters = "\n。！？；，、,.!?:：";
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -112,6 +112,8 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
         {
             TryDeleteDirectory(workDirectory, logger);
         }
+
+        return MultiVoiceSynthesisResult.None;
     }
 
     private async Task SynthesizeChunkAsync(

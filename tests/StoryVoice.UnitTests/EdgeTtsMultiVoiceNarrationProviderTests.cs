@@ -111,7 +111,7 @@ internal sealed class FakeMultiVoiceProvider(string providerName) : IMultiVoiceN
     public MultiVoiceNarrationRequest? LastRequest { get; private set; }
     public string? LastOutputPath { get; private set; }
 
-    public Task SynthesizeAsync(
+    public Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -119,7 +119,7 @@ internal sealed class FakeMultiVoiceProvider(string providerName) : IMultiVoiceN
     {
         LastRequest = request;
         LastOutputPath = outputPath;
-        return Task.CompletedTask;
+        return Task.FromResult(MultiVoiceSynthesisResult.None);
     }
 }
 
@@ -130,10 +130,10 @@ internal sealed class FakeVersionedMultiVoiceProvider(
     public string ProviderName { get; } = providerName;
     public string ProviderVersion { get; } = providerVersion;
 
-    public Task SynthesizeAsync(
+    public Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
         CancellationToken cancellationToken) =>
-        Task.CompletedTask;
+        Task.FromResult(MultiVoiceSynthesisResult.None);
 }

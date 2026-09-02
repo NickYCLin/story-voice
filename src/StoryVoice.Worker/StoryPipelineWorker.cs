@@ -236,6 +236,7 @@ public sealed class StoryPipelineWorker(
             Directory.CreateDirectory(Path.GetDirectoryName(absolutePath)!);
             temporaryPath = absolutePath + $".tmp-{Guid.NewGuid():N}";
 
+            NarrationTimelineDocument? timelineDocument = null;
             using var timeout = new CancellationTokenSource(
                 TimeSpan.FromMinutes(options.Value.ProviderTimeoutMinutes));
             using var providerCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -289,7 +290,7 @@ public sealed class StoryPipelineWorker(
                         job.OwnerId,
                         job.SeriesId.Value,
                         stoppingToken);
-                    var turns = MultiCharacterTurnBuilder.BuildTurns(
+                    var turnPlan = MultiCharacterTurnBuilder.BuildTurnPlan(
                         castRevision,
                         chapterPlans,
                         voiceProfiles,
@@ -303,12 +304,15 @@ public sealed class StoryPipelineWorker(
                         ComputeSpeechPlanFingerprint(chapterPlans),
                         castRevision.CompositionVersion,
                         castRevision.FfmpegProfile);
-                    await multiVoiceDispatcher.SynthesizeAsync(
+                    var synthesisResult = await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
-                        CreateMultiVoiceNarrationRequest(castRevision, turns, cacheContext),
+                        CreateMultiVoiceNarrationRequest(castRevision, turnPlan.Turns, cacheContext),
                         temporaryPath,
                         reportProgress,
                         providerCancellation.Token);
+                    timelineDocument = NarrationTimelineComposer.Compose(
+                        turnPlan.Sources,
+                        synthesisResult.TurnTimings);
                 }
                 else
                 {
@@ -341,6 +345,7 @@ public sealed class StoryPipelineWorker(
             File.Move(temporaryPath, absolutePath, overwrite: false);
             temporaryPath = null;
             uncommittedAudioPath = absolutePath;
+            await PersistTimelineAsync(db, job.OwnerId, claim.JobId, timelineDocument, stoppingToken);
             var completedAt = DateTimeOffset.UtcNow;
             var persistedRelativePath = relativePath.Replace('\\', '/');
             int affected;
@@ -530,6 +535,43 @@ public sealed class StoryPipelineWorker(
                         && operation.FormalNarrationAllowed)))
             .ToListAsync(cancellationToken);
         return (profiles, characterProfileIdsByCharacterId);
+    }
+
+    /// <summary>
+    /// Best-effort by design: the MP3 already exists, so a failed timeline write only costs
+    /// playback sync — it must never fail (or roll back) the completed synthesis itself.
+    /// </summary>
+    private async Task PersistTimelineAsync(
+        StoryVoiceDbContext db,
+        Guid ownerId,
+        Guid jobId,
+        NarrationTimelineDocument? timelineDocument,
+        CancellationToken cancellationToken)
+    {
+        if (timelineDocument is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await db.NarrationTimelines
+                .Where(timeline => timeline.NarrationJobId == jobId)
+                .ExecuteDeleteAsync(cancellationToken);
+            db.NarrationTimelines.Add(NarrationTimeline.Create(ownerId, jobId, timelineDocument.ToJson()));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to persist the playback timeline for narration job {JobId}; playback sync stays unavailable",
+                jobId);
+        }
+        finally
+        {
+            db.ChangeTracker.Clear();
+        }
     }
 
     private static async Task<IReadOnlyList<ChapterPlanSource>> LoadChapterPlanSourcesAsync(

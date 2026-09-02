@@ -21,3 +21,30 @@ public sealed record NarrationJobResponse(
     DateTimeOffset? CompletedAt);
 
 public sealed record NarrationAudioDescriptor(string AbsolutePath, string ContentType);
+
+/// <summary>
+/// The playback timeline for one completed narration job. <see cref="TextAvailable"/> is false
+/// when the book's chapters changed after the audio was composed — timing and chapter navigation
+/// still work, but stale offsets are never sliced into wrong text.
+/// </summary>
+public sealed record NarrationTimelineResponse(
+    Guid JobId,
+    bool TextAvailable,
+    IReadOnlyList<NarrationTimelineChapterResponse> Chapters,
+    IReadOnlyList<NarrationTimelineTurnResponse> Turns);
+
+public sealed record NarrationTimelineChapterResponse(
+    Guid ChapterId,
+    int SortOrder,
+    string Title,
+    long StartMs);
+
+public sealed record NarrationTimelineTurnResponse(
+    int Index,
+    long StartMs,
+    long DurationMs,
+    int ChapterSortOrder,
+    string Kind,
+    Guid? CharacterId,
+    string? CharacterName,
+    string? Text);

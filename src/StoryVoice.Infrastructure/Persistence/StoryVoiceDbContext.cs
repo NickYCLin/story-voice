@@ -76,6 +76,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<NarrationJobSpeechPlan> NarrationJobSpeechPlans => Set<NarrationJobSpeechPlan>();
 
+    public DbSet<NarrationTimeline> NarrationTimelines => Set<NarrationTimeline>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

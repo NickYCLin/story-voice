@@ -1510,9 +1510,9 @@ chapter_001.mp3
 # 41. Phase 8 — Player
 
 - [x] Private HTML audio player
-- [ ] Chapter List
-- [ ] Current Sentence
-- [ ] Current Character
+- [x] Chapter List（合成時間軸章節列表、點擊跳轉與上一章／下一章；Edge 多角色路徑產生時間軸）
+- [x] Current Sentence（播放中逐 turn 文字同步顯示；文字以 offset 於讀取時切出，來源變更即停止供文）
+- [x] Current Character（播放中角色／旁白／內心獨白標示）
 - [x] Seek（browser native control）
 - [x] 明確的播放倍速控制（0.75x ~ 2.0x 顯式倍速切換控制項）
 - [x] Listening Progress（播放時間記憶與進度持久化）

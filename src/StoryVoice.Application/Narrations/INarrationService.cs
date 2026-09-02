@@ -14,4 +14,6 @@ public interface INarrationService
     Task<NarrationJobResponse?> CancelAsync(Guid jobId, CancellationToken cancellationToken);
 
     Task<NarrationAudioDescriptor?> GetAudioAsync(Guid jobId, CancellationToken cancellationToken);
+
+    Task<NarrationTimelineResponse?> GetTimelineAsync(Guid jobId, CancellationToken cancellationToken);
 }

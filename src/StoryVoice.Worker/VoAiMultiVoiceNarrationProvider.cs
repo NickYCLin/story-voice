@@ -16,7 +16,7 @@ public sealed class VoAiMultiVoiceNarrationProvider(
 
     public string ProviderName => CharacterVoiceProviders.VoAi;
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -114,6 +114,8 @@ public sealed class VoAiMultiVoiceNarrationProvider(
             {
                 TryDeleteDirectory(workDirectory);
             }
+
+            return MultiVoiceSynthesisResult.None;
         }
         catch (OperationCanceledException)
         {

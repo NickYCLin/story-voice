@@ -111,6 +111,175 @@ internal sealed class NarrationService(
         return new NarrationAudioDescriptor(path, "audio/mpeg");
     }
 
+    public async Task<NarrationTimelineResponse?> GetTimelineAsync(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var job = await OwnedRegularJobs().SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        if (job is null || !job.IsAvailableForRegularPlayback)
+        {
+            return null;
+        }
+
+        var timeline = await dbContext.NarrationTimelines
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.NarrationJobId == jobId && item.OwnerId == currentUser.UserId,
+                cancellationToken);
+        if (timeline is null)
+        {
+            return null;
+        }
+
+        var document = NarrationTimelineDocument.FromJson(timeline.TimelineJson);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var contentBook = await dbContext.Books
+            .AsNoTracking()
+            .Include(book => book.Chapters)
+            .SingleOrDefaultAsync(
+                book => book.Id == job.ContentBookId && book.OwnerId == currentUser.UserId,
+                cancellationToken);
+        var chaptersById = contentBook?.Chapters.ToDictionary(chapter => chapter.Id)
+            ?? new Dictionary<Guid, Chapter>();
+        var textAvailable = contentBook is not null
+            && SourceHashStillMatches(contentBook, job.SourceHash);
+        var characterNames = await LoadCharacterNamesAsync(job.SeriesId, document, cancellationToken);
+
+        var chapters = new List<NarrationTimelineChapterResponse>();
+        var turns = new List<NarrationTimelineTurnResponse>(document.Turns.Count);
+        for (var index = 0; index < document.Turns.Count; index++)
+        {
+            var turn = document.Turns[index];
+            if (turn.ChapterStart || chapters.Count == 0)
+            {
+                chapters.Add(new NarrationTimelineChapterResponse(
+                    turn.ChapterId,
+                    turn.ChapterSortOrder,
+                    chaptersById.TryGetValue(turn.ChapterId, out var chapter) ? chapter.Title : string.Empty,
+                    turn.StartMs));
+            }
+
+            var (kind, characterId) = ResolveTurnIdentity(turn);
+            turns.Add(new NarrationTimelineTurnResponse(
+                index,
+                turn.StartMs,
+                turn.DurationMs,
+                turn.ChapterSortOrder,
+                kind,
+                characterId,
+                characterId is Guid id ? characterNames.GetValueOrDefault(id) : null,
+                textAvailable ? SliceTurnText(turn, chaptersById) : null));
+        }
+
+        return new NarrationTimelineResponse(job.Id, textAvailable, chapters, turns);
+    }
+
+    private static bool SourceHashStillMatches(Book contentBook, string expectedSourceHash)
+    {
+        try
+        {
+            var source = NarrationSource.Create(contentBook.Chapters.Select(chapter =>
+                new NarrationChapterSource(chapter.Id, chapter.SortOrder, chapter.Title, chapter.OriginalText)));
+            return string.Equals(source.SourceHash, expectedSourceHash, StringComparison.Ordinal);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, string>> LoadCharacterNamesAsync(
+        Guid? seriesId,
+        NarrationTimelineDocument document,
+        CancellationToken cancellationToken)
+    {
+        if (seriesId is not Guid series)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        var characterIds = document.Turns
+            .SelectMany(turn => turn.Slices)
+            .Where(slice => slice.CharacterId is not null)
+            .Select(slice => slice.CharacterId!.Value)
+            .Distinct()
+            .ToArray();
+        if (characterIds.Length == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return await dbContext.SeriesCharacters
+            .AsNoTracking()
+            .Where(character => character.OwnerId == currentUser.UserId
+                && character.SeriesId == series
+                && characterIds.Contains(character.Id))
+            .ToDictionaryAsync(
+                character => character.Id,
+                character => character.CanonicalName,
+                cancellationToken);
+    }
+
+    /// <summary>
+    /// A merged turn can fold several confirmed segments into one stretch of audio. It only keeps
+    /// a single story identity when every slice agrees; anything blended (e.g. narration merged
+    /// with a dialogue line that fell back to the narrator voice) reports "mixed" rather than
+    /// mislabelling narration as one character's line.
+    /// </summary>
+    private static (string Kind, Guid? CharacterId) ResolveTurnIdentity(NarrationTimelineTurn turn)
+    {
+        var kinds = turn.Slices.Select(slice => slice.Kind).Distinct().ToArray();
+        var characterIds = turn.Slices.Select(slice => slice.CharacterId).Distinct().ToArray();
+        if (kinds.Length == 1
+            && string.Equals(kinds[0], NarrationTimelineTurnKinds.Narrator, StringComparison.Ordinal))
+        {
+            return (NarrationTimelineTurnKinds.Narrator, null);
+        }
+
+        if (kinds.Length == 1 && characterIds.Length == 1 && characterIds[0] is Guid characterId)
+        {
+            return (kinds[0], characterId);
+        }
+
+        return (NarrationTimelineTurnKinds.Mixed, null);
+    }
+
+    private static string? SliceTurnText(
+        NarrationTimelineTurn turn,
+        IReadOnlyDictionary<Guid, Chapter> chaptersById)
+    {
+        if (!chaptersById.TryGetValue(turn.ChapterId, out var chapter))
+        {
+            return null;
+        }
+
+        var builder = new System.Text.StringBuilder();
+        foreach (var slice in turn.Slices)
+        {
+            var sourceText = string.Equals(
+                slice.SourceKind,
+                NarrationTimelineSourceKinds.ChapterTitle,
+                StringComparison.Ordinal)
+                ? chapter.Title
+                : chapter.OriginalText;
+            if (slice.StartOffset < 0
+                || slice.Length < 1
+                || slice.StartOffset > sourceText.Length
+                || slice.Length > sourceText.Length - slice.StartOffset)
+            {
+                return null;
+            }
+
+            builder.Append(sourceText, slice.StartOffset, slice.Length);
+        }
+
+        return builder.ToString();
+    }
+
     private async Task<NarrationJobResponse?> RequeueIfTerminalAsync(
         Guid jobId,
         CancellationToken cancellationToken)

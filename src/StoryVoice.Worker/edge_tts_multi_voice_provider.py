@@ -13,6 +13,7 @@ import edge_tts
 
 
 MANIFEST_SCHEMA_VERSION = "storyvoice:multi-voice-manifest:v1"
+TIMELINE_SCHEMA_VERSION = "storyvoice:multi-voice-timeline:v1"
 DEFAULT_MAX_CHARS = 5_000
 DEFAULT_MAX_ATTEMPTS = 3
 BREAK_CHARACTERS = "\n。！？；，、,.!?:："
@@ -141,7 +142,7 @@ async def synthesize_multi_voice(
     subprocess_runner: SubprocessRunner | None = None,
     ffmpeg_bin: str = "ffmpeg",
     ffprobe_bin: str = "ffprobe",
-) -> None:
+) -> list[dict[str, int]]:
     if not turns:
         raise ValueError("manifest has no turns")
     if max_attempts < 1:
@@ -163,7 +164,17 @@ async def synthesize_multi_voice(
     if total_chunks == 0:
         raise ValueError("no synthesizable text in manifest")
 
+    async def probe_part_ms(path: Path) -> int:
+        seconds = await probe_duration_seconds(path, ffprobe_bin=ffprobe_bin, runner=run)
+        if seconds < 0:
+            raise RuntimeError("ffprobe reported a negative part duration")
+        return round(seconds * 1000)
+
     completed = 0
+    timeline: list[dict[str, int]] = []
+    # Integer-millisecond cursor built from per-part probed durations, so turn boundaries stay
+    # monotonic by construction instead of accumulating float rounding drift.
+    cursor_ms = 0
     with tempfile.TemporaryDirectory(prefix="edge-tts-multi-", dir=output.parent) as directory:
         work = Path(directory)
         sequence: list[Path] = []
@@ -175,7 +186,9 @@ async def synthesize_multi_voice(
                 silence_path, pause_before_ms, ffmpeg_bin=ffmpeg_bin, runner=run
             ):
                 sequence.append(silence_path)
+                cursor_ms += await probe_part_ms(silence_path)
 
+            turn_start_ms = cursor_ms
             voice = str(turn["voice"])
             rate = str(turn.get("rate", "+0%"))
             pitch = str(turn.get("pitch", "+0Hz"))
@@ -198,9 +211,16 @@ async def synthesize_multi_voice(
                             ) from error
                         await wait(float(2 ** (attempt - 1)))
                 sequence.append(part)
+                cursor_ms += await probe_part_ms(part)
                 completed += 1
                 if progress_reporter is not None:
                     progress_reporter(completed, total_chunks)
+
+            timeline.append({
+                "index": turn_index,
+                "startMs": turn_start_ms,
+                "durationMs": cursor_ms - turn_start_ms,
+            })
 
         candidate = work / "complete.mp3"
         await concat_audio(
@@ -215,6 +235,8 @@ async def synthesize_multi_voice(
             raise RuntimeError("multi-voice synthesis produced no usable audio")
         os.replace(candidate, output)
 
+    return timeline
+
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
@@ -228,7 +250,7 @@ async def main() -> None:
             f"unsupported manifest schemaVersion: {manifest.get('schemaVersion')!r}"
         )
 
-    await synthesize_multi_voice(
+    timeline = await synthesize_multi_voice(
         manifest["turns"],
         args.output,
         normalize_loudness=not args.no_loudness_norm,
@@ -237,6 +259,11 @@ async def main() -> None:
             file=sys.stderr,
             flush=True,
         ),
+    )
+    # stdout carries only this machine-readable timeline; diagnostics stay on stderr.
+    print(
+        json.dumps({"schemaVersion": TIMELINE_SCHEMA_VERSION, "turns": timeline}),
+        flush=True,
     )
 
 

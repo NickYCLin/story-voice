@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
-import { AudioPlayer } from './components/AudioPlayer'
+import { AudioPlayer, type NarrationTimeline } from './components/AudioPlayer'
 
 type NarrationBook = {
   id: string
@@ -51,6 +51,38 @@ function VoiceWave() {
         <span key={index} style={{ '--wave': `${height * 100}%`, '--delay': `${(index % 5) * .15}s` } as CSSProperties} />
       ))}
     </div>
+  )
+}
+
+function CompletedNarrationPlayer({ job }: { job: NarrationJob }) {
+  const [timeline, setTimeline] = useState<NarrationTimeline | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/narrations/${job.id}/timeline`), {
+          credentials: 'same-origin',
+          signal: controller.signal,
+        })
+        // 404 代表這個工作沒有時間軸（較舊的音訊或 provider 不支援）；播放器維持原樣。
+        if (!response.ok) return
+        setTimeline(await response.json() as NarrationTimeline)
+      } catch {
+        // 時間軸是加值資訊，讀取失敗不影響播放。
+      }
+    })()
+    return () => controller.abort()
+  }, [job.id])
+
+  return (
+    <AudioPlayer
+      className="mt-4"
+      src={apiUrl(`/api/narrations/${job.id}/audio`)}
+      storageKey={`narration-${job.id}`}
+      timeline={timeline}
+      title={`${job.voice} · ${job.rate}`}
+    />
   )
 }
 
@@ -208,14 +240,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
                 取消工作
               </button>
             )}
-            {job.status === 'Completed' && (
-              <AudioPlayer
-                className="mt-4"
-                src={apiUrl(`/api/narrations/${job.id}/audio`)}
-                storageKey={`narration-${job.id}`}
-                title={`${job.voice} · ${job.rate}`}
-              />
-            )}
+            {job.status === 'Completed' && <CompletedNarrationPlayer job={job} />}
             {job.status === 'Failed' && (
               <p className="mt-3 text-sm text-rose-600">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
             )}

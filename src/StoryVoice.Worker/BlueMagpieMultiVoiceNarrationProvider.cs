@@ -33,7 +33,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
 
     public string ProviderVersion => PinnedProviderVersion;
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -199,6 +199,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                     cacheMisses);
             }
         }
+
+        return MultiVoiceSynthesisResult.None;
     }
 
     internal static IReadOnlyList<string> SplitText(string text)

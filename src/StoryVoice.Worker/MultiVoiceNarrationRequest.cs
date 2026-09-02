@@ -41,3 +41,20 @@ public sealed record MultiVoiceNarrationRequest(
     NarrationProviderContract? NarratorProvider = null,
     IReadOnlyList<NarrationProviderContract>? CharacterProviders = null,
     NarrationSynthesisCacheContext? CacheContext = null);
+
+/// <summary>
+/// Where one turn's audible audio starts inside the finished MP3 and how long it plays.
+/// <see cref="StartMs"/> points at the first audible sample of the turn — after any
+/// <see cref="NarrationTurn.PauseBeforeMs"/> silence — so seeking to it never lands in a gap.
+/// </summary>
+public sealed record NarrationTurnTiming(int TurnIndex, long StartMs, long DurationMs);
+
+/// <summary>
+/// What a multi-voice provider can report about the audio it just produced. Timing is optional by
+/// design: a provider that cannot measure per-turn durations returns <see cref="None"/> and the
+/// job still completes — it just ships without a playback timeline.
+/// </summary>
+public sealed record MultiVoiceSynthesisResult(IReadOnlyList<NarrationTurnTiming>? TurnTimings)
+{
+    public static readonly MultiVoiceSynthesisResult None = new((IReadOnlyList<NarrationTurnTiming>?)null);
+}

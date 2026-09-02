@@ -56,6 +56,17 @@ public static class NarrationEndpoints
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
+        jobGroup.MapGet("/timeline", async (
+            Guid jobId,
+            HttpContext httpContext,
+            INarrationService service,
+            CancellationToken cancellationToken) =>
+        {
+            var timeline = await service.GetTimelineAsync(jobId, cancellationToken);
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            return timeline is null ? Results.NotFound() : Results.Ok(timeline);
+        });
+
         jobGroup.MapGet("/audio", async (
             Guid jobId,
             HttpContext httpContext,

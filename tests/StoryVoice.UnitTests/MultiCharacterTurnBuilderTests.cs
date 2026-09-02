@@ -408,6 +408,56 @@ public sealed class MultiCharacterTurnBuilderTests
             exception.ErrorCode);
     }
 
+    [Fact]
+    public void BuildTurnPlan_sources_align_with_turns_and_carry_chapter_and_slice_provenance()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        var chapterOne = BuildConfirmedChapter(0, "第一章", "「你回來了？」艾莉絲說。", AliceId);
+        var chapterTwo = BuildConfirmedChapter(1, "第二章", "雨還在下。", AliceId);
+
+        var plan = MultiCharacterTurnBuilder.BuildTurnPlan(castRevision, [chapterOne, chapterTwo]);
+
+        Assert.Equal(plan.Turns.Count, plan.Sources.Count);
+        Assert.True(plan.Sources[0].ChapterStart);
+        Assert.Equal(0, plan.Sources[0].ChapterSortOrder);
+        Assert.Equal(SpeechSegmentSourceKind.ChapterTitle, plan.Sources[0].Slices[0].SourceKind);
+
+        var dialogueTurnIndex = plan.Turns.ToList().FindIndex(turn => turn.Voice == "alice-voice");
+        var dialogueSlice = Assert.Single(plan.Sources[dialogueTurnIndex].Slices);
+        Assert.Equal(SpeechSegmentTurnKind.Dialogue, dialogueSlice.Kind);
+        Assert.Equal(AliceId, dialogueSlice.CharacterId);
+
+        var chapterTwoTurnIndex = plan.Turns.ToList().FindIndex(turn => turn.Text.Contains("第二章"));
+        Assert.True(plan.Sources[chapterTwoTurnIndex].ChapterStart);
+        Assert.Equal(1, plan.Sources[chapterTwoTurnIndex].ChapterSortOrder);
+        Assert.NotEqual(plan.Sources[0].ChapterId, plan.Sources[chapterTwoTurnIndex].ChapterId);
+        // Chapter 2's title and body merge into one narrator turn, so its source must carry both
+        // slices — the title slice from the title text and the body slice from the body text.
+        Assert.Equal(2, plan.Sources[chapterTwoTurnIndex].Slices.Count);
+        Assert.Equal(SpeechSegmentSourceKind.ChapterTitle, plan.Sources[chapterTwoTurnIndex].Slices[0].SourceKind);
+        Assert.Equal(SpeechSegmentSourceKind.Body, plan.Sources[chapterTwoTurnIndex].Slices[1].SourceKind);
+    }
+
+    [Fact]
+    public void BuildTurnPlan_merged_slices_reassemble_the_exact_turn_text_from_the_chapter_sources()
+    {
+        var castRevision = BuildCastRevision(narratorVoice: "narrator-voice", aliceVoice: "alice-voice");
+        const string title = "序章";
+        const string body = "風穿過長廊。吹熄了燈。";
+        var chapter = BuildConfirmedChapter(0, title, body, AliceId);
+
+        var plan = MultiCharacterTurnBuilder.BuildTurnPlan(castRevision, [chapter]);
+
+        for (var index = 0; index < plan.Turns.Count; index++)
+        {
+            var reassembled = string.Concat(plan.Sources[index].Slices.Select(slice =>
+                slice.SourceKind == SpeechSegmentSourceKind.ChapterTitle
+                    ? title.Substring(slice.StartOffset, slice.Length)
+                    : body.Substring(slice.StartOffset, slice.Length)));
+            Assert.Equal(plan.Turns[index].Text, reassembled);
+        }
+    }
+
     private static NarrationCastRevision BuildCastRevision(
         string narratorVoice,
         string aliceVoice,

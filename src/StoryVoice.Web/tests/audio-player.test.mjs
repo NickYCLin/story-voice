@@ -36,3 +36,28 @@ test('AudioPlayer integrates with NarrationPanel and uses bilingual i18n', () =>
   assert.ok(playerSource.includes('useLocale()'))
   assert.ok(playerSource.includes('localize('))
 })
+
+test('AudioPlayer renders a chapter list with click-to-seek navigation from the timeline', () => {
+  assert.ok(playerSource.includes('timeline.chapters.map'))
+  assert.ok(playerSource.includes('seekToMs(chapter.startMs)'))
+  assert.ok(playerSource.includes("localize(locale, '章節列表', 'Chapter list')"))
+  assert.ok(playerSource.includes('goToPreviousChapter'))
+  assert.ok(playerSource.includes('goToNextChapter'))
+  assert.ok(playerSource.includes("aria-current={index === currentChapterIndex ? 'true' : undefined}"))
+})
+
+test('AudioPlayer highlights the current sentence and speaking character during playback', () => {
+  assert.ok(playerSource.includes('findTimelineIndex'))
+  assert.ok(playerSource.includes('currentTurn'))
+  assert.ok(playerSource.includes('speakerLabel(currentTurn)'))
+  assert.ok(playerSource.includes('currentTurn?.text'))
+  assert.ok(playerSource.includes("localize(locale, '旁白', 'Narrator')"))
+  assert.ok(playerSource.includes("localize(locale, '內心獨白', 'Inner monologue')"))
+})
+
+test('NarrationPanel fetches the playback timeline for completed jobs without breaking playback on 404', () => {
+  assert.ok(narrationPanelSource.includes('CompletedNarrationPlayer'))
+  assert.ok(narrationPanelSource.includes('/timeline'))
+  assert.ok(narrationPanelSource.includes('if (!response.ok) return'))
+  assert.ok(narrationPanelSource.includes('timeline={timeline}'))
+})

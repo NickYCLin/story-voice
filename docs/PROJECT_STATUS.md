@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-30（repository／production 唯讀狀態、前後端、CI、可在本機驗證的相依安全與文件全面稽核）
+最後更新：2026-09-02（播放器章節列表與逐句／角色同步；先前輪次：播放倍速／進度續播、劇本審核試聽、角色庫 AI 輔助、EBU R128 響度標準化）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -64,6 +64,7 @@
 - BlueMagpie 正式工作在建立任何 cast／batch／job 前會逐冊執行保守的 chunk 與 PCM/WAV budget preflight；Worker 再以實際 chunks 與快取／gateway 音訊 bytes 重驗。合成進度只在整數百分比增加時寫入資料庫，暫時性失敗與 timeout 會等待 GPU lease 安全冷卻後才重試。
 - Edge 對白依情緒（緊張／開心／生氣／難過）微調 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱；BlueMagpie 維持固定中性參數。
 - 角色庫（Character Library，見下方獨立章節）：owner-scoped、跨系列共用的角色管理頁面（`/characters`），角色的基本資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格）與自訂聲線（Character Voice Studio）都掛在角色庫上，任何系列的多角色配音都能直接選用同一個角色，不用每個系列各自重建。
+- 播放器章節／句子／角色同步：Edge 多角色合成時由 provider 以 ffprobe 實測回報逐 turn 起點與時長，Worker 在完成音訊後把「時間 + 章節 + 確認片段 offset」寫入 `narration_timelines`（一 job 一份 JSON 文件，只存 offset 不存正文；寫入為 best-effort，失敗不影響完成的音訊）。owner-scoped `GET /api/narrations/{jobId}/timeline` 讀取時會重算書籍 source hash，僅在與工作鎖定的正文一致時才切出逐 turn 文字，否則保留時間軸但不供文；合併 turn 若混合旁白與角色片段會誠實標為 mixed，不會誤標為單一角色。前端播放器據此顯示章節列表（點擊跳轉、上一章／下一章）、目前句子文字與目前說話角色（含內心獨白標示）；無時間軸的舊工作與 VoAI／BlueMagpie／3wa 路徑（provider 尚未回報 timing）維持原本純播放 UI。
 
 ## 多角色系列配音進度
 
@@ -169,7 +170,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色建立 | 角色基本資料的 AI 補完／全部重寫 | 目前 UI 明示尚未提供；3wa 沒有對應文字生成 mode |
-| 長期有聲書 UX | automatic casting、單片段重生、平行生成、cost logging、loudness normalize、章節／句子／角色同步、播放進度與 resume | 已完成的 private audio player 與 staged narration 不等於這些後續能力 |
+| 長期有聲書 UX | automatic casting、平行生成、cost logging；VoAI／BlueMagpie／3wa 路徑的播放時間軸（目前只有 Edge 多角色合成回報逐 turn timing） | 單片段重生、loudness normalize、播放進度／resume 與 Edge 路徑的章節／句子／角色同步已完成；播放進度仍存於瀏覽器 localStorage，尚無伺服器端 ListeningProgress |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界

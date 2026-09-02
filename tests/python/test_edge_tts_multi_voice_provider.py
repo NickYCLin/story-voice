@@ -68,7 +68,7 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         runner = RecordingRunner()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "book.mp3"
-            await provider.synthesize_multi_voice(
+            timeline = await provider.synthesize_multi_voice(
                 [
                     {"text": "風穿過長廊。", "voice": "narrator-voice", "rate": "-5%", "pitch": "-2Hz", "volume": "-3%", "pauseBeforeMs": 0},
                     {"text": "「你終於來了。」", "voice": "alice-voice", "rate": "+0%", "pitch": "+4Hz", "volume": "+2%", "pauseBeforeMs": 200},
@@ -88,6 +88,15 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
                 saved,
             )
             self.assertEqual([(1, 2), (2, 2)], reports)
+            # Every probed part reports 1.25s: turn 0 is one chunk; turn 1 starts after that
+            # chunk plus its own probed 1.25s silence clip, and its start excludes the pause.
+            self.assertEqual(
+                [
+                    {"index": 0, "startMs": 0, "durationMs": 1250},
+                    {"index": 1, "startMs": 2500, "durationMs": 1250},
+                ],
+                timeline,
+            )
 
     async def test_generates_silence_only_when_pause_before_is_positive(self):
         class FakeCommunicate:
@@ -137,11 +146,13 @@ class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
         concat_calls = [call for call in runner.calls if "-f" in call and "concat" in call]
         self.assertEqual(1, len(concat_calls))
         probe_calls = [call for call in runner.calls if Path(call[0]).name == "ffprobe"]
-        self.assertEqual(1, len(probe_calls))
+        # One timeline probe per part (the 150ms silence clip and the single chunk),
+        # plus the final full-output validation probe.
+        self.assertEqual(3, len(probe_calls))
         # The concat call must come after every synthesis/silence ffmpeg call, and the
-        # probe must be the very last subprocess invocation before publish.
-        self.assertLess(runner.calls.index(concat_calls[0]), runner.calls.index(probe_calls[0]))
-        self.assertEqual(runner.calls[-1], probe_calls[0])
+        # final validation probe must be the very last subprocess invocation before publish.
+        self.assertLess(runner.calls.index(concat_calls[0]), runner.calls.index(probe_calls[-1]))
+        self.assertEqual(runner.calls[-1], probe_calls[-1])
 
     async def test_rejects_a_manifest_with_no_turns(self):
         with self.assertRaises(ValueError):
@@ -244,7 +255,7 @@ class EdgeTtsMultiVoiceProviderRealFfmpegTests(unittest.IsolatedAsyncioTestCase)
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "book.mp3"
-            await provider.synthesize_multi_voice(
+            timeline = await provider.synthesize_multi_voice(
                 [
                     {"text": "旁白開場。", "voice": "narrator", "pauseBeforeMs": 0},
                     {"text": "「你好。」", "voice": "alice", "pauseBeforeMs": 150},
@@ -260,6 +271,17 @@ class EdgeTtsMultiVoiceProviderRealFfmpegTests(unittest.IsolatedAsyncioTestCase)
             # comfortably under a generous upper bound.
             self.assertGreater(duration, 0.4)
             self.assertLess(duration, 3.0)
+            # Real probed timings: turn 0 starts at zero; turn 1 starts after turn 0's
+            # ~0.2s clip and its own ~0.15s pause (MP3 frame padding makes both a bit
+            # longer than requested, so only sanity-bound the values).
+            self.assertEqual([0, 1], [entry["index"] for entry in timeline])
+            self.assertEqual(0, timeline[0]["startMs"])
+            self.assertGreater(timeline[1]["startMs"], timeline[0]["durationMs"])
+            self.assertLess(timeline[1]["startMs"], 1_500)
+            self.assertLessEqual(
+                timeline[1]["startMs"] + timeline[1]["durationMs"],
+                round(duration * 1000) + 100,
+            )
 
 
 if __name__ == "__main__":

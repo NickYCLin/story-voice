@@ -1,11 +1,37 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
 
 import { localize, useLocale } from '../i18n'
+
+export type NarrationTimelineChapter = {
+  chapterId: string
+  sortOrder: number
+  title: string
+  startMs: number
+}
+
+export type NarrationTimelineTurn = {
+  index: number
+  startMs: number
+  durationMs: number
+  chapterSortOrder: number
+  kind: 'narrator' | 'dialogue' | 'innerMonologue' | 'mixed'
+  characterId: string | null
+  characterName: string | null
+  text: string | null
+}
+
+export type NarrationTimeline = {
+  jobId: string
+  textAvailable: boolean
+  chapters: NarrationTimelineChapter[]
+  turns: NarrationTimelineTurn[]
+}
 
 type AudioPlayerProps = {
   src: string
@@ -15,7 +41,25 @@ type AudioPlayerProps = {
   hasNext?: boolean
   onPrevious?: () => void
   onNext?: () => void
+  timeline?: NarrationTimeline | null
   className?: string
+}
+
+/** Last turn whose startMs is at or before the playhead; -1 before the first turn starts. */
+function findTimelineIndex(startsMs: number[], positionMs: number): number {
+  let low = 0
+  let high = startsMs.length - 1
+  let found = -1
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    if (startsMs[mid] <= positionMs) {
+      found = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  return found
 }
 
 const SPEED_OPTIONS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -40,10 +84,12 @@ export function AudioPlayer({
   hasNext = false,
   onPrevious,
   onNext,
+  timeline = null,
   className = '',
 }: AudioPlayerProps) {
   const { locale } = useLocale()
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [showChapterList, setShowChapterList] = useState(false)
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -56,6 +102,61 @@ export function AudioPlayer({
   const [seekValue, setSeekValue] = useState(0)
 
   const effectiveStorageKey = storageKey ? `storyvoice.progress.${storageKey}` : null
+
+  const positionMs = (isSeeking ? seekValue : currentTime) * 1000
+  const turnStarts = useMemo(
+    () => timeline?.turns.map((turn) => turn.startMs) ?? [],
+    [timeline],
+  )
+  const chapterStarts = useMemo(
+    () => timeline?.chapters.map((chapter) => chapter.startMs) ?? [],
+    [timeline],
+  )
+  const currentTurn = useMemo(() => {
+    if (!timeline || timeline.turns.length === 0) return null
+    const index = findTimelineIndex(turnStarts, positionMs)
+    return index >= 0 ? timeline.turns[index] : null
+  }, [timeline, turnStarts, positionMs])
+  const currentChapterIndex = useMemo(() => {
+    if (!timeline || timeline.chapters.length === 0) return -1
+    return Math.max(0, findTimelineIndex(chapterStarts, positionMs))
+  }, [timeline, chapterStarts, positionMs])
+  const currentChapter = currentChapterIndex >= 0 ? timeline?.chapters[currentChapterIndex] ?? null : null
+  const hasChapterNav = (timeline?.chapters.length ?? 0) > 1
+
+  const seekToMs = useCallback((targetMs: number) => {
+    const audio = audioRef.current
+    if (!audio) return
+    const target = Math.max(0, targetMs / 1000)
+    audio.currentTime = target
+    setCurrentTime(target)
+  }, [])
+
+  const goToPreviousChapter = () => {
+    if (!timeline || currentChapterIndex < 0) return
+    const chapterStartMs = timeline.chapters[currentChapterIndex].startMs
+    // More than 3 seconds into the chapter restarts it; otherwise jump one chapter back.
+    if (positionMs - chapterStartMs > 3_000 || currentChapterIndex === 0) {
+      seekToMs(chapterStartMs)
+    } else {
+      seekToMs(timeline.chapters[currentChapterIndex - 1].startMs)
+    }
+  }
+
+  const goToNextChapter = () => {
+    if (!timeline || currentChapterIndex >= timeline.chapters.length - 1) return
+    seekToMs(timeline.chapters[currentChapterIndex + 1].startMs)
+  }
+
+  const speakerLabel = (turn: NarrationTimelineTurn): string => {
+    if (turn.kind === 'narrator') return localize(locale, '旁白', 'Narrator')
+    if (turn.kind === 'mixed') return localize(locale, '旁白與對白', 'Narration & dialogue')
+    const name = turn.characterName
+      ?? localize(locale, '角色', 'Character')
+    return turn.kind === 'innerMonologue'
+      ? `${name} · ${localize(locale, '內心獨白', 'Inner monologue')}`
+      : name
+  }
 
   // Restore saved playback position if available
   useEffect(() => {
@@ -221,6 +322,30 @@ export function AudioPlayer({
         )}
       </div>
 
+      {/* Now Playing: current chapter, character and sentence synced to the playhead */}
+      {timeline && (currentChapter || currentTurn) && (
+        <div className="mt-3 rounded-xl bg-stone-800/60 p-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {currentChapter && (
+              <span className="rounded-full bg-stone-700 px-2.5 py-0.5 text-stone-300">
+                {currentChapter.title
+                  || localize(locale, `第 ${currentChapter.sortOrder + 1} 章`, `Chapter ${currentChapter.sortOrder + 1}`)}
+              </span>
+            )}
+            {currentTurn && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 font-medium text-amber-300">
+                {speakerLabel(currentTurn)}
+              </span>
+            )}
+          </div>
+          {currentTurn?.text && (
+            <p className="mt-2 max-h-24 overflow-y-auto text-sm leading-6 text-stone-200">
+              {currentTurn.text}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Progress & Time Slider */}
       <div className="mt-3 space-y-1">
         <div className="flex items-center gap-3">
@@ -252,11 +377,11 @@ export function AudioPlayer({
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-1">
         {/* Main playback buttons */}
         <div className="flex items-center gap-2">
-          {hasPrevious && onPrevious && (
+          {((hasPrevious && onPrevious) || hasChapterNav) && (
             <button
               aria-label={localize(locale, '上一章', 'Previous chapter')}
               className="rounded-full p-2 text-stone-300 hover:bg-stone-800 hover:text-white"
-              onClick={onPrevious}
+              onClick={onPrevious ?? goToPreviousChapter}
               type="button"
             >
               ⏮
@@ -290,11 +415,12 @@ export function AudioPlayer({
             +10s
           </button>
 
-          {hasNext && onNext && (
+          {((hasNext && onNext) || hasChapterNav) && (
             <button
               aria-label={localize(locale, '下一章', 'Next chapter')}
-              className="rounded-full p-2 text-stone-300 hover:bg-stone-800 hover:text-white"
-              onClick={onNext}
+              className="rounded-full p-2 text-stone-300 hover:bg-stone-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!onNext && !!timeline && currentChapterIndex >= timeline.chapters.length - 1}
+              onClick={onNext ?? goToNextChapter}
               type="button"
             >
               ⏭
@@ -348,6 +474,50 @@ export function AudioPlayer({
           />
         </div>
       </div>
+
+      {/* Chapter List navigation */}
+      {timeline && timeline.chapters.length > 0 && (
+        <div className="mt-3 border-t border-stone-800 pt-3">
+          <button
+            aria-expanded={showChapterList}
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs text-stone-300 transition hover:bg-stone-800 hover:text-white"
+            onClick={() => setShowChapterList((current) => !current)}
+            type="button"
+          >
+            <span>{showChapterList ? '▾' : '▸'}</span>
+            <span>{localize(locale, '章節列表', 'Chapter list')}（{timeline.chapters.length}）</span>
+          </button>
+          {showChapterList && (
+            <ol
+              aria-label={localize(locale, '章節列表', 'Chapter list')}
+              className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1"
+            >
+              {timeline.chapters.map((chapter, index) => (
+                <li key={`${chapter.chapterId}-${index}`}>
+                  <button
+                    aria-current={index === currentChapterIndex ? 'true' : undefined}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-1.5 text-left text-xs transition ${
+                      index === currentChapterIndex
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : 'text-stone-300 hover:bg-stone-800 hover:text-white'
+                    }`}
+                    onClick={() => seekToMs(chapter.startMs)}
+                    type="button"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {chapter.title
+                        || localize(locale, `第 ${chapter.sortOrder + 1} 章`, `Chapter ${chapter.sortOrder + 1}`)}
+                    </span>
+                    <span className="shrink-0 font-mono text-stone-500">
+                      {formatTime(chapter.startMs / 1000)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
     </div>
   )
 }
