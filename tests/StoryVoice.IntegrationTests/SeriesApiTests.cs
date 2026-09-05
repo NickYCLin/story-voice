@@ -46,8 +46,9 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             && voice.Voice == "v1:Neo:佑希:預設"
             && voice.DisplayName == "VoAI 佑希（Neo／預設）"
             && voice.Locale == "zh-TW");
-        Assert.DoesNotContain(voices, voice =>
-            string.Equals(voice.Provider, "3wa-voxcpm2", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(voices, voice =>
+            string.Equals(voice.Provider, "3wa-voxcpm2", StringComparison.OrdinalIgnoreCase)
+            && voice.FormalNarrationAvailable);
         Assert.DoesNotContain(voices, voice =>
             string.Equals(voice.Provider, "bluemagpie", StringComparison.OrdinalIgnoreCase));
 
