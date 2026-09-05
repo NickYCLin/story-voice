@@ -58,7 +58,7 @@ public sealed class StoryPipelineWorkerModeTests
         var loadPlans = source.IndexOf("LoadChapterPlanSourcesAsync(", StringComparison.Ordinal);
         var loadProfiles = source.IndexOf("LoadCharacterVoiceProfilesAsync(", StringComparison.Ordinal);
 
-        Assert.False(ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration);
+        Assert.True(ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration);
         Assert.True(gate >= 0);
         Assert.True(loadPlans > gate);
         Assert.True(loadProfiles > gate);

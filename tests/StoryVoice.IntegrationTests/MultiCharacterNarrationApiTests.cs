@@ -505,7 +505,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
-    public async Task A_configured_3wa_series_cannot_stage_while_trusted_formal_authorization_is_disabled()
+    public async Task A_configured_3wa_series_with_edge_fallback_characters_stages_a_rebuild()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
@@ -553,17 +553,17 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             new { rightsAttested = true },
             cancellationToken);
         var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
-        Assert.Contains(
+        Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+        Assert.DoesNotContain(
             ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
             responseBody,
             StringComparison.Ordinal);
 
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-        Assert.False(await verifyDb.SeriesCastRebuildBatches
+        Assert.True(await verifyDb.SeriesCastRebuildBatches
             .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
-        Assert.False(await verifyDb.NarrationJobs
+        Assert.True(await verifyDb.NarrationJobs
             .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
     }
 
@@ -775,7 +775,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
         Assert.Contains(
-            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
+            ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage,
             responseBody,
             StringComparison.Ordinal);
 
@@ -790,7 +790,7 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Formal_3wa_series_is_code_pinned_off_even_with_self_declared_formal_evidence(
+    public async Task Formal_3wa_series_requires_self_declared_formal_evidence_on_the_clone_operation(
         bool addSelfDeclaredFormalOperation)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -922,18 +922,28 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             new { rightsAttested = true },
             cancellationToken);
         var responseBody = await stageResponse.Content.ReadAsStringAsync(cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
-        Assert.Contains(
-            ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage,
-            responseBody,
-            StringComparison.Ordinal);
-
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-        Assert.False(await verifyDb.SeriesCastRebuildBatches
-            .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
-        Assert.False(await verifyDb.NarrationJobs
-            .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
+        if (addSelfDeclaredFormalOperation)
+        {
+            Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
+            Assert.True(await verifyDb.SeriesCastRebuildBatches
+                .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
+            Assert.True(await verifyDb.NarrationJobs
+                .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, stageResponse.StatusCode);
+            Assert.Contains(
+                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage,
+                responseBody,
+                StringComparison.Ordinal);
+            Assert.False(await verifyDb.SeriesCastRebuildBatches
+                .AnyAsync(batch => batch.SeriesId == series.Id, cancellationToken));
+            Assert.False(await verifyDb.NarrationJobs
+                .AnyAsync(job => job.SeriesId == series.Id, cancellationToken));
+        }
     }
 
     [Fact]
