@@ -92,7 +92,9 @@
 manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文字設計」已在 API、
 試音、系列 admission 與 Worker 全部 fail closed；既有描述資料保留但不可視為可用聲線。
 可用流程只剩「上傳錄音克隆」（需要選擇同意類型：本人親自錄製／已取得明確同意／
-已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒）。角色建好
+已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒；若 3wa 的
+profile 已建立但站方 ASR 回報失敗（例如 `asr_unavailable`），refresh-status 會改以
+上傳時附的預期逐字稿作為待確認草稿，仍需人工確認，不會直接作廢）。角色建好
 之後，在「多角色系列配音」加入角色時可以直接從角色庫選入，同一個角色（與其聲線）
 能跨多個系列重複使用，不用每個
 系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
@@ -131,8 +133,12 @@ Design 模式的 submit/poll/result/artifact 短句實測：任務雖由 `runnin
 number，產物為可解析的 `audio/x-wav`（PCM 16-bit、48 kHz、mono）。Client 現已同時
 支援 number/string ID，只會將 Bearer token 送往設定的同源 HTTPS API 目錄，並限制
 JSON/音訊回應大小。
-新 canonical Clone 的 profile prepare/confirm 尚需以另一份授權短 WAV 完成實測；
-現存 legacy Clone task 的 ASR 轉錄失敗，不能視為可用聲線。
+新 canonical Clone 的 profile prepare/confirm 已於 2026-09-05 以 19 組角色實測完成
+（其中 17 組以 Edge TTS 合成的擁有者自製參考音建立，2 組沿用主機允許清單素材），
+全部走到 Ready；當日 3wa 的 ASR 與 GPU 常駐服務不可用（`asr_unavailable`、
+`waiting_gpu` / `resident_service_unavailable`），因此逐字稿改由預期逐字稿人工確認，
+私人試音則會在應用程式 60 秒輪詢上限後逾時，待 3wa 恢復即可使用。舊的 legacy
+Clone task 已被新的 canonical Clone 取代。
 
 已知限制（刻意排除的範圍，不是漏做）：
 - **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆
