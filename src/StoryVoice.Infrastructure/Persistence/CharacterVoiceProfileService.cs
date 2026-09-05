@@ -272,9 +272,27 @@ internal sealed class CharacterVoiceProfileService(
 
         var status = await threeWaClient.GetStatusAsync(profile.VoiceProfileTaskId!, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase) || status.TranscriptionFailed)
+        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase))
         {
             profile.MarkFailed(now);
+        }
+        else if (status.TranscriptionFailed && !status.TranscriptConfirmed)
+        {
+            // 3wa 已建立聲線，只是站方 ASR 草稿產生失敗（例如 asr_unavailable）。錄音者上傳時
+            // 已提供預期逐字稿，改以它作為待確認草稿，讓人工確認流程照常進行，而不是整組作廢。
+            if (profile.ConfirmationTranscriptIntent is null
+                && profile.TranscriptConfirmedAt is null
+                && !string.IsNullOrWhiteSpace(profile.ExpectedTranscript))
+            {
+                if (profile.Status == CharacterVoiceProfileStatus.Pending)
+                {
+                    profile.AttachDraftTranscript(profile.VoiceProfileTaskId!, profile.ExpectedTranscript, now);
+                }
+            }
+            else if (profile.ConfirmationTranscriptIntent is null)
+            {
+                profile.MarkFailed(now);
+            }
         }
         else if (status.TranscriptConfirmed)
         {
