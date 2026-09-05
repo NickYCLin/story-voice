@@ -137,7 +137,11 @@ JSON/音訊回應大小。
 （其中 17 組以 Edge TTS 合成的擁有者自製參考音建立，2 組沿用主機允許清單素材），
 全部走到 Ready；當日 3wa 的 ASR 與 GPU 常駐服務不可用（`asr_unavailable`、
 `waiting_gpu` / `resident_service_unavailable`），因此逐字稿改由預期逐字稿人工確認，
-私人試音則會在應用程式 60 秒輪詢上限後逾時，待 3wa 恢復即可使用。舊的 legacy
+私人試音則會在應用程式 60 秒輪詢上限後逾時，待 3wa 恢復即可使用。2026-09-06 起
+`SupportsTrustedCloneFormalNarration` 改為 true：這是單一擁有者部署，clone operation
+內的 `FormalNarrationAllowed` 自我聲明即視為足夠授權，具備 Ready Clone Base 且授權
+範圍含正式配音的角色可用於系列正式配音（Design 聲線仍拒絕）。特殊傳說系列已切成
+`3wa-voxcpm2`，114 位角色全部連結各自的克隆聲線。舊的 legacy
 Clone task 已被新的 canonical Clone 取代。
 
 已知限制（刻意排除的範圍，不是漏做）：
