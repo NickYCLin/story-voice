@@ -90,8 +90,8 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
   const applicableVoiceOptions = useMemo(() => {
     if (!selectedSeries) return []
     return voiceOptions.filter((voice) => voice.provider === selectedSeries.narratorProvider
-      || (selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'))
-      .filter((voice) => voice.provider !== '3wa-voxcpm2')
+      || (['3wa-voxcpm2', 'local-clone'].includes(selectedSeries.narratorProvider) && voice.provider === 'edge'))
+      .filter((voice) => !['3wa-voxcpm2', 'local-clone'].includes(voice.provider))
   }, [selectedSeries, voiceOptions])
 
   useEffect(() => {

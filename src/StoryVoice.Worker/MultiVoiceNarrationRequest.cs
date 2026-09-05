@@ -36,8 +36,17 @@ public sealed record NarrationSynthesisCacheContext(
     string CompositionVersion,
     string FfmpegProfile);
 
+/// <summary>
+/// The private reference recording behind one <c>localclone:</c> turn voice reference. The
+/// absolute path stays on the worker host; only the bytes travel to the local gateway.
+/// </summary>
+public sealed record LocalCloneVoiceReference(
+    string ReferenceAudioPath,
+    string ReferenceTranscript);
+
 public sealed record MultiVoiceNarrationRequest(
     IReadOnlyList<NarrationTurn> Turns,
     NarrationProviderContract? NarratorProvider = null,
     IReadOnlyList<NarrationProviderContract>? CharacterProviders = null,
-    NarrationSynthesisCacheContext? CacheContext = null);
+    NarrationSynthesisCacheContext? CacheContext = null,
+    IReadOnlyDictionary<string, LocalCloneVoiceReference>? CloneReferences = null);

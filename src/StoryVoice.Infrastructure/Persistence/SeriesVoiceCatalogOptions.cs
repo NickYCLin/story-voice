@@ -92,6 +92,16 @@ public sealed class SeriesVoiceCatalogOptions
             Voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
             DisplayName = "3wa 角色克隆（旁白：雲哲）",
             Locale = "zh-TW"
+        },
+        new()
+        {
+            // Self-hosted CosyVoice3 through the local-clone gateway. Characters resolve to their
+            // linked Clone profiles; narrator-fallback turns are voiced by the point-of-view
+            // character's clone so no third-party voice is ever used.
+            Provider = CharacterVoiceProviders.LocalClone,
+            Voice = ThreeWaSynthesisCapabilities.NarratorFallbackVoice,
+            DisplayName = "自架 CosyVoice 角色克隆（旁白：主角克隆聲）",
+            Locale = "zh-TW"
         }
     ];
 }

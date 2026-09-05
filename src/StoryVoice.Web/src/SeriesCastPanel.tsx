@@ -8,7 +8,8 @@ import { ConfirmDialog } from './components/ConfirmDialog'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
 
-const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
+const CUSTOM_VOICE_PROVIDERS = ['3wa-voxcpm2', 'local-clone']
+const isCustomVoiceProvider = (provider: string | null | undefined) => Boolean(provider && CUSTOM_VOICE_PROVIDERS.includes(provider))
 const EDGE_VOICE_PROVIDER = 'edge'
 const VOAI_VOICE_PROVIDER = 'voai'
 const BLUE_MAGPIE_PROVIDER = 'bluemagpie'
@@ -387,9 +388,9 @@ export function SeriesCastPanel() {
 
   const manualCharacterVoiceOptions = useMemo(() => {
     if (!details) return []
-    return voiceOptions.filter((option) => option.provider !== CUSTOM_VOICE_PROVIDER
+    return voiceOptions.filter((option) => !isCustomVoiceProvider(option.provider)
       && (option.provider === details.narratorProvider
-        || (details.narratorProvider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER)))
+        || (isCustomVoiceProvider(details.narratorProvider) && option.provider === EDGE_VOICE_PROVIDER)))
   }, [details, voiceOptions])
 
   const configuredNarratorVoice = useMemo(
@@ -400,7 +401,7 @@ export function SeriesCastPanel() {
   const configuredCharacterVoiceOptions = useMemo(() => {
     if (!configuredNarratorVoice) return []
     return voiceOptions.filter((option) => option.provider === configuredNarratorVoice.provider
-      || (configuredNarratorVoice.provider === CUSTOM_VOICE_PROVIDER
+      || (isCustomVoiceProvider(configuredNarratorVoice.provider)
         && option.provider === EDGE_VOICE_PROVIDER))
   }, [configuredNarratorVoice, voiceOptions])
 
@@ -409,7 +410,7 @@ export function SeriesCastPanel() {
     setCharacterVoiceKey((current) => manualCharacterVoiceOptions.some((option) => voiceKey(option) === current)
       ? current
       : manualCharacterVoiceOptions[0] ? voiceKey(manualCharacterVoiceOptions[0]) : '')
-    if (details.narratorProvider !== CUSTOM_VOICE_PROVIDER) {
+    if (!isCustomVoiceProvider(details.narratorProvider)) {
       setSelectedCharacterProfileId('')
     }
   }, [details, manualCharacterVoiceOptions])
@@ -483,7 +484,7 @@ export function SeriesCastPanel() {
     const narrator = voiceOptions.find((option) => voiceKey(option) === nextKey)
     if (!narrator) return
     const compatible = voiceOptions.filter((option) => option.provider === narrator.provider
-      || (narrator.provider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER))
+      || (isCustomVoiceProvider(narrator.provider) && option.provider === EDGE_VOICE_PROVIDER))
     setConfiguredCharacterVoiceKeys((current) => Object.fromEntries(details.characters.map((character) => {
       const selected = compatible.find((option) => voiceKey(option) === current[character.id])
       return [character.id, voiceKey(selected ?? compatible[0] ?? narrator)]
@@ -588,7 +589,7 @@ export function SeriesCastPanel() {
 
   async function addCharacter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const usingLibraryCharacter = details?.narratorProvider === CUSTOM_VOICE_PROVIDER
+    const usingLibraryCharacter = isCustomVoiceProvider(details?.narratorProvider)
       && Boolean(selectedCharacterProfileId)
     const libraryCharacter = characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)
     const libraryCharacterAlreadyLinked = details?.characters.some(
@@ -602,7 +603,7 @@ export function SeriesCastPanel() {
       return
     }
 
-    const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER)
+    const customVoice = voiceOptions.find((option) => option.provider === details.narratorProvider)
     const selectedVoice = usingLibraryCharacter
       ? customVoice
       : manualCharacterVoiceOptions.find((option) => voiceKey(option) === characterVoiceKey)
@@ -1055,9 +1056,9 @@ export function SeriesCastPanel() {
                     })}
                   </div>
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
-                    {details.narratorProvider === CUSTOM_VOICE_PROVIDER ? (
+                    {isCustomVoiceProvider(details.narratorProvider) ? (
                       <label className="text-xs text-stone-500 sm:col-span-3">
-                        從角色庫選擇（可選，選了就沿用角色庫的 3wa 自訂聲線）
+                        從角色庫選擇（可選，選了就沿用角色庫的自訂克隆聲線）
                         <select
                           className="auth-input mt-2"
                           onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
@@ -1078,7 +1079,7 @@ export function SeriesCastPanel() {
                       <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500 sm:col-span-3">
                         {details.narratorProvider === VOAI_VOICE_PROVIDER
                           ? '這個系列使用 VoAI；不可混用 3wa 角色庫自訂聲線，請從下方選擇 VoAI 聲線。'
-                          : '角色庫自訂聲線只支援 3wa 系列；請從下方選擇與旁白相同 provider 的聲線。'}
+                          : '角色庫自訂聲線只支援 3wa 或自架克隆系列；請從下方選擇與旁白相同 provider 的聲線。'}
                       </p>
                     )}
                     <label className="text-xs text-stone-500">

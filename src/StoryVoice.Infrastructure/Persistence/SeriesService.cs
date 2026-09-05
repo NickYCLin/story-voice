@@ -17,7 +17,8 @@ internal sealed class SeriesService(
     ICurrentUser currentUser,
     IStorySeriesRepository repository,
     IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions,
-    IOptions<BlueMagpieOptions> blueMagpieOptions) : ISeriesService
+    IOptions<BlueMagpieOptions> blueMagpieOptions,
+    IOptions<LocalClonePreviewOptions> localCloneOptions) : ISeriesService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string NeutralRate = "+0%";
@@ -27,6 +28,8 @@ internal sealed class SeriesService(
         voiceCatalogOptions.Value.Voices.ToArray();
     private readonly bool _blueMagpieFormalNarrationEnabled =
         blueMagpieOptions.Value.FormalNarrationEnabled;
+    private readonly bool _localCloneFormalNarrationEnabled =
+        localCloneOptions.Value.FormalNarrationEnabled;
 
     public async Task<IReadOnlyList<StorySeriesSummaryResponse>> ListAsync(
         CancellationToken cancellationToken)
@@ -445,10 +448,7 @@ internal sealed class SeriesService(
         CancellationToken cancellationToken)
     {
         var customCharacters = series.Characters
-            .Where(character => string.Equals(
-                assignments[character.Id].Provider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(assignments[character.Id].Provider))
             .ToArray();
         if (customCharacters.Length == 0)
         {
@@ -731,6 +731,11 @@ internal sealed class SeriesService(
                     voice.Provider,
                     CharacterVoiceProviders.ThreeWaVoxCpm2,
                     StringComparison.OrdinalIgnoreCase))
+            .Where(voice => _localCloneFormalNarrationEnabled
+                || !string.Equals(
+                    voice.Provider,
+                    CharacterVoiceProviders.LocalClone,
+                    StringComparison.OrdinalIgnoreCase))
             .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
             .ThenBy(voice => voice.DisplayName, StringComparer.Ordinal)
             .Select(voice => new SeriesVoiceOptionResponse(
@@ -769,17 +774,14 @@ internal sealed class SeriesService(
         string narratorProvider,
         IEnumerable<string> characterProviders)
     {
-        var allowsEdgeFallback = string.Equals(
-            narratorProvider,
-            CharacterVoiceProviders.ThreeWaVoxCpm2,
-            StringComparison.OrdinalIgnoreCase);
+        var allowsEdgeFallback = CharacterVoiceProviders.UsesCloneProfiles(narratorProvider);
         if (characterProviders.Any(provider =>
                 !string.Equals(provider, narratorProvider, StringComparison.OrdinalIgnoreCase)
                 && !(allowsEdgeFallback
                     && string.Equals(provider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
         {
             throw new ArgumentException(
-                "系列旁白與角色必須使用相同的語音 provider（3wa 系列可使用 Edge fallback）。",
+                "系列旁白與角色必須使用相同的語音 provider（3wa／自架克隆系列可使用 Edge fallback）。",
                 nameof(characterProviders));
         }
     }

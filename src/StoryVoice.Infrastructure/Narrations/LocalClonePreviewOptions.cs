@@ -12,6 +12,13 @@ public sealed class LocalClonePreviewOptions
 
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// Allows the <c>local-clone</c> series provider: full-book multi-character synthesis through
+    /// the self-hosted gateway using each character's linked Ready Clone profile recording.
+    /// Independent of <see cref="Enabled"/>, which only governs the allow-listed private preview.
+    /// </summary>
+    public bool FormalNarrationEnabled { get; set; }
+
     public string GatewayBaseUrl { get; set; } = PinnedGatewayBaseUrl;
 
     public string InternalToken { get; set; } = string.Empty;

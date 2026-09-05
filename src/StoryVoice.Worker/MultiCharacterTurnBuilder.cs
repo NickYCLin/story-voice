@@ -164,10 +164,7 @@ public static class MultiCharacterTurnBuilder
                 var emotion = segment.Kind == SpeechSegmentTurnKind.InnerMonologue
                     ? DialogueEmotion.Neutral
                     : DialogueEmotionClassifier.Classify(segmentText, precedingContext);
-                var isCustomVoiceProvider = string.Equals(
-                    assignment.VoiceProvider,
-                    CharacterVoiceProviders.ThreeWaVoxCpm2,
-                    StringComparison.OrdinalIgnoreCase);
+                var isCustomVoiceProvider = CharacterVoiceProviders.UsesCloneProfiles(assignment.VoiceProvider);
                 var isBlueMagpieProvider = string.Equals(
                     assignment.VoiceProvider,
                     CharacterVoiceProviders.BlueMagpie,
@@ -197,7 +194,7 @@ public static class MultiCharacterTurnBuilder
                             // picked, so — unlike the Edge path below — the fixed cast rate/
                             // pitch/volume pass through unchanged rather than getting a delta.
                             return (
-                                EncodeVoiceReference(profile),
+                                EncodeVoiceReference(profile, assignment.VoiceProvider),
                                 assignment.Rate,
                                 assignment.Pitch,
                                 assignment.Volume);
@@ -246,15 +243,24 @@ public static class MultiCharacterTurnBuilder
 
     /// <summary>Packs a Ready Clone profile into the opaque reference carried by a narration turn.
     /// Design profiles are rejected while the provider contract cannot distinguish voice prompts.</summary>
-    private static string EncodeVoiceReference(CharacterVoiceProfile profile)
+    public const string LocalCloneReferencePrefix = "localclone:";
+
+    private static string EncodeVoiceReference(CharacterVoiceProfile profile, string provider)
     {
         if (profile.Mode != CharacterVoiceProfileMode.Clone)
         {
             throw UnsupportedDesignVoice();
         }
 
-        return $"clone:{profile.VoiceProfileTaskId}";
+        // The self-hosted provider synthesizes from the stored reference recording itself, so
+        // the turn carries the local profile id; the 3wa provider replays a remote task handle.
+        return string.Equals(provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase)
+            ? EncodeLocalCloneReference(profile.Id)
+            : $"clone:{profile.VoiceProfileTaskId}";
     }
+
+    public static string EncodeLocalCloneReference(Guid voiceProfileId) =>
+        $"{LocalCloneReferencePrefix}{voiceProfileId:N}";
 
     /// <summary>
     /// Voice profiles hang off a <c>CharacterProfile</c> library entry, not off any one series'
@@ -272,10 +278,7 @@ public static class MultiCharacterTurnBuilder
     {
         var result = new Dictionary<Guid, CharacterVoiceProfileBundle>();
         var threeWaCharacterIds = castRevision.Assignments
-            .Where(assignment => string.Equals(
-                assignment.VoiceProvider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(assignment => CharacterVoiceProviders.UsesCloneProfiles(assignment.VoiceProvider))
             .Select(assignment => assignment.CharacterId)
             .ToHashSet();
         if (threeWaCharacterIds.Count == 0)

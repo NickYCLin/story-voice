@@ -29,6 +29,7 @@ internal sealed class SeriesNarrationService(
     IOptions<MultiCharacterNarrationOptions> compositionOptions,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
     IOptions<NarrationOptions> narrationOptions,
+    IOptions<LocalClonePreviewOptions> localCloneOptions,
     PostgreSqlCastEpochActivationPublisher activationPublisher) : ISeriesNarrationService
 {
     public async Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
@@ -82,6 +83,16 @@ internal sealed class SeriesNarrationService(
             {
                 throw new InvalidOperationException(
                     ThreeWaSynthesisCapabilities.CloneFormalNarrationUnavailableMessage);
+            }
+
+            var isLocalClone = string.Equals(
+                series.NarratorProvider,
+                CharacterVoiceProviders.LocalClone,
+                StringComparison.OrdinalIgnoreCase);
+            if (isLocalClone && !localCloneOptions.Value.FormalNarrationEnabled)
+            {
+                throw new InvalidOperationException(
+                    "自架克隆聲線的正式配音尚未由管理員啟用（LocalClonePreview__FormalNarrationEnabled）。");
             }
 
             var memberships = series.Books
@@ -753,17 +764,14 @@ internal sealed class SeriesNarrationService(
         // ThreeWaVoxCpm2NarrationProvider), so a series staged on it may freely mix Edge-voiced
         // characters alongside 3wa-cloned ones. Any other provider must still be uniform across
         // the whole cast, since nothing else can route a mixed turn stream.
-        var allowsEdgeFallback = string.Equals(
-            series.NarratorProvider,
-            CharacterVoiceProviders.ThreeWaVoxCpm2,
-            StringComparison.OrdinalIgnoreCase);
+        var allowsEdgeFallback = CharacterVoiceProviders.UsesCloneProfiles(series.NarratorProvider);
 
         if (series.Characters.Any(character =>
             !string.Equals(character.VoiceProvider, series.NarratorProvider, StringComparison.OrdinalIgnoreCase)
             && !(allowsEdgeFallback
                 && string.Equals(character.VoiceProvider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
         {
-            throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider（3wa 聲線系列除外，角色可混用 Edge 聲線）。");
+            throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider（3wa／自架克隆聲線系列除外，角色可混用 Edge 聲線）。");
         }
     }
 
@@ -773,10 +781,7 @@ internal sealed class SeriesNarrationService(
         CancellationToken cancellationToken)
     {
         var customCharacters = series.Characters
-            .Where(character => string.Equals(
-                character.VoiceProvider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(character.VoiceProvider))
             .ToArray();
         if (customCharacters.Length == 0)
         {

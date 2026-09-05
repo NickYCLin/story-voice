@@ -277,6 +277,25 @@ public sealed class MultiCharacterTurnBuilderTests
     }
 
     [Fact]
+    public void A_local_clone_character_turn_carries_its_profile_reference_instead_of_a_remote_task()
+    {
+        var castRevision = BuildCastRevision(
+            narratorVoice: "narrator-voice",
+            aliceVoice: "alice-voice",
+            aliceProvider: CharacterVoiceProviders.LocalClone,
+            narratorProvider: CharacterVoiceProviders.LocalClone);
+        var chapter = BuildConfirmedChapter(0, "序章", "「你回來了？」艾莉絲說。", AliceId);
+        var baseProfile = BuildReadyProfile(CharacterVoiceProfileKind.Base, sceneCode: null, taskId: "base-task");
+        var characterProfileIdsByCharacterId = new Dictionary<Guid, Guid> { [AliceId] = AliceCharacterProfileId };
+
+        var turns = MultiCharacterTurnBuilder.BuildTurns(castRevision, [chapter], [baseProfile], characterProfileIdsByCharacterId);
+
+        var aliceTurn = Assert.Single(turns, turn => turn.Voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal));
+        Assert.Equal(MultiCharacterTurnBuilder.EncodeLocalCloneReference(baseProfile.Id), aliceTurn.Voice);
+        Assert.DoesNotContain(turns, turn => turn.Voice.StartsWith("clone:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_neutral_line_for_a_custom_provider_character_without_a_matching_scene_falls_back_to_its_base_profile()
     {
         var castRevision = BuildCastRevision(

@@ -18,6 +18,7 @@ public sealed class StoryPipelineWorker(
     NarrationProviderDispatcher multiVoiceDispatcher,
     IOptions<NarrationOptions> options,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
+    IOptions<CharacterVoiceStorageOptions> characterVoiceStorageOptions,
     ILogger<StoryPipelineWorker> logger) : BackgroundService
 {
     private readonly string _workerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -303,9 +304,13 @@ public sealed class StoryPipelineWorker(
                         ComputeSpeechPlanFingerprint(chapterPlans),
                         castRevision.CompositionVersion,
                         castRevision.FfmpegProfile);
+                    var cloneReferences = BuildLocalCloneReferences(
+                        castRevision,
+                        voiceProfiles,
+                        characterVoiceStorageOptions.Value.RootPath);
                     await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
-                        CreateMultiVoiceNarrationRequest(castRevision, turns, cacheContext),
+                        CreateMultiVoiceNarrationRequest(castRevision, turns, cacheContext, cloneReferences),
                         temporaryPath,
                         reportProgress,
                         providerCancellation.Token);
@@ -624,7 +629,8 @@ public sealed class StoryPipelineWorker(
     internal static MultiVoiceNarrationRequest CreateMultiVoiceNarrationRequest(
         NarrationCastRevision castRevision,
         IReadOnlyList<NarrationTurn> turns,
-        NarrationSynthesisCacheContext? cacheContext = null)
+        NarrationSynthesisCacheContext? cacheContext = null,
+        IReadOnlyDictionary<string, LocalCloneVoiceReference>? cloneReferences = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
         ArgumentNullException.ThrowIfNull(turns);
@@ -638,7 +644,58 @@ public sealed class StoryPipelineWorker(
                     assignment.VoiceProvider,
                     assignment.ProviderVersion))
                 .ToArray(),
-            cacheContext);
+            cacheContext,
+            cloneReferences);
+    }
+
+    /// <summary>
+    /// Maps every <c>localclone:</c> reference the turns can carry to the Ready Clone profile's
+    /// stored reference recording and confirmed transcript. Only built for the self-hosted
+    /// provider; other providers never read the recordings.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, LocalCloneVoiceReference>? BuildLocalCloneReferences(
+        NarrationCastRevision castRevision,
+        IReadOnlyList<CharacterVoiceProfile> voiceProfiles,
+        string characterVoiceStorageRoot)
+    {
+        ArgumentNullException.ThrowIfNull(castRevision);
+        ArgumentNullException.ThrowIfNull(voiceProfiles);
+        if (!string.Equals(
+                castRevision.NarratorProvider,
+                CharacterVoiceProviders.LocalClone,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var root = Path.GetFullPath(characterVoiceStorageRoot);
+        var references = new Dictionary<string, LocalCloneVoiceReference>(StringComparer.Ordinal);
+        foreach (var profile in voiceProfiles)
+        {
+            if (profile.Mode != CharacterVoiceProfileMode.Clone
+                || profile.Status != CharacterVoiceProfileStatus.Ready
+                || string.IsNullOrWhiteSpace(profile.ReferenceAudioRelativePath))
+            {
+                continue;
+            }
+
+            var transcript = profile.Transcript ?? profile.ExpectedTranscript;
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                continue;
+            }
+
+            var absolutePath = Path.GetFullPath(Path.Combine(root, profile.ReferenceAudioRelativePath));
+            if (!absolutePath.StartsWith(root, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            references[MultiCharacterTurnBuilder.EncodeLocalCloneReference(profile.Id)] =
+                new LocalCloneVoiceReference(absolutePath, transcript.Trim());
+        }
+
+        return references;
     }
 
     internal static bool CanResumeAfterWorkerStop(string? providerName) =>
