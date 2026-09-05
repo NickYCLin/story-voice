@@ -140,9 +140,16 @@ JSON/音訊回應大小。
 私人試音則會在應用程式 60 秒輪詢上限後逾時，待 3wa 恢復即可使用。2026-09-06 起
 `SupportsTrustedCloneFormalNarration` 改為 true：這是單一擁有者部署，clone operation
 內的 `FormalNarrationAllowed` 自我聲明即視為足夠授權，具備 Ready Clone Base 且授權
-範圍含正式配音的角色可用於系列正式配音（Design 聲線仍拒絕）。特殊傳說系列已切成
-`3wa-voxcpm2`，114 位角色全部連結各自的克隆聲線。舊的 legacy
+範圍含正式配音的角色可用於系列正式配音（Design 聲線仍拒絕）。舊的 legacy
 Clone task 已被新的 canonical Clone 取代。
+
+同日新增自架克隆 provider `local-clone`（`LocalClonePreview__FormalNarrationEnabled`
+開放）：Worker 的 `LocalCloneMultiVoiceNarrationProvider` 讀取每個角色連結的 Ready Clone
+參考錄音與逐字稿，逐 turn 送到 local-clone gateway（FaceSpeak CosyVoice3，需以
+`compose.gpu.yaml` 掛 GPU，否則會退回 CPU、慢十倍以上）合成，24 kHz WAV 轉 44.1 kHz
+MP3 串接；旁白 fallback 改用該工作中台詞最多的克隆聲（POV 模式即主角），完全不使用
+Edge 或 3wa；每段音訊以 job 為範圍快取於 `/data/audio/local-clone-cache/`，重試可續跑。
+特殊傳說系列已切成 `local-clone`，114 位角色全部連結各自的克隆聲線並開始批次合成。
 
 已知限制（刻意排除的範圍，不是漏做）：
 - **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆
