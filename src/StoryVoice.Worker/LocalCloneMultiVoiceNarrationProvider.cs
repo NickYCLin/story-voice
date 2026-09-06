@@ -92,16 +92,33 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (!HasSpeakableText(chunks[chunkIndex]))
+                    {
+                        // CosyVoice's Chinese front end drops text without any CJK characters
+                        // (chapter headers such as "Atlantis AM8：20") and then reports zero
+                        // output, which the gateway surfaces as a 503. Nothing to voice here.
+                        logger.LogInformation(
+                            "Local clone skipped a chunk without speakable CJK text ({Length} chars)",
+                            chunks[chunkIndex].Length);
+                        completed++;
+                        continue;
+                    }
+
                     var cachedPath = Path.Combine(cacheDirectory, $"{ChunkCacheKey(referenceKey, chunks[chunkIndex])}.mp3");
                     if (!File.Exists(cachedPath) || new FileInfo(cachedPath).Length < 1)
                     {
-                        await SynthesizeChunkAsync(
+                        var produced = await SynthesizeChunkWithFallbackAsync(
                             reference,
                             referenceAudioCache,
                             chunks[chunkIndex],
                             cachedPath,
                             workDirectory,
                             cancellationToken);
+                        if (!produced)
+                        {
+                            completed++;
+                            continue;
+                        }
                     }
 
                     sequence.Add(cachedPath);
@@ -192,7 +209,13 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private async Task SynthesizeChunkAsync(
+    /// <summary>
+    /// Synthesizes one chunk into <paramref name="cachedPath"/>. A chunk the gateway rejects twice
+    /// is retried sentence by sentence so a single unsynthesizable fragment (a stray header, a
+    /// symbol-only line) is dropped instead of failing the whole book. Returns false when nothing
+    /// speakable could be produced for the chunk.
+    /// </summary>
+    private async Task<bool> SynthesizeChunkWithFallbackAsync(
         LocalCloneVoiceReference reference,
         Dictionary<string, byte[]> referenceAudioCache,
         string text,
@@ -200,21 +223,112 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         string workDirectory,
         CancellationToken cancellationToken)
     {
-        if (!referenceAudioCache.TryGetValue(reference.ReferenceAudioPath, out var audio))
+        var audio = await LoadReferenceAudioAsync(reference, referenceAudioCache, cancellationToken);
+        var stem = Path.GetFileNameWithoutExtension(cachedPath);
+        var wholePath = Path.Combine(workDirectory, $"{stem}-whole.mp3");
+        if (await TrySynthesizePieceAsync(reference, audio, text, wholePath, workDirectory, attempts: 2, cancellationToken))
         {
-            if (!File.Exists(reference.ReferenceAudioPath))
-            {
-                throw new PermanentNarrationProviderException(
-                    MissingReferenceCode,
-                    "自架克隆聲線的參考錄音檔案不存在。");
-            }
-
-            audio = await File.ReadAllBytesAsync(reference.ReferenceAudioPath, cancellationToken);
-            referenceAudioCache[reference.ReferenceAudioPath] = audio;
+            File.Move(wholePath, cachedPath, overwrite: true);
+            return true;
         }
 
+        var pieces = SplitSentences(text).Where(HasSpeakableText).ToArray();
+        var parts = new List<string>();
+        var rejected = 0;
+        for (var index = 0; index < pieces.Length; index++)
+        {
+            var piecePath = Path.Combine(workDirectory, $"{stem}-piece{index:000}.mp3");
+            if (await TrySynthesizePieceAsync(reference, audio, pieces[index], piecePath, workDirectory, attempts: 2, cancellationToken))
+            {
+                parts.Add(piecePath);
+            }
+            else
+            {
+                rejected++;
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            if (pieces.Length == 0)
+            {
+                return false;
+            }
+
+            // Every sentence failed: this looks like an outage rather than bad text. Keep
+            // waiting for the gateway before giving up on the job.
+            for (var attempt = 3; attempt <= MaxGatewayAttempts; attempt++)
+            {
+                await Task.Delay(GatewayRetryDelay, cancellationToken);
+                if (await TrySynthesizePieceAsync(reference, audio, text, wholePath, workDirectory, attempts: 1, cancellationToken))
+                {
+                    File.Move(wholePath, cachedPath, overwrite: true);
+                    return true;
+                }
+            }
+
+            throw new InvalidOperationException("自架克隆聲線 gateway 持續無法合成。");
+        }
+
+        if (rejected > 0)
+        {
+            logger.LogWarning(
+                "Local clone dropped {Rejected} of {Total} sentence(s) the gateway could not synthesize in one chunk",
+                rejected,
+                pieces.Length);
+        }
+
+        if (parts.Count == 1)
+        {
+            File.Move(parts[0], cachedPath, overwrite: true);
+        }
+        else
+        {
+            var joinedPath = Path.Combine(workDirectory, $"{stem}-joined.mp3");
+            await ConcatAsync(parts, joinedPath, cancellationToken);
+            File.Move(joinedPath, cachedPath, overwrite: true);
+            foreach (var part in parts)
+            {
+                File.Delete(part);
+            }
+        }
+
+        return true;
+    }
+
+    private static async Task<byte[]> LoadReferenceAudioAsync(
+        LocalCloneVoiceReference reference,
+        Dictionary<string, byte[]> referenceAudioCache,
+        CancellationToken cancellationToken)
+    {
+        if (referenceAudioCache.TryGetValue(reference.ReferenceAudioPath, out var audio))
+        {
+            return audio;
+        }
+
+        if (!File.Exists(reference.ReferenceAudioPath))
+        {
+            throw new PermanentNarrationProviderException(
+                MissingReferenceCode,
+                "自架克隆聲線的參考錄音檔案不存在。");
+        }
+
+        audio = await File.ReadAllBytesAsync(reference.ReferenceAudioPath, cancellationToken);
+        referenceAudioCache[reference.ReferenceAudioPath] = audio;
+        return audio;
+    }
+
+    private async Task<bool> TrySynthesizePieceAsync(
+        LocalCloneVoiceReference reference,
+        byte[] audio,
+        string text,
+        string outputPath,
+        string workDirectory,
+        int attempts,
+        CancellationToken cancellationToken)
+    {
         LocalCloneGatewayAudio? result = null;
-        for (var attempt = 1; attempt <= MaxGatewayAttempts; attempt++)
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -224,35 +338,87 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                     cancellationToken);
                 break;
             }
-            catch (LocalClonePreviewUnavailableException exception) when (attempt < MaxGatewayAttempts)
+            catch (LocalClonePreviewUnavailableException exception)
             {
-                // The gateway is single-flight and the executor may be warming the model or
-                // waiting on the shared GPU lease; back off instead of failing the whole book.
                 logger.LogWarning(
                     exception,
-                    "Local clone gateway unavailable (attempt {Attempt}/{MaxAttempts}); retrying",
+                    "Local clone gateway rejected a piece of {Length} chars (attempt {Attempt}/{Attempts})",
+                    text.Length,
                     attempt,
-                    MaxGatewayAttempts);
-                await Task.Delay(GatewayRetryDelay, cancellationToken);
+                    attempts);
+                if (attempt < attempts)
+                {
+                    await Task.Delay(GatewayRetryDelay, cancellationToken);
+                }
             }
         }
 
         if (result is null)
         {
-            throw new InvalidOperationException("自架克隆聲線 gateway 持續無法合成。");
+            return false;
         }
 
-        var rawPath = Path.Combine(workDirectory, $"{Path.GetFileNameWithoutExtension(cachedPath)}-raw.wav");
+        var rawPath = Path.Combine(workDirectory, $"{Path.GetFileNameWithoutExtension(outputPath)}-raw.wav");
         await File.WriteAllBytesAsync(rawPath, result.Content, cancellationToken);
-        var temporaryPath = cachedPath + ".tmp.mp3";
-        await TranscodeAsync(rawPath, temporaryPath, cancellationToken);
+        await TranscodeAsync(rawPath, outputPath, cancellationToken);
         File.Delete(rawPath);
-        if (!File.Exists(temporaryPath) || new FileInfo(temporaryPath).Length < 1)
+        if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
         {
             throw new InvalidOperationException("自架克隆聲線音檔轉檔失敗。");
         }
 
-        File.Move(temporaryPath, cachedPath, overwrite: true);
+        return true;
+    }
+
+    /// <summary>True when the text contains at least one CJK ideograph, bopomofo, kana or hangul
+    /// character — anything else (Latin headers, digits, symbols) yields no CosyVoice output.</summary>
+    internal static bool HasSpeakableText(string text)
+    {
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var value = rune.Value;
+            if ((value >= 0x4E00 && value <= 0x9FFF)
+                || (value >= 0x3400 && value <= 0x4DBF)
+                || (value >= 0x20000 && value <= 0x2FA1F)
+                || (value >= 0xF900 && value <= 0xFAFF)
+                || (value >= 0x3100 && value <= 0x312F)
+                || (value >= 0x31A0 && value <= 0x31BF)
+                || (value >= 0x3040 && value <= 0x30FF)
+                || (value >= 0xAC00 && value <= 0xD7AF))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static IReadOnlyList<string> SplitSentences(string text)
+    {
+        var pieces = new List<string>();
+        var current = new StringBuilder();
+        foreach (var character in text)
+        {
+            current.Append(character);
+            if ("。！？；!?;\n".Contains(character))
+            {
+                var piece = current.ToString().Trim();
+                if (piece.Length > 0)
+                {
+                    pieces.Add(piece);
+                }
+
+                current.Clear();
+            }
+        }
+
+        var tail = current.ToString().Trim();
+        if (tail.Length > 0)
+        {
+            pieces.Add(tail);
+        }
+
+        return pieces;
     }
 
     internal static IReadOnlyList<string> SplitText(string text, int maxChars)

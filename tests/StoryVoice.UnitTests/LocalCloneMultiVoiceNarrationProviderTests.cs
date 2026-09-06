@@ -39,6 +39,26 @@ public sealed class LocalCloneMultiVoiceNarrationProviderTests
             new Dictionary<string, LocalCloneVoiceReference>()));
     }
 
+    [Theory]
+    [InlineData("Atlantis AM8：20", false)]
+    [InlineData("......", false)]
+    [InlineData("2026/08/13", false)]
+    [InlineData("「早。」", true)]
+    [InlineData("Atlantis 學園 AM8：20", true)]
+    [InlineData("ㄅㄆㄇ", true)]
+    public void Only_text_with_cjk_characters_is_sent_to_the_clone_engine(string text, bool speakable)
+    {
+        Assert.Equal(speakable, LocalCloneMultiVoiceNarrationProvider.HasSpeakableText(text));
+    }
+
+    [Fact]
+    public void Sentence_fallback_splits_on_terminal_punctuation()
+    {
+        var pieces = LocalCloneMultiVoiceNarrationProvider.SplitSentences("你好。Atlantis AM8：20！再見？尾巴");
+
+        Assert.Equal(["你好。", "Atlantis AM8：20！", "再見？", "尾巴"], pieces);
+    }
+
     [Fact]
     public void Long_turns_split_on_sentence_boundaries_within_the_chunk_limit()
     {
