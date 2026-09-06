@@ -52,6 +52,25 @@ public sealed class LocalCloneMultiVoiceNarrationProviderTests
     }
 
     [Fact]
+    public void Reference_duration_is_read_from_the_wav_data_chunk()
+    {
+        var seconds = 31.0;
+        var dataBytes = (int)(seconds * 48_000 * 2);
+        var wav = new byte[44 + dataBytes];
+        "RIFF"u8.CopyTo(wav.AsSpan(0, 4));
+        BitConverter.GetBytes((uint)(wav.Length - 8)).CopyTo(wav, 4);
+        "WAVE"u8.CopyTo(wav.AsSpan(8, 4));
+        "fmt "u8.CopyTo(wav.AsSpan(12, 4));
+        BitConverter.GetBytes(16u).CopyTo(wav, 16);
+        "data"u8.CopyTo(wav.AsSpan(36, 4));
+        BitConverter.GetBytes((uint)dataBytes).CopyTo(wav, 40);
+
+        Assert.Equal(seconds, LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds(wav), precision: 3);
+        Assert.True(LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds(wav) > LocalCloneMultiVoiceNarrationProvider.MaximumReferenceSeconds);
+        Assert.Equal(0, LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds([1, 2, 3]));
+    }
+
+    [Fact]
     public void Sentence_fallback_splits_on_terminal_punctuation()
     {
         var pieces = LocalCloneMultiVoiceNarrationProvider.SplitSentences("你好。Atlantis AM8：20！再見？尾巴");

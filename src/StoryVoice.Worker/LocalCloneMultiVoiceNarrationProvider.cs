@@ -223,7 +223,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         string workDirectory,
         CancellationToken cancellationToken)
     {
-        var audio = await LoadReferenceAudioAsync(reference, referenceAudioCache, cancellationToken);
+        var audio = await LoadReferenceAudioAsync(reference, referenceAudioCache, workDirectory, cancellationToken);
         var stem = Path.GetFileNameWithoutExtension(cachedPath);
         var wholePath = Path.Combine(workDirectory, $"{stem}-whole.mp3");
         if (await TrySynthesizePieceAsync(reference, audio, text, wholePath, workDirectory, attempts: 2, cancellationToken))
@@ -296,9 +296,16 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         return true;
     }
 
-    private static async Task<byte[]> LoadReferenceAudioAsync(
+    // The gateway (and CosyVoice's prompt extractor) reject prompts longer than 30 s. Stored
+    // profiles may sit right at the limit, so anything over this is trimmed before upload.
+    internal const double MaximumReferenceSeconds = 29.5;
+    private const int ReferenceSampleRate = 48_000;
+    private const int ReferenceBytesPerSecond = ReferenceSampleRate * 2;
+
+    private async Task<byte[]> LoadReferenceAudioAsync(
         LocalCloneVoiceReference reference,
         Dictionary<string, byte[]> referenceAudioCache,
+        string workDirectory,
         CancellationToken cancellationToken)
     {
         if (referenceAudioCache.TryGetValue(reference.ReferenceAudioPath, out var audio))
@@ -314,8 +321,55 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         }
 
         audio = await File.ReadAllBytesAsync(reference.ReferenceAudioPath, cancellationToken);
+        var seconds = EstimateWavSeconds(audio);
+        if (seconds > MaximumReferenceSeconds)
+        {
+            var trimmedPath = Path.Combine(workDirectory, $"ref-{Guid.NewGuid():N}.wav");
+            await RunFfmpegAsync(
+                [
+                    "-y", "-i", reference.ReferenceAudioPath, "-t",
+                    MaximumReferenceSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture),
+                    "-ac", "1", "-ar", ReferenceSampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    "-sample_fmt", "s16", "-fflags", "+bitexact", "-flags:a", "+bitexact",
+                    "-map_metadata", "-1", "-f", "wav", trimmedPath
+                ],
+                cancellationToken);
+            audio = await File.ReadAllBytesAsync(trimmedPath, cancellationToken);
+            File.Delete(trimmedPath);
+            logger.LogInformation(
+                "Local clone trimmed a {Seconds:F2}s reference recording to {Limit:F1}s for the gateway",
+                seconds,
+                MaximumReferenceSeconds);
+        }
+
         referenceAudioCache[reference.ReferenceAudioPath] = audio;
         return audio;
+    }
+
+    /// <summary>Duration of a 48 kHz mono PCM16 WAV from its <c>data</c> chunk; 0 when the
+    /// container cannot be parsed (the gateway then reports the exact contract failure).</summary>
+    internal static double EstimateWavSeconds(byte[] wav)
+    {
+        if (wav.Length < 12 || !wav.AsSpan(0, 4).SequenceEqual("RIFF"u8) || !wav.AsSpan(8, 4).SequenceEqual("WAVE"u8))
+        {
+            return 0;
+        }
+
+        var position = 12;
+        while (position + 8 <= wav.Length)
+        {
+            var chunkId = wav.AsSpan(position, 4);
+            var chunkSize = BitConverter.ToUInt32(wav, position + 4);
+            if (chunkId.SequenceEqual("data"u8))
+            {
+                var available = Math.Min((long)chunkSize, wav.Length - position - 8);
+                return available / (double)ReferenceBytesPerSecond;
+            }
+
+            position += 8 + (int)Math.Min(chunkSize + (chunkSize & 1), (uint)(wav.Length - position - 8));
+        }
+
+        return 0;
     }
 
     private async Task<bool> TrySynthesizePieceAsync(
