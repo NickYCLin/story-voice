@@ -45,10 +45,12 @@ export function LibraryPage() {
       const response = await fetch(apiUrl('/api/books'), { signal, credentials: 'same-origin' })
       if (!response.ok) throw new Error(`API returned ${response.status}`)
       const items = await response.json() as BookSummary[]
+      if (signal?.aborted) return null
       setBooks(items)
       setLibraryState('ready')
       return items
     } catch (error) {
+      if (signal?.aborted) return null
       if (error instanceof DOMException && error.name === 'AbortError') return null
       setLibraryState('error')
       return null
@@ -90,10 +92,12 @@ export function LibraryPage() {
         return response.json() as Promise<BookDetails>
       })
       .then((book) => {
+        if (controller.signal.aborted) return
         setSelectedBook(book)
         setDetailState('ready')
       })
       .catch((error: unknown) => {
+        if (controller.signal.aborted) return
         if (error instanceof DOMException && error.name === 'AbortError') return
         setDetailState('error')
       })
@@ -154,7 +158,9 @@ export function LibraryPage() {
           <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">整理你的故事書庫。</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">從任何來源取得、且你有權處理的 EPUB 或文字檔，都可以自行匯入、解析與整理。</p>
         </div>
-        <span className="rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">書庫已有 {books.length} 本</span>
+        <span className="shrink-0 self-start rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500" role="status">
+          {libraryState === 'loading' ? '正在讀取書庫…' : libraryState === 'error' ? '書庫讀取失敗' : `書庫已有 ${books.length} 本`}
+        </span>
       </div>
 
       <form className="mb-6 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleUpload}>
@@ -284,9 +290,9 @@ export function LibraryPage() {
                 <BookInsightsPanel
                   book={selectedBook}
                   csrfToken={csrfToken}
-                  key={selectedBook.id}
+                  key={`insights-${selectedBook.id}`}
                 />
-                <NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={csrfToken} />
+                <NarrationPanel key={`narration-${selectedBook.id}`} book={selectedBook} csrfToken={csrfToken} />
                 <div className="mt-5 space-y-3">
                   {selectedBook.chapters.length === 0 && (
                     <div className="library-state min-h-52">

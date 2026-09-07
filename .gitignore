@@ -6,6 +6,8 @@
 *.suo
 TestResults/
 coverage/
+output/playwright/
+.playwright-cli/
 
 # Node / Vite
 **/node_modules/

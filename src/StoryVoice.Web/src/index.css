@@ -25,8 +25,16 @@
 
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: hidden; }
-button, input, a { font: inherit; }
+button, input, select, textarea, a { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
+:where(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+button:disabled { cursor: not-allowed; }
+.app-header nav a { min-height: 2.75rem; display: flex; align-items: center; }
+.audio-player { color-scheme: dark; }
+.audio-player :focus-visible { outline-color: #fbbf24; }
+.audio-player button { min-height: 2.75rem; min-width: 2.75rem; }
+.audio-player button:disabled { opacity: .4; }
+.audio-player input[type="range"] { touch-action: pan-y; }
 .font-serif { font-family: Georgia, "Noto Serif TC", "Times New Roman", serif; }
 .public-focus:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
@@ -50,7 +58,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   border: 1px solid var(--line); background: var(--surface);
   padding: .7rem .95rem; font-size: .9rem; line-height: 1.5; color: var(--ink); transition: .18s ease;
 }
-.auth-input::placeholder { color: var(--ink-faint); }
+.auth-input::placeholder { color: var(--ink-soft); opacity: .8; }
 .auth-input:hover { border-color: rgba(96, 70, 30, .24); }
 .auth-input:focus { outline: none; border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(180, 101, 15, .13); }
 .auth-input:disabled { opacity: .55; cursor: not-allowed; }

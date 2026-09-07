@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { fetchBlob, fetchJson } from './api'
 import type { BookDetails, Chapter } from './types'
@@ -146,6 +146,8 @@ export function SpeechPlanReview({
   const [busyChapterId, setBusyChapterId] = useState<string | null>(null)
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
   const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null)
+  const [previewAudio, setPreviewAudio] = useState<{ seriesId: string; segmentId: string; url: string } | null>(null)
+  const previewRequest = useRef<AbortController | null>(null)
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null)
   const [assignSelections, setAssignSelections] = useState<Record<string, string>>({})
   const [correctionSegmentId, setCorrectionSegmentId] = useState<string | null>(null)
@@ -157,6 +159,20 @@ export function SpeechPlanReview({
   const [rightsAttested, setRightsAttested] = useState(false)
   const [stageState, setStageState] = useState<'idle' | 'loading'>('idle')
   const [bulkDraftState, setBulkDraftState] = useState<'idle' | 'loading'>('idle')
+
+  useEffect(() => {
+    setPreviewAudio(null)
+    setPlayingSegmentId(null)
+    setBusySegmentId(null)
+    return () => {
+      previewRequest.current?.abort()
+      previewRequest.current = null
+    }
+  }, [seriesId])
+
+  useEffect(() => () => {
+    if (previewAudio) URL.revokeObjectURL(previewAudio.url)
+  }, [previewAudio])
 
   const confirmedGapCount = useMemo(
     () => entries.filter((entry) => entry.draft?.confirmedRevisionId === null || entry.draft === null).length,
@@ -183,30 +199,29 @@ export function SpeechPlanReview({
     if (!entry.draft) return
     const text = segmentText(entry.chapter, segment)
     if (!text.trim()) return
+    previewRequest.current?.abort()
+    const controller = new AbortController()
+    previewRequest.current = controller
+    setPreviewAudio(null)
+    setPlayingSegmentId(null)
     setBusySegmentId(segment.id)
     setMessage(`正在以這段實際會使用的聲線產生「${text.slice(0, 15)}…」試聽…`)
     try {
       const blob = await fetchBlob(
         `/api/series/${seriesId}/speech-plan-drafts/${entry.draft.id}/segments/${segment.id}/preview`,
-        { method: 'POST', csrfToken },
+        { method: 'POST', csrfToken, signal: controller.signal },
       )
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      setPlayingSegmentId(segment.id)
-      audio.onended = () => {
-        setPlayingSegmentId(null)
-        URL.revokeObjectURL(url)
-      }
-      audio.onerror = () => {
-        setPlayingSegmentId(null)
-        URL.revokeObjectURL(url)
-      }
-      await audio.play()
-      setMessage('正在播放該句語音（過長片段只試聽開頭）。')
+      if (controller.signal.aborted || previewRequest.current !== controller) return
+      setPreviewAudio({ seriesId, segmentId: segment.id, url: URL.createObjectURL(blob) })
+      setMessage('試聽已產生，可播放、暫停或重播；過長片段只試聽開頭。')
     } catch (error) {
+      if (controller.signal.aborted || previewRequest.current !== controller) return
       setMessage(error instanceof Error ? error.message : '單段語音試聽失敗。')
     } finally {
-      setBusySegmentId(null)
+      if (previewRequest.current === controller) {
+        previewRequest.current = null
+        setBusySegmentId(null)
+      }
     }
   }
 
@@ -402,6 +417,23 @@ export function SpeechPlanReview({
           )}
         </div>
       </div>
+
+      {previewAudio?.seriesId === seriesId && (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-white p-3">
+          <p className="mb-2 text-xs text-stone-500">單句試聽</p>
+          <audio
+            aria-label="單句試聽"
+            autoPlay
+            className="w-full"
+            controls
+            onEnded={() => setPlayingSegmentId(null)}
+            onError={() => { setPreviewAudio(null); setPlayingSegmentId(null); setMessage('試聽音訊無法播放，請重新產生。') }}
+            onPause={() => setPlayingSegmentId(null)}
+            onPlay={() => setPlayingSegmentId(previewAudio.segmentId)}
+            src={previewAudio.url}
+          />
+        </div>
+      )}
 
       <form className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200 bg-white p-4" onSubmit={addCharacterInline}>
         <p className="w-full text-xs text-stone-500">審核時遇到名冊上沒有的角色，可以直接在這裡補建；聲線建立後即固定，跨冊沿用。</p>

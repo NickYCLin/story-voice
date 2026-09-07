@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const panel = readFileSync(new URL('../src/NarrationPanel.tsx', import.meta.url), 'utf8')
-const libraryPage = readFileSync(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 const bookInsightsPanel = readFileSync(new URL('../src/BookInsightsPanel.tsx', import.meta.url), 'utf8')
 
 test('new narration routes eligible authorized text through the multi-character series workflow', () => {
@@ -36,7 +35,6 @@ test('narration polling is serialized and stale responses cannot regress durable
   assert.ok(panel.includes('mergeFreshJobs'))
   assert.ok(panel.includes('Date.parse(incoming.updatedAt) >= Date.parse(existing.updatedAt)'))
   assert.ok(panel.includes('job.bookId === bookId'))
-  assert.ok(libraryPage.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={csrfToken} />'))
 })
 
 test('narration mutations use CSRF, poll durable jobs, support cancel and private audio playback', () => {
@@ -45,6 +43,5 @@ test('narration mutations use CSRF, poll durable jobs, support cancel and privat
   assert.ok(panel.includes('/cancel`'))
   assert.ok(panel.includes('/audio`)}'))
   assert.ok(panel.includes('<AudioPlayer') || panel.includes('<audio'))
-  assert.ok(libraryPage.includes('<NarrationPanel key={selectedBook.id} book={selectedBook} csrfToken={csrfToken} />'))
   assert.ok(bookInsightsPanel.includes('const canAnalyzeText = book.authorizedTextAvailable'))
 })

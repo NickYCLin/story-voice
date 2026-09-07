@@ -104,6 +104,9 @@ export function CharacterLibraryPage() {
   const [previewProfileId, setPreviewProfileId] = useState('')
   const [previewText, setPreviewText] = useState('你好，這是我的聲音示範。')
   const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const previewRequest = useRef<AbortController | null>(null)
+  const voiceProfilesRequest = useRef<AbortController | null>(null)
   const [localCloneAvailability, setLocalCloneAvailability] = useState<LocalClonePreviewAvailability | null>(null)
   const [localCloneAvailabilityState, setLocalCloneAvailabilityState] = useState<LoadState>('idle')
   const [localClonePreviewBusy, setLocalClonePreviewBusy] = useState(false)
@@ -114,6 +117,24 @@ export function CharacterLibraryPage() {
   const [statusToggleBusy, setStatusToggleBusy] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
+  const aiRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    setAiBusy(false)
+    setPreviewBusy(false)
+    setPreviewUrl(null)
+    setMessage('')
+    return () => {
+      aiRequest.current?.abort()
+      aiRequest.current = null
+      previewRequest.current?.abort()
+      previewRequest.current = null
+    }
+  }, [selectedId])
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
 
   const triggerAiAssist = useCallback(async (field: 'all' | 'personality' | 'background' | 'speakingStyle' | 'catchphrase') => {
     if (!form.canonicalName.trim()) {
@@ -121,10 +142,15 @@ export function CharacterLibraryPage() {
       return
     }
     setAiBusy(true)
+    aiRequest.current?.abort()
+    const controller = new AbortController()
+    aiRequest.current = controller
+    const characterId = selectedId
     setMessage('AI 正在為角色構思設定…')
     try {
       const response = await fetch(apiUrl('/api/character-profiles/ai-assist'), {
         method: 'POST',
+        signal: controller.signal,
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         body: JSON.stringify({
@@ -145,20 +171,27 @@ export function CharacterLibraryPage() {
         speakingStyle: string | null
         catchphrase: string | null
       }
-      setForm((current) => ({
-        ...current,
-        personality: result.personality ?? current.personality,
-        background: result.background ?? current.background,
-        speakingStyle: result.speakingStyle ?? current.speakingStyle,
-        catchphrase: result.catchphrase ?? current.catchphrase,
-      }))
-      setMessage('AI 角色設定已生成並填入表單，確認無誤後請點擊「儲存角色資料」。')
+      if (controller.signal.aborted || aiRequest.current !== controller || selectedIdRef.current !== characterId) return
+      setForm((current) => {
+        const next = { ...current }
+        for (const key of ['personality', 'background', 'speakingStyle', 'catchphrase'] as const) {
+          if ((field === 'all' || field === key) && current[key] === form[key] && result[key] != null) {
+            next[key] = result[key]
+          }
+        }
+        return next
+      })
+      setMessage('AI 角色設定已填入表單，等待期間手動修改的欄位已保留。確認後請按「儲存角色資料」。')
     } catch (error) {
+      if (controller.signal.aborted || aiRequest.current !== controller) return
       setMessage(error instanceof Error ? error.message : 'AI 輔助生成失敗。')
     } finally {
-      setAiBusy(false)
+      if (aiRequest.current === controller) {
+        aiRequest.current = null
+        setAiBusy(false)
+      }
     }
-  }, [csrfToken, form])
+  }, [csrfToken, form, selectedId])
 
   const loadCharacters = useCallback(async () => {
     setListState('loading')
@@ -196,21 +229,28 @@ export function CharacterLibraryPage() {
   }, [selected])
 
   const loadVoiceProfiles = useCallback(async () => {
+    voiceProfilesRequest.current?.abort()
+    const controller = new AbortController()
+    voiceProfilesRequest.current = controller
+    setVoiceProfiles([])
+    setPreviewProfileId('')
     if (!selectedId) {
-      setVoiceProfiles([])
       return
     }
     try {
-      const profiles = await fetchJson<VoiceProfileSummary[]>(`/api/character-profiles/${selectedId}/voice-profiles`)
+      const profiles = await fetchJson<VoiceProfileSummary[]>(`/api/character-profiles/${selectedId}/voice-profiles`, { signal: controller.signal })
+      if (controller.signal.aborted || voiceProfilesRequest.current !== controller || selectedIdRef.current !== selectedId) return
       setVoiceProfiles(profiles)
       setPreviewProfileId((current) => (profiles.some((profile) => profile.id === current) ? current : profiles.find((profile) => profile.status === 'Ready')?.id ?? ''))
     } catch {
+      if (controller.signal.aborted || voiceProfilesRequest.current !== controller) return
       setVoiceProfiles([])
     }
   }, [selectedId])
 
   useEffect(() => {
     void loadVoiceProfiles()
+    return () => { voiceProfilesRequest.current?.abort() }
   }, [loadVoiceProfiles])
 
   useEffect(() => {
@@ -274,6 +314,9 @@ export function CharacterLibraryPage() {
   }, [])
 
   function resetForm() {
+    aiRequest.current?.abort()
+    aiRequest.current = null
+    setAiBusy(false)
     setForm(selected
       ? {
         canonicalName: selected.canonicalName,
@@ -411,38 +454,33 @@ export function CharacterLibraryPage() {
   }
 
   async function playPreview() {
-    if (!selected || !previewProfileId || !previewText.trim()) return
+    if (!selected || !previewProfileId || !previewText.trim() || previewRequest.current) return
+    const controller = new AbortController()
+    const characterId = selected.id
+    previewRequest.current = controller
     setPreviewBusy(true)
+    setPreviewUrl(null)
     try {
       const response = await fetch(apiUrl(`/api/character-profiles/${selected.id}/voice-profiles/${previewProfileId}/preview`), {
         method: 'POST',
+        signal: controller.signal,
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
         body: JSON.stringify({ text: previewText.trim() }),
       })
       if (!response.ok) throw new Error(await responseProblem(response, '試講失敗'))
       const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      let released = false
-      const releaseUrl = () => {
-        if (released) return
-        released = true
-        URL.revokeObjectURL(url)
-      }
-      audio.addEventListener('ended', releaseUrl, { once: true })
-      audio.addEventListener('error', releaseUrl, { once: true })
-      try {
-        await audio.play()
-      } catch (error) {
-        releaseUrl()
-        throw error
-      }
-      setMessage('正在播放試講。')
+      if (controller.signal.aborted || previewRequest.current !== controller || selectedIdRef.current !== characterId) return
+      setPreviewUrl(URL.createObjectURL(blob))
+      setMessage('試講已產生，可播放、暫停或重播。')
     } catch (error) {
+      if (controller.signal.aborted || previewRequest.current !== controller) return
       setMessage(error instanceof Error ? error.message : '試講失敗。')
     } finally {
-      setPreviewBusy(false)
+      if (previewRequest.current === controller) {
+        previewRequest.current = null
+        setPreviewBusy(false)
+      }
     }
   }
 
@@ -516,7 +554,8 @@ export function CharacterLibraryPage() {
 
           <form className="mt-3 flex gap-2" onSubmit={createCharacter}>
             <input
-              className="auth-input flex-1"
+              aria-label="新角色名稱"
+              className="auth-input min-w-0 flex-1"
               maxLength={200}
               onChange={(event) => setNewCharacterName(event.target.value)}
               placeholder="新角色名稱"
@@ -558,11 +597,11 @@ export function CharacterLibraryPage() {
           </div>
         </aside>
 
-        <section>
+        <section className="min-w-0">
           {!selected && <div className="library-state">選擇或建立一個角色，開始設定基本資料與自訂聲線。</div>}
           {selected && (
             <div className="space-y-6">
-              <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
+              <div className="min-w-0 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
                 <div className="flex flex-wrap items-center gap-4">
                   {selected.hasAvatar ? (
                     <img
@@ -575,9 +614,9 @@ export function CharacterLibraryPage() {
                       {selected.canonicalName.slice(0, 1)}
                     </span>
                   )}
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-serif text-2xl text-stone-900">{selected.canonicalName}</h2>
+                      <h2 className="break-words font-serif text-2xl text-stone-900">{selected.canonicalName}</h2>
                       <span className={`rounded-full border px-3 py-0.5 text-xs ${selected.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-stone-100 text-stone-500'}`}>
                         {selected.isActive ? '啟用中' : '已停用'}
                       </span>
@@ -670,9 +709,9 @@ export function CharacterLibraryPage() {
                       生日
                       <input className="auth-input mt-2" onChange={(event) => setForm((current) => ({ ...current, birthday: event.target.value }))} type="date" value={form.birthday} />
                     </label>
-                    <label className="text-xs text-stone-500 sm:col-span-2">
+                    <div className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
-                        <span>個性</span>
+                        <label htmlFor="character-personality">個性</label>
                         <button
                           className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
                           disabled={aiBusy || !form.canonicalName.trim()}
@@ -682,11 +721,11 @@ export function CharacterLibraryPage() {
                           ✦ AI 補完個性
                         </button>
                       </div>
-                      <textarea className="auth-input mt-2 min-h-16 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, personality: event.target.value }))} value={form.personality} />
-                    </label>
-                    <label className="text-xs text-stone-500 sm:col-span-2">
+                      <textarea className="auth-input mt-2 min-h-16 w-full" id="character-personality" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, personality: event.target.value }))} value={form.personality} />
+                    </div>
+                    <div className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
-                        <span>口頭禪</span>
+                        <label htmlFor="character-catchphrase">口頭禪</label>
                         <button
                           className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
                           disabled={aiBusy || !form.canonicalName.trim()}
@@ -696,11 +735,11 @@ export function CharacterLibraryPage() {
                           ✦ AI 構思口頭禪
                         </button>
                       </div>
-                      <textarea className="auth-input mt-2 min-h-12 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, catchphrase: event.target.value }))} value={form.catchphrase} />
-                    </label>
-                    <label className="text-xs text-stone-500 sm:col-span-2">
+                      <textarea className="auth-input mt-2 min-h-12 w-full" id="character-catchphrase" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, catchphrase: event.target.value }))} value={form.catchphrase} />
+                    </div>
+                    <div className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
-                        <span>人物背景</span>
+                        <label htmlFor="character-background">人物背景</label>
                         <button
                           className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
                           disabled={aiBusy || !form.canonicalName.trim()}
@@ -710,11 +749,11 @@ export function CharacterLibraryPage() {
                           ✦ AI 補完背景
                         </button>
                       </div>
-                      <textarea className="auth-input mt-2 min-h-20 w-full" maxLength={4000} onChange={(event) => setForm((current) => ({ ...current, background: event.target.value }))} value={form.background} />
-                    </label>
-                    <label className="text-xs text-stone-500 sm:col-span-2">
+                      <textarea className="auth-input mt-2 min-h-20 w-full" id="character-background" maxLength={4000} onChange={(event) => setForm((current) => ({ ...current, background: event.target.value }))} value={form.background} />
+                    </div>
+                    <div className="text-xs text-stone-500 sm:col-span-2">
                       <div className="flex items-center justify-between">
-                        <span>說話風格</span>
+                        <label htmlFor="character-speaking-style">說話風格</label>
                         <button
                           className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
                           disabled={aiBusy || !form.canonicalName.trim()}
@@ -724,8 +763,8 @@ export function CharacterLibraryPage() {
                           ✦ AI 補完風格
                         </button>
                       </div>
-                      <textarea className="auth-input mt-2 min-h-16 w-full" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, speakingStyle: event.target.value }))} value={form.speakingStyle} />
-                    </label>
+                      <textarea className="auth-input mt-2 min-h-16 w-full" id="character-speaking-style" maxLength={2000} onChange={(event) => setForm((current) => ({ ...current, speakingStyle: event.target.value }))} value={form.speakingStyle} />
+                    </div>
                     <div className="flex gap-3 sm:col-span-2">
                       <button className="secondary-button flex-1 disabled:cursor-wait disabled:opacity-60" disabled={saveState === 'loading' || !form.canonicalName.trim()} type="submit">
                         儲存角色資料
@@ -910,7 +949,7 @@ export function CharacterLibraryPage() {
                         <div className="mt-3 space-y-3">
                           <label className="block text-xs text-stone-500">
                             選擇聲線
-                            <select className="auth-input mt-2" onChange={(event) => setPreviewProfileId(event.target.value)} value={previewProfileId}>
+                            <select className="auth-input mt-2" disabled={previewBusy} onChange={(event) => { setPreviewProfileId(event.target.value); setPreviewUrl(null) }} value={previewProfileId}>
                               {readyProfiles.map((profile) => (
                                 <option key={profile.id} value={profile.id}>{slotLabel(profile)}（{profile.mode === 'Design' ? '文字設計' : '錄音克隆'}）</option>
                               ))}
@@ -918,7 +957,7 @@ export function CharacterLibraryPage() {
                           </label>
                           <label className="block text-xs text-stone-500">
                             試講文字
-                            <textarea className="auth-input mt-2 min-h-20 w-full" maxLength={200} onChange={(event) => setPreviewText(event.target.value)} value={previewText} />
+                            <textarea className="auth-input mt-2 min-h-20 w-full" disabled={previewBusy} maxLength={200} onChange={(event) => { setPreviewText(event.target.value); setPreviewUrl(null) }} value={previewText} />
                           </label>
                           <button
                             className="secondary-button disabled:cursor-wait disabled:opacity-60"
@@ -928,6 +967,9 @@ export function CharacterLibraryPage() {
                           >
                             {previewBusy ? '合成中…' : '▶ 播放試講'}
                           </button>
+                          {previewUrl && (
+                            <audio aria-label="角色試講" autoPlay className="w-full" controls onError={() => { setPreviewUrl(null); setMessage('試講音訊無法播放，請重新產生。') }} src={previewUrl} />
+                          )}
                         </div>
                       )}
                     </section>

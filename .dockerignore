@@ -9,6 +9,8 @@
 !.env.example
 TestResults
 coverage
+output
+.playwright-cli
 storage
 uploads
 audio

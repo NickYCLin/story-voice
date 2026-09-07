@@ -287,7 +287,9 @@ export function DeveloperPlaygroundPage() {
   }
 
   function cancel() {
-    controllerRef.current?.abort()
+    invalidatePendingGeneration()
+    setGenerateState('cancelled')
+    setMessage(t('已取消這次要求，可以修改文字後重新產生。', 'This request was cancelled. You can edit the text and try again.'))
   }
 
   function handleExampleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, tab: ExampleTab) {
@@ -378,7 +380,7 @@ export function DeveloperPlaygroundPage() {
             )}
 
             <div className="mt-6 flex flex-wrap gap-3">
-              <button className="auth-submit" disabled={invalidText || projectUnavailable || !voice || generateState === 'generating'} type="submit">
+              <button className="primary-button disabled:opacity-50" disabled={invalidText || projectUnavailable || !voice || generateState === 'generating'} type="submit">
                 {generateState === 'generating' ? t('正在產生…', 'Generating…') : t('產生語音', 'Generate voice')}
               </button>
               {generateState === 'generating' && (
