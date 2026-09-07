@@ -297,6 +297,13 @@ public static class DependencyInjection
         services.AddSingleton<LocalCharacterVoiceAudioStorage>();
         services.AddSingleton<LocalCharacterAvatarStorage>();
         services.AddScoped<ICharacterProfileService, CharacterProfileService>();
+        services.AddHttpClient<ICharacterProfileAssistGenerator, OllamaCharacterAnalysisProvider>((provider, client) =>
+        {
+            var localLlmOptions = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
+            client.BaseAddress = new Uri(localLlmOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
         services.AddScoped<ICharacterVoiceProfileService, CharacterVoiceProfileService>();
         services.AddScoped<ICharacterVoicePreviewService, CharacterVoicePreviewService>();
         services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>
