@@ -16,6 +16,7 @@ character workflows, series voice casting, and the owner-scoped developer consol
 - Tailwind CSS 4
 - Oxlint
 - Node.js built-in test runner for static contract tests
+- Vitest, jsdom, and Testing Library for rendered component interactions
 
 ## Prerequisites
 
@@ -49,7 +50,8 @@ To run the complete stack instead, use `docker compose up --build` from the repo
 | Command | Purpose |
 |---|---|
 | `npm run dev` | Start the Vite development server |
-| `npm test` | Run the Web contract and static tests |
+| `npm test` | Run static contracts and component interaction regressions |
+| `npm run test:runtime` | Run component interaction regressions only |
 | `npm run lint` | Run Oxlint |
 | `npm run build` | Type-check and create a production build |
 | `npm run preview` | Preview the production build locally |
@@ -61,6 +63,12 @@ npm test
 npm run lint
 npm run build
 ```
+
+Runtime tests use synthetic data and controlled network/media responses. They cover
+playback position and errors, character changes during AI generation, preview cancellation
+and Blob URL cleanup, library request races, and confirmation-dialog keyboard focus.
+They run in the existing frontend CI job through `npm test`; real browser audio, responsive
+layout, and model/provider acceptance still need separate verification.
 
 ## Main routes
 

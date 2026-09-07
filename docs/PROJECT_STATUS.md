@@ -1,12 +1,27 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-02（播放器章節列表與逐句／角色同步；先前輪次：播放倍速／進度續播、劇本審核試聽、角色庫 AI 輔助、EBU R128 響度標準化）
+最後更新：2026-09-07（角色設定改接本機 LLM、播放與試音競態修正、手機導覽、前端互動回歸測試）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-07 功能補完與互動檢查
+
+- 角色設定的「AI 輔助生成」原本回傳固定模板，單項 `speakingStyle` 也因大小寫比對錯誤而沒有結果。現在透過獨立的 `ICharacterProfileAssistGenerator` 接到既有 Ollama client，使用 `LocalLlmCharacterAnalysis` 設定、共用 GPU lease 與模型卸載流程；只接受指定欄位、限制輸入與回應長度，模型錯誤回 503，不再以模板充當生成成功。草稿仍須使用者按儲存才會寫入角色資料。
+- AI 填表會在切換角色或重設時取消；晚到回應不能改寫別的角色，也不會覆蓋等待期間手動編輯的欄位。角色聲線摘要與試講也補上取消和過期回應檢查。
+- 播放器修正鍵盤跳轉、換音檔殘留狀態、播放失敗無提示、無效音訊長度與零音量取消靜音；暫停、離頁與跳轉會保存進度，僅瀏覽播放器不會清除舊的續播位置。
+- 角色試講與劇本單句試聽改用可暫停、重播的播放器；切換項目、播放錯誤及離頁時回收 Blob URL，過期要求不會自行播放。Playground 取消會立即解除等待，不必等網路回應才可重試。
+- 書庫的筆記與朗讀面板使用不同 React key，快速換書時也會忽略舊回應。書庫載入中不再顯示假的零本狀態。
+- 手機主要導覽改成可展開選單，支援 Escape 關閉與焦點返回；角色表單修正標籤與輸入框的關聯，播放器增加操作區域與鍵盤焦點提示，Playground 產生按鈕改用共用按鈕樣式。
+- `npm test` 現在同時執行靜態契約與 Vitest／jsdom 互動測試，涵蓋播放器、角色 AI、書庫、試聽、Playground 與確認對話框。使用可控制延遲的合成回應驗證競態，已接入現有 frontend CI。
+
+本輪瀏覽器驗證使用獨立本機 Compose 與合成資料：註冊、TXT 匯入、角色儲存後重開、書冊建立、確認對話框鍵盤操作，以及 1440／390／320px 的主要頁面。播放器另以合成 WAV 驗證鍵盤跳轉、章節切換、倍速、播放／暫停與重新整理後續播。
+驗證結果：Release 建置通過，582 項單元測試、238 項整合測試、164 項前端靜態契約、22 項前端互動測試與 13 項 Python 測試通過；前端 lint、根目錄與子路徑建置、EF migration 一致性檢查也通過。Compose 重建後 API readiness 與 Web 均回 200，實際頁面確認模型離線回 503 並保留原表單。前端互動測試使用單一 threads worker，保留每份測試的隔離並減少 Windows 子程序啟動負擔。
+
+這些證據不代表正式站已部署；本機沒有可用的 Ollama 模型，角色生成的回應格式、錯誤與取消流程由測試驗證，實際生成品質仍需模型環境驗收。
 
 ## 2026-08-30 全面稽核與修正
 
@@ -87,8 +102,8 @@
 ## 角色庫（Character Library）與角色自訂聲線工作室（Character Voice Studio）
 
 `/characters` 是獨立於任何系列的 owner-scoped 角色管理頁面：可以建立角色的基本
-資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格——AI 補完／AI
-全部重寫按鈕先保留位置，尚未接 LLM），也可以直接在同一頁替角色建立一組基礎
+資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格；AI 單項補完與完整
+人設生成已接到本機 Ollama，產生結果仍需人工儲存），也可以直接在同一頁替角色建立一組基礎
 聲線，以及緊張／開心／生氣／難過（加上「平常」）最多五組情境聲線。3wa 官方
 manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文字設計」已在 API、
 試音、系列 admission 與 Worker 全部 fail closed；既有描述資料保留但不可視為可用聲線。
@@ -166,10 +181,10 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | Public voice catalog | 核准 entry、固定 demo、detail DTO／route、creator publication／revoke workflow | `/voices` shell 已部署但 feature flag 關閉，public API 維持 404 |
 | 商業化／營運 | 申請、subscription、billing、invoice、billing-grade metering、hard quota、admin、usage retention／archive | 現有 best-effort ledger 不作唯一計費／硬額度來源；不顯示假價格、假訂閱或假用量 |
 | 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
-| 前端 runtime regression automation | ConfirmDialog focus trap、Playground stale response／Blob URL lifecycle 的完整 DOM／browser 自動化 | 本輪有 source-level regression tests、獨立 review 與實際 Chrome 核心流程驗證，但 CI 尚未模擬這些焦點與競態時序 |
+| 跨瀏覽器驗收 | Safari／Firefox 與真實行動裝置媒體播放 | CI 已有 DOM 互動回歸；本輪 Chromium 實測不代表所有瀏覽器或真實手機皆已驗收 |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
-| 角色建立 | 角色基本資料的 AI 補完／全部重寫 | 目前 UI 明示尚未提供；3wa 沒有對應文字生成 mode |
+| 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
 | 長期有聲書 UX | automatic casting、平行生成、cost logging；VoAI／BlueMagpie／3wa 路徑的播放時間軸（目前只有 Edge 多角色合成回報逐 turn timing） | 單片段重生、loudness normalize、播放進度／resume 與 Edge 路徑的章節／句子／角色同步已完成；播放進度仍存於瀏覽器 localStorage，尚無伺服器端 ListeningProgress |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
