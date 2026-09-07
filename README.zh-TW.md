@@ -5,22 +5,34 @@
 [![CI](https://github.com/NickYCLin/story-voice/actions/workflows/ci.yml/badge.svg)](https://github.com/NickYCLin/story-voice/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Self-hosted multi-character audiobook production for EPUB and TXT, with human-in-the-loop story analysis, voice casting and text-to-speech.**
+> **把你的故事，做成多角色有聲書。**
 
-StoryVoice 是開源、自架式的 EPUB／TXT 有聲書製作工具。它會整理章節、角色與對話，讓使用者
-逐章確認說話者和聲線，再以多角色 TTS 產製可重試、可分段重建的朗讀音訊。重點不是一鍵把整本
-書丟進語音引擎，而是保留 **Story Analyzer、Character Bible、Voice Casting、Speech Plan**
-與人工審核流程。
+StoryVoice 是開源、自架的多角色有聲書工作室。匯入 EPUB 或 TXT，整理角色與台詞、安排聲線，
+審核後產生有聲書。你可以先試做一章，確認角色和聲音合適，再製作整本。
 
 English summary: StoryVoice is an open-source audiobook generator and voice-production platform built
 with ASP.NET Core and React. It turns authorized DRM-free EPUB/TXT content into reviewable,
 multi-speaker narration and supports self-hosted or pluggable speech-synthesis providers.
 
 - 正式站：<https://aiprod.wrbtycg.tw/StoryVoice/>
+- [完整產品介紹](docs/PRODUCT_OVERVIEW.zh-TW.md)：用途、製作流程、功能與常見問題，適合直接分享或交給 AI 閱讀。
+- 本版 `/about` 提供圖文卡片；`/product.zh-TW.md`、`/product.json`、`/llms.txt` 提供無須登入的文字入口，部署後可用。
 - 開發進度：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
 - 多角色製作規劃：[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
 
-## 可以用它做什麼
+## 怎麼做成有聲書
+
+| 步驟 | 你要做的事 |
+|---|---|
+| 1. 匯入故事 | 上傳有權使用、無 DRM 的 EPUB 或 UTF-8 TXT，整理章節與原文。 |
+| 2. 安排角色 | 檢查 AI 建議的角色與說話者，替旁白和角色選擇聲線。 |
+| 3. 審核與試聽 | 確認台詞歸屬；支援的聲線可以單句試聽，有錯就修改。 |
+| 4. 產生與聆聽 | 建立朗讀工作、查看進度，完成後播放或下載 MP3。 |
+
+目前以繁體中文內容、台灣華語製作為主。實際可用的 AI 與聲線取決於部署設定；MIT 授權不包含
+伺服器、GPU 或外部服務費用。使用外部模型或語音服務時，相關文字或音訊會送往該服務。
+
+## 主要功能
 
 - 匯入使用者有權處理的 DRM-free EPUB／TXT，保存目錄、章節順序與原始正文。
 - 以規則和本機 LLM 輔助找出角色、alias、旁白、對話及說話者，低信心結果保留人工確認。

@@ -9,6 +9,7 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
 const auth = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')
 const landing = readFileSync(new URL('../src/pages/LandingPage.tsx', import.meta.url), 'utf8')
+const productCopy = readFileSync(new URL('../src/content/product-overview.json', import.meta.url), 'utf8')
 
 test('語言選擇依 URL、已儲存偏好、瀏覽器語言的順序決定', () => {
   assert.match(i18n, /SupportedLocale = 'zh-TW' \| 'en'/)
@@ -46,9 +47,9 @@ test('公開 about 頁不依賴登入殼層，並提供公開導覽與雙語產�
   assert.match(landing, /publicMode\?: boolean/)
   assert.match(landing, /to="\/voices"/)
   assert.match(landing, /to="\/developers\/docs"/)
-  assert.match(landing, /self-hosted AI audiobook studio/i)
-  assert.match(landing, /Taiwan-Mandarin-first/)
-  assert.match(landing, /No DRM circumvention/)
+  assert.match(productCopy, /self-hosted AI audiobook studio/i)
+  assert.match(productCopy, /Taiwan-Mandarin-first/)
+  assert.match(productCopy, /No DRM circumvention/)
 })
 
 test('登入與私人工作區 chrome 有雙語文案與誠實能力提示', () => {

@@ -52,6 +52,7 @@ To run the complete stack instead, use `docker compose up --build` from the repo
 | `npm run dev` | Start the Vite development server |
 | `npm test` | Run static contracts and component interaction regressions |
 | `npm run test:runtime` | Run component interaction regressions only |
+| `npm run docs:product` | Update the bilingual product documents in `docs/` |
 | `npm run lint` | Run Oxlint |
 | `npm run build` | Type-check and create a production build |
 | `npm run preview` | Preview the production build locally |
@@ -71,6 +72,13 @@ They run in the existing frontend CI job through `npm test`; real browser audio,
 layout, and model/provider acceptance still need separate verification.
 
 ## Main routes
+
+The `/about` page and authenticated home share the product cards in `LandingPage`.
+Their copy lives in `src/content/product-overview.json`. After changing it, run
+`npm run docs:product`; `npm test` checks that the repository's Markdown copies match.
+Vite serves and builds `product.zh-TW.md`, `product.en.md`, `product.json`, and `llms.txt`
+from the same content, including correct links for deployments below `/StoryVoice/`.
+These are public product facts, not a report of the deployment's enabled voice services.
 
 The route assembly is defined in [`src/App.tsx`](src/App.tsx).
 

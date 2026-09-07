@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const landingPage = await readFile(new URL('../src/pages/LandingPage.tsx', import.meta.url), 'utf8')
+const landingPage = await readFile(new URL('../src/content/product-overview.json', import.meta.url), 'utf8')
 
 test('landing copy matches the current import and collection-sharing contracts', () => {
   assert.doesNotMatch(landingPage, /博客來|Companion|同步書櫃|擷取式摘要/)

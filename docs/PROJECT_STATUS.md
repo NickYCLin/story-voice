@@ -1,12 +1,22 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-07（角色設定改接本機 LLM、播放與試音競態修正、手機導覽、前端互動回歸測試）
+最後更新：2026-09-07（產品介紹卡片與文字入口、角色設定改接本機 LLM、播放與試音修正）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-07 產品介紹整理
+
+- `/about` 與登入後首頁改用製作流程、功能、適用對象與常見問題卡片；以虛構對話說明角色配音，重要文字不放在圖片裡。
+- 文案改為直接說明用途與操作，補充模型設定、聲線可用條件、費用及外部服務的資料流向，移除過度保證。
+- 新增複製介紹、繁中／英文 Markdown、JSON 與 `llms.txt` 閱讀入口，不需登入即可取得介紹內容。
+- 網頁與文件共用 `product-overview.json`，`npm run docs:product` 更新 repository 文件，`npm test` 檢查是否同步。Vite 會依部署路徑產生連結，nginx 為 Markdown、JSON 與文字索引標示正確類型和 UTF-8，避免中文被讀成亂碼。
+- 本機前端 164 項靜態契約與 27 項互動測試通過；另以 Chromium 實際檢查兩種語言、1440／768／390／320px、FAQ 鍵盤操作、複製內容和 `/StoryVoice/` 下的文字文件。
+
+完整介紹：[`PRODUCT_OVERVIEW.zh-TW.md`](PRODUCT_OVERVIEW.zh-TW.md)／[`PRODUCT_OVERVIEW.en.md`](PRODUCT_OVERVIEW.en.md)。本輪修改不代表正式站已更新。
 
 ## 2026-09-07 功能補完與互動檢查
 

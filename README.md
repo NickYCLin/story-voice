@@ -7,30 +7,32 @@
 
 > **Turn authorized EPUB and TXT files into reviewable, multi-character audiobooks.**
 
-StoryVoice is an open-source, self-hosted production workflow for story analysis,
-character bibles, voice casting, human review, and resumable text-to-speech. It is
-built with ASP.NET Core, React, PostgreSQL, Redis, and Docker Compose.
+StoryVoice is an open-source, self-hosted audiobook studio. Import EPUB or TXT,
+organize characters and dialogue, cast voices, and review the script before generating
+an audiobook. Try one chapter first, then produce the whole book when the voices fit.
 
-Unlike one-click text-to-speech tools, StoryVoice keeps the decisions that matter
-visible: who is speaking, which voice is assigned, what still needs review, and
-which staged audio is safe to publish.
+You can check who is speaking, change voice assignments, review uncertain passages,
+and listen to a candidate version before switching the active audio.
 
 - [Production app](https://aiprod.wrbtycg.tw/StoryVoice/) — private workspaces require sign-in
 - Public product route in this source: `/about?lang=en` — deploy this Web revision before treating the production URL as live
+- [Product overview](docs/PRODUCT_OVERVIEW.en.md) — uses, workflow, features, requirements, and FAQ in plain Markdown
+- This Web build also provides `/product.en.md`, `/product.json`, and `/llms.txt` without sign-in or JavaScript; paths follow the deployment base path
 - [Verified project status](docs/PROJECT_STATUS.md)
 - [Product and data-model plan](DEVELOPMENT_PLAN.md)
 - [UI/UX implementation handoff](docs/VOICE_PLATFORM_UI_UX_HANDOFF.md)
 
 ## Why StoryVoice
 
-- **Human-guided, not a black box.** Review character candidates, speaker assignments,
+- **Review before production.** Check character candidates, speaker assignments,
   speech plans, and staged output before anything becomes the active audiobook.
 - **Consistent casts across long stories.** Keep canonical characters, aliases,
   narrator settings, and immutable cast revisions consistent across books and chapters.
 - **Resumable production.** Persist jobs, leases, progress, retries, and validated audio
   chunks so failed work can continue without rebuilding everything.
-- **Self-hosted boundaries.** Keep books, analysis, and generated audio in your own
-  deployment while choosing from built-in, local, or explicitly configured TTS providers.
+- **Choose your hosting and speech services.** Manage books and generated audio in your
+  own deployment. External models and speech services receive the text or audio needed
+  for their work; self-hosting does not make every provider local.
 - **Synthetic voice API with explicit authorization.** Approved server-to-server consumers
   can use short-lived private-development grants or a separately governed commercial tier.
 
