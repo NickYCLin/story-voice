@@ -125,6 +125,26 @@ public sealed class NarrationWorkerPostgreSqlTests
             {
                 await restarted.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30), ct);
             }
+
+            await using (var scope = scopeFactory.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+                var usages = await db.NarrationAttemptUsage.AsNoTracking().Where(item => item.OwnerId == owner).ToArrayAsync(ct);
+                Assert.Equal(5, usages.Length);
+                Assert.Equal(3, usages.Count(item => item.Outcome == "Completed"));
+                Assert.Equal(2, usages.Count(item => item.Outcome == "WorkerStopped"));
+                Assert.All(usages, item =>
+                {
+                    Assert.NotNull(item.FinishedAt);
+                    Assert.True(item.ElapsedMs >= item.SynthesisElapsedMs);
+                    Assert.True(item.SynthesisElapsedMs >= 0);
+                    Assert.True(item.InputCharacters > 0);
+                    Assert.Equal(1, item.CompletedChunks);
+                    Assert.Equal(2, item.TotalChunks);
+                    Assert.Equal("edge", item.Provider);
+                    Assert.Equal(item.Outcome == "Completed" ? ControlledProvider.Audio.Length : (long?)null, item.AudioBytes);
+                });
+            }
         }
         finally
         {

@@ -5,6 +5,7 @@ import { fetchBlob, fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
 import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { NarrationUsagePanel } from './components/NarrationUsagePanel'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
 import { suggestCharacterVoices, type CastingProfile, type CastingSuggestion, type CastingVoice } from './voiceCasting'
@@ -1264,9 +1265,12 @@ export function SeriesCastPanel() {
                   </div>
                   <ul className="mt-4 space-y-2">
                     {batch.members.map((member) => (
-                      <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}>
-                        <span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span>
-                        <span className="text-xs text-stone-500">{rebuildStatusLabels[member.status] ?? '狀態更新中'}</span>
+                      <li className="min-w-0 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span>
+                          <span className="text-xs text-stone-500">{rebuildStatusLabels[member.status] ?? '狀態更新中'}</span>
+                        </div>
+                        {member.stagedNarrationJobId && <NarrationUsagePanel jobId={member.stagedNarrationJobId} />}
                       </li>
                     ))}
                   </ul>

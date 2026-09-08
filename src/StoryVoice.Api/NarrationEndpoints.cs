@@ -46,6 +46,14 @@ public static class NarrationEndpoints
             return job is null ? Results.NotFound() : Results.Ok(job);
         });
 
+        jobGroup.MapGet("/usage", async (
+            Guid jobId, HttpContext httpContext, INarrationService service, CancellationToken cancellationToken) =>
+        {
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            var usage = await service.GetUsageAsync(jobId, cancellationToken);
+            return usage is null ? Results.NotFound() : Results.Ok(usage);
+        });
+
         jobGroup.MapPost("/cancel", async (
             Guid jobId,
             INarrationService service,

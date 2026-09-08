@@ -28,6 +28,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<NarrationJob> NarrationJobs => Set<NarrationJob>();
 
+    public DbSet<NarrationAttemptUsage> NarrationAttemptUsage => Set<NarrationAttemptUsage>();
+
     public DbSet<NarrationCastRevision> NarrationCastRevisions => Set<NarrationCastRevision>();
 
     public DbSet<NarrationCastAssignment> NarrationCastAssignments => Set<NarrationCastAssignment>();

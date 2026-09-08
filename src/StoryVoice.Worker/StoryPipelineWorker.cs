@@ -156,6 +156,8 @@ public sealed class StoryPipelineWorker(
         string? temporaryPath = null;
         string? uncommittedAudioPath = null;
         string? synthesisProviderName = null;
+        NarrationUsageRecorder? usage = null;
+        var completionUncertain = false;
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -184,8 +186,12 @@ public sealed class StoryPipelineWorker(
                 return;
             }
 
+            usage = new NarrationUsageRecorder(scopeFactory, logger, Guid.ParseExact(claim.ArtifactToken, "N"));
+            await usage.StartAsync(job.OwnerId, job.Id, claim.LeaseOwner);
+
             if (job.CancellationRequested)
             {
+                usage.Outcome = "Cancelled";
                 await RecordFailureAsync(claim, "cancelled", CancellationToken.None);
                 return;
             }
@@ -228,6 +234,7 @@ public sealed class StoryPipelineWorker(
                 var progressCheckpoint = new SynthesisProgressCheckpoint();
                 Func<NarrationSynthesisProgress, CancellationToken, Task> reportProgress = async (progress, progressCancellationToken) =>
                 {
+                    usage.ReportProgress(progress);
                     if (progressCheckpoint.TryAdvance(progress, out var progressPercent))
                     {
                         await ReportSynthesisProgressAsync(
@@ -284,6 +291,7 @@ public sealed class StoryPipelineWorker(
                         ComputeSpeechPlanFingerprint(chapterPlans),
                         castRevision.CompositionVersion,
                         castRevision.FfmpegProfile);
+                    await usage.BeginSynthesisAsync(castRevision.NarratorProvider, turnPlan.Turns.Select(turn => turn.Text));
                     var synthesisResult = await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
                         CreateMultiVoiceNarrationRequest(castRevision, turnPlan.Turns, cacheContext),
@@ -296,6 +304,7 @@ public sealed class StoryPipelineWorker(
                 }
                 else
                 {
+                    await usage.BeginSynthesisAsync("edge", [source.Text]);
                     await provider.SynthesizeAsync(
                         source.Text,
                         temporaryPath,
@@ -307,6 +316,7 @@ public sealed class StoryPipelineWorker(
             }
             finally
             {
+                usage.EndSynthesis();
                 providerCancellation.Cancel();
                 await IgnoreCancellationAsync(cancellationMonitor);
             }
@@ -358,6 +368,8 @@ public sealed class StoryPipelineWorker(
                 var outcome = NarrationCompletionOutcomeResolver.ResolveAfterAmbiguousCommand(completionConfirmed);
                 if (outcome.AcceptCompletion)
                 {
+                    usage.Outcome = "Completed";
+                    usage.AudioBytes = audioBytes;
                     uncommittedAudioPath = null;
                     await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
                     logger.LogWarning(
@@ -369,6 +381,7 @@ public sealed class StoryPipelineWorker(
 
                 if (!outcome.DeleteCandidateArtifact)
                 {
+                    completionUncertain = true;
                     // Preserve the uniquely named artifact when durable state cannot be re-read.
                     // Deleting it here could leave a committed Completed row pointing at a missing file.
                     uncommittedAudioPath = null;
@@ -379,11 +392,14 @@ public sealed class StoryPipelineWorker(
 
             if (affected != 1)
             {
+                usage.Outcome = "LeaseLost";
                 await RecordFailureAsync(claim, "cancelled", CancellationToken.None);
                 return;
             }
 
             uncommittedAudioPath = null;
+            usage.Outcome = "Completed";
+            usage.AudioBytes = audioBytes;
             await SynchronizeStagedBatchAsync(claim.JobId, CancellationToken.None);
             logger.LogInformation(
                 "Narration job {JobId} completed with {AudioBytes} bytes",
@@ -392,6 +408,7 @@ public sealed class StoryPipelineWorker(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            if (!completionUncertain && usage is { Outcome: not "Completed" }) usage.Outcome = "WorkerStopped";
             if (CanResumeAfterWorkerStop(synthesisProviderName))
             {
                 await RecordFailureAsync(
@@ -406,6 +423,7 @@ public sealed class StoryPipelineWorker(
         }
         catch (OperationCanceledException)
         {
+            if (!completionUncertain && usage is { Outcome: not "Completed" }) usage.Outcome = "TimedOut";
             var preventAutomaticReplay = string.Equals(
                 synthesisProviderName,
                 CharacterVoiceProviders.VoAi,
@@ -422,6 +440,7 @@ public sealed class StoryPipelineWorker(
         }
         catch (Exception exception)
         {
+            if (!completionUncertain && usage is { Outcome: not "Completed" }) usage.Outcome = "Failed";
             logger.LogWarning(exception, "Narration job {JobId} failed", claim.JobId);
             var permanentProviderFailure = exception as PermanentNarrationProviderException;
             var isVoAiJob = string.Equals(
@@ -449,8 +468,15 @@ public sealed class StoryPipelineWorker(
         }
         finally
         {
-            DeleteIfExists(temporaryPath);
-            DeleteIfExists(uncommittedAudioPath);
+            try
+            {
+                DeleteIfExists(temporaryPath);
+                DeleteIfExists(uncommittedAudioPath);
+            }
+            finally
+            {
+                if (usage is not null) await usage.FinishAsync();
+            }
         }
     }
 

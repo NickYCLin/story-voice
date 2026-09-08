@@ -46,6 +46,32 @@ internal sealed class NarrationService(
         return job is null ? null : ToResponse(job);
     }
 
+    public async Task<NarrationUsageResponse?> GetUsageAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        // Owners can inspect failed staged attempts as well as published or historical jobs.
+        // This metadata endpoint grants no access to the corresponding audio or source text.
+        var job = await dbContext.NarrationJobs.AsNoTracking()
+            .Where(item => item.Id == jobId && item.OwnerId == currentUser.UserId
+                && dbContext.Books.Any(book => book.Id == item.BookId
+                    && book.OwnerId == currentUser.UserId && !book.IsArchived))
+            .Select(item => new { item.LeaseOwner, item.LeaseExpiresAt, item.Status })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (job is null) return null;
+        var query = dbContext.NarrationAttemptUsage.AsNoTracking()
+            .Where(item => item.NarrationJobId == jobId && item.OwnerId == currentUser.UserId);
+        var total = await query.CountAsync(cancellationToken);
+        var attempts = await query.OrderByDescending(item => item.StartedAt).ThenByDescending(item => item.Id)
+            .Take(100).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        return new NarrationUsageResponse(jobId, total, attempts.Select(item => new NarrationAttemptUsageResponse(
+            item.Id, item.StartedAt, item.FinishedAt,
+            item.FinishedAt is null && (job.Status != NarrationJobStatus.Running
+                || job.LeaseOwner != item.LeaseOwner || job.LeaseExpiresAt is null || job.LeaseExpiresAt <= now)
+                ? "Unknown" : item.Outcome,
+            item.Provider, item.InputCharacters, item.CompletedChunks, item.TotalChunks,
+            item.ElapsedMs, item.SynthesisElapsedMs, item.AudioBytes)).ToArray());
+    }
+
     public async Task<NarrationJobResponse?> CancelAsync(Guid jobId, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < 5; attempt++)

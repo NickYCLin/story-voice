@@ -22,6 +22,13 @@ public sealed record NarrationJobResponse(
 
 public sealed record NarrationAudioDescriptor(string AbsolutePath, string ContentType);
 
+public sealed record NarrationUsageResponse(Guid JobId, int TotalAttempts, IReadOnlyList<NarrationAttemptUsageResponse> Attempts);
+
+public sealed record NarrationAttemptUsageResponse(
+    Guid Id, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt, string Outcome,
+    string? Provider, long? InputCharacters, int? CompletedChunks, int? TotalChunks,
+    long? ElapsedMs, long? SynthesisElapsedMs, long? AudioBytes);
+
 public sealed record SaveListeningProgressRequest(long PositionMs, long DurationMs, Guid? ExpectedVersion);
 
 public sealed record ListeningProgressResponse(

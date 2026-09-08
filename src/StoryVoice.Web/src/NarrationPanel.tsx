@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
 import { AudioPlayer, type NarrationTimeline } from './components/AudioPlayer'
+import { NarrationUsagePanel } from './components/NarrationUsagePanel'
 import { useListeningProgress } from './useListeningProgress'
 import { localize, useLocale } from './i18n'
 
@@ -257,6 +258,7 @@ export function NarrationPanel({ book, csrfToken }: Props) {
               </button>
             )}
             {job.status === 'Completed' && <CompletedNarrationPlayer key={job.id} job={job} csrfToken={csrfToken} />}
+            <NarrationUsagePanel jobId={job.id} />
             {job.status === 'Failed' && (
               <p className="mt-3 text-sm text-rose-600">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
             )}

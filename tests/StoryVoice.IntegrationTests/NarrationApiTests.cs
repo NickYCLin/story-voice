@@ -15,6 +15,79 @@ namespace StoryVoice.IntegrationTests;
 public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
+    public async Task Usage_is_private_reports_unknown_interrupted_attempts_and_hides_archived_books()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(ct);
+        using var other = await factory.CreateAuthenticatedClientAsync(ct);
+        var book = await ImportTextAsync(owner, ct);
+        var job = await SeedQueuedPublishedAsync(book.Id, ct);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var running = await db.NarrationJobs.SingleAsync(item => item.Id == job.Id, ct);
+            running.Claim("current-synthetic-lease", DateTimeOffset.UtcNow.AddMinutes(10));
+            db.NarrationAttemptUsage.Add(NarrationAttemptUsage.Start(Guid.NewGuid(), job.OwnerId, job.Id, "old-synthetic-lease"));
+            db.NarrationAttemptUsage.Add(NarrationAttemptUsage.Start(Guid.NewGuid(), job.OwnerId, job.Id, "current-synthetic-lease"));
+            await db.SaveChangesAsync(ct);
+        }
+        using var response = await owner.GetAsync($"/api/narrations/{job.Id}/usage", ct);
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        Assert.DoesNotContain("synthetic-lease", json);
+        Assert.DoesNotContain("原始", json);
+        var usage = await response.Content.ReadFromJsonAsync<NarrationUsageResponse>(ct);
+        Assert.NotNull(usage);
+        Assert.Equal(2, usage.TotalAttempts);
+        Assert.Single(usage.Attempts, item => item.Outcome == "Unknown");
+        Assert.Single(usage.Attempts, item => item.Outcome == "Running");
+        Assert.All(usage.Attempts, item =>
+        {
+            Assert.Null(item.FinishedAt);
+            Assert.Null(item.InputCharacters);
+            Assert.Null(item.ElapsedMs);
+        });
+        using var denied = await other.GetAsync($"/api/narrations/{job.Id}/usage", ct);
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var archivedBook = await db.Books.SingleAsync(item => item.Id == book.Id, ct);
+            archivedBook.Archive();
+            await db.SaveChangesAsync(ct);
+        }
+        using var archived = await owner.GetAsync($"/api/narrations/{job.Id}/usage", ct);
+        Assert.Equal(HttpStatusCode.NotFound, archived.StatusCode);
+    }
+
+    [Fact]
+    public async Task Usage_does_not_invent_history_for_existing_jobs_and_bounds_the_latest_attempts()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(ct);
+        var book = await ImportTextAsync(owner, ct);
+        var job = await SeedQueuedPublishedAsync(book.Id, ct);
+        var empty = await owner.GetFromJsonAsync<NarrationUsageResponse>($"/api/narrations/{job.Id}/usage", ct);
+        Assert.NotNull(empty);
+        Assert.Equal(0, empty.TotalAttempts);
+        Assert.Empty(empty.Attempts);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            for (var index = 0; index < 105; index++)
+                db.NarrationAttemptUsage.Add(NarrationAttemptUsage.Start(Guid.NewGuid(), job.OwnerId, job.Id, "synthetic-lease"));
+            await db.SaveChangesAsync(ct);
+        }
+        var bounded = await owner.GetFromJsonAsync<NarrationUsageResponse>($"/api/narrations/{job.Id}/usage", ct);
+        Assert.NotNull(bounded);
+        Assert.Equal(105, bounded.TotalAttempts);
+        Assert.Equal(100, bounded.Attempts.Count);
+        Assert.All(bounded.Attempts, item => Assert.Equal("Unknown", item.Outcome));
+        Assert.Equal(bounded.Attempts.OrderByDescending(item => item.StartedAt).ThenByDescending(item => item.Id), bounded.Attempts);
+    }
+
+    [Fact]
     public async Task Legacy_single_voice_creation_is_retired_before_request_validation()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
