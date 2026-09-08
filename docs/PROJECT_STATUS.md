@@ -1,12 +1,21 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-08（帳號續播、BlueMagpie 恢復／監測與有界平行配音）
+最後更新：2026-09-08（帳號續播、BlueMagpie 恢復／監測、平行配音與聲線建議）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 角色聲線建議
+
+- 系列聲線設定新增「依角色資料建議聲線」與還原；依已連結、啟用中的角色庫設定及目錄明確標籤比對，只選擇與旁白相同引擎且正式可用的聲線。
+- 建議先填表並說明理由，保留手動選擇；角色資料不足就維持原聲線，不從名字猜測性別或年齡。順序固定，已保存的相符聲線優先保留，儲存後沿用既有 cast 鎖定流程。
+- 聲線目錄新增可選性別、年齡範圍與風格標籤，啟動時驗證數量、重複與範圍。內建目錄只標示原本已知的男／女聲，沒有捏造年齡與個性；也不呼叫 LLM 或 TTS 分析角色資料。
+- 聲線儲存補上系列切換與晚到回應檢查，切換系列不會被舊儲存結果拉回去。相關前端互動、API 和設定驗證通過；前端完整 164 項靜態檢查、46 項互動測試、lint 與根路徑／子路徑建置通過。
+
+使用方式與限制見 [`VOICE_CASTING.md`](VOICE_CASTING.md)。Chromium 以合成角色與模擬 API 驗證 1440／390／320px、手動選擇保留、先填表後儲存、重新開啟後讀回；實際模型品質與正式部署仍另行驗收。
 
 ## 2026-09-08 Worker 平行配音
 
@@ -236,7 +245,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復與程式 metrics 已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
-| 長期有聲書 UX | automatic casting、單工作片段平行、cost logging | 不同工作間有界平行、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
+| 長期有聲書 UX | 單工作片段平行、cost logging | 規則式聲線建議、不同工作間有界平行、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界

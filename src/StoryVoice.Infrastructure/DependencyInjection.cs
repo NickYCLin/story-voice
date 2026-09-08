@@ -195,6 +195,8 @@ public static class DependencyInjection
                         .Distinct(StringComparer.Ordinal)
                         .Count() == options.Voices.Count,
                 "Series voice catalog entries must be complete and unique.")
+            .Validate(options => options.Voices.All(voice => voice.HasValidCastingMetadata()),
+                "Series voice casting metadata must use a known gender, a valid age range, and at most 16 distinct short tags.")
             .ValidateOnStart();
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();

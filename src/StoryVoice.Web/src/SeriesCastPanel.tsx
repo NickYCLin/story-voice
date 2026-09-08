@@ -7,6 +7,7 @@ import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
+import { suggestCharacterVoices, type CastingProfile, type CastingSuggestion, type CastingVoice } from './voiceCasting'
 
 const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
 const EDGE_VOICE_PROVIDER = 'edge'
@@ -19,14 +20,14 @@ const BLUE_MAGPIE_VOICES = [
 type BlueMagpieVoice = typeof BLUE_MAGPIE_VOICES[number]['voice']
 type NarrativeVoiceMode = 'IndependentNarrator' | 'PointOfViewInnerMonologue'
 
-type CharacterProfileSummary = {
+type CharacterProfileSummary = CastingProfile & {
   id: string
   canonicalName: string
   hasAvatar: boolean
   isActive: boolean
 }
 
-type VoiceOption = {
+type VoiceOption = CastingVoice & {
   provider: string
   voice: string
   displayName: string
@@ -157,6 +158,8 @@ export function SeriesCastPanel() {
   const [narratorVoiceKey, setNarratorVoiceKey] = useState('')
   const [configuredNarratorVoiceKey, setConfiguredNarratorVoiceKey] = useState('')
   const [configuredCharacterVoiceKeys, setConfiguredCharacterVoiceKeys] = useState<Record<string, string>>({})
+  const [castingSuggestions, setCastingSuggestions] = useState<Record<string, CastingSuggestion>>({})
+  const manualVoiceOverrides = useRef(new Set<string>())
   const [bookId, setBookId] = useState('')
   const [volumeLabel, setVolumeLabel] = useState('')
   const [characterName, setCharacterName] = useState('')
@@ -207,6 +210,9 @@ export function SeriesCastPanel() {
     // 側欄高亮 B、實際 details 是 A，之後所有表單都寫到錯的系列。
     const generation = detailsGenerationRef.current + 1
     detailsGenerationRef.current = generation
+    manualVoiceOverrides.current.clear()
+    setCastingSuggestions({})
+    setFormState('idle')
     setRetryingBatch(false)
     setRetryRightsAttested(false)
     setActivateDialogOpen(false)
@@ -261,6 +267,8 @@ export function SeriesCastPanel() {
       return
     }
 
+    manualVoiceOverrides.current.clear()
+    setCastingSuggestions({})
     setConfiguredNarratorVoiceKey(`${details.narratorProvider}\n${details.narratorVoice}`)
     setConfiguredCharacterVoiceKeys(Object.fromEntries(
       details.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
@@ -498,9 +506,11 @@ export function SeriesCastPanel() {
 
   function selectConfiguredNarrator(nextKey: string) {
     setConfiguredNarratorVoiceKey(nextKey)
+    setCastingSuggestions({})
     if (!details) return
     const narrator = voiceOptions.find((option) => voiceKey(option) === nextKey)
     if (!narrator) return
+    if (configuredNarratorVoice?.provider !== narrator.provider) manualVoiceOverrides.current.clear()
     const compatible = voiceOptions.filter((option) => option.provider === narrator.provider
       || (narrator.provider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER))
     setConfiguredCharacterVoiceKeys((current) => Object.fromEntries(details.characters.map((character) => {
@@ -511,7 +521,8 @@ export function SeriesCastPanel() {
 
   async function configureSeriesVoices(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !configuredNarratorVoice) return
+    if (!details || details.id !== selectedSeriesId || !configuredNarratorVoice) return
+    const generation = detailsGenerationRef.current
     const characters = details.characters.map((character) => {
       const selected = configuredCharacterVoiceOptions.find(
         (option) => voiceKey(option) === configuredCharacterVoiceKeys[character.id],
@@ -538,18 +549,31 @@ export function SeriesCastPanel() {
           characters,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
+      manualVoiceOverrides.current.clear()
+      setCastingSuggestions({})
       setBatch(null)
       setConfiguredNarratorVoiceKey(`${updated.narratorProvider}\n${updated.narratorVoice}`)
       setConfiguredCharacterVoiceKeys(Object.fromEntries(
         updated.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
       ))
-      setMessage('已原子切換整個系列聲線；舊成品仍保持啟用，請重新建立 staged 配音後再人工切換。')
+      setMessage('已儲存整個系列的聲線設定。建立新配音並完成後，再切換成新版本。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '系列聲線切換失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '系列聲線切換失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
+  }
+
+  function suggestCast() {
+    if (!details || details.id !== selectedSeriesId || !configuredNarratorVoice || formState === 'loading') return
+    const suggestions = suggestCharacterVoices(details.characters, characterProfiles, voiceOptions,
+      configuredNarratorVoice, configuredCharacterVoiceKeys, manualVoiceOverrides.current)
+    const changed = Object.entries(suggestions).filter(([id, suggestion]) => suggestion.voiceKey !== configuredCharacterVoiceKeys[id]).length
+    setCastingSuggestions(suggestions)
+    setConfiguredCharacterVoiceKeys(Object.fromEntries(Object.entries(suggestions).map(([id, suggestion]) => [id, suggestion.voiceKey])))
+    setMessage(changed > 0 ? `已填入 ${changed} 位角色的聲線建議，檢查後按「儲存整系列聲線」才會套用。` : '沒有需要調整的聲線；各角色下方可查看保留原因。')
   }
 
   async function createSeries(event: FormEvent<HTMLFormElement>) {
@@ -923,11 +947,11 @@ export function SeriesCastPanel() {
               <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
                 <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">{details.narratorProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button></div>
 
-                <form className="mt-6 border-t border-stone-200 pt-5" onSubmit={configureSeriesVoices}>
+                <form aria-label="整系列聲線設定" className="mt-6 border-t border-stone-200 pt-5" onSubmit={configureSeriesVoices}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 className="font-serif text-xl text-stone-900">整系列聲線設定</h3>
-                      <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-500">旁白與所有角色會一次驗證、一次切換，避免留下無法合成的 mixed-provider 設定。這是下一次 staged rebuild 的聲線設定；儲存後不會立刻替換既有已啟用音訊。</p>
+                      <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-500">儲存後會一起更新旁白和角色的聲線設定，下一批配音才會使用。目前啟用的音訊會保留，完成新配音後再由你切換。</p>
                     </div>
                     <button
                       className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
@@ -937,9 +961,24 @@ export function SeriesCastPanel() {
                       儲存整系列聲線
                     </button>
                   </div>
+                  {details.characters.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
+                      <div className="flex flex-wrap gap-3">
+                        <button className="secondary-button" disabled={formState === 'loading' || !configuredNarratorVoice || configuredNarratorVoice.provider === CUSTOM_VOICE_PROVIDER || details.id !== selectedSeriesId} onClick={suggestCast} type="button">依角色資料建議聲線</button>
+                        <button className="secondary-button" disabled={formState === 'loading' || details.id !== selectedSeriesId} onClick={() => {
+                          setConfiguredNarratorVoiceKey(`${details.narratorProvider}\n${details.narratorVoice}`)
+                          setConfiguredCharacterVoiceKeys(Object.fromEntries(details.characters.map(character => [character.id, `${character.voiceProvider}\n${character.voice}`])))
+                          manualVoiceOverrides.current.clear()
+                          setCastingSuggestions({})
+                          setMessage('已還原成目前儲存的聲線。')
+                        }} type="button">還原已儲存聲線</button>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-stone-500">依角色庫設定與聲線目錄的性別、年齡、風格標籤提出建議，保留你手動選擇的聲線。沒有明確相符資料就維持原設定，儲存後才會套用。克隆聲線需自行確認已就緒的角色。</p>
+                    </div>
+                  )}
                   <label className="mt-4 block max-w-md text-xs text-stone-500">
                     固定旁白聲線
-                    <select className="auth-input mt-2" onChange={(event) => selectConfiguredNarrator(event.target.value)} value={configuredNarratorVoiceKey}>
+                    <select className="auth-input mt-2" disabled={formState === 'loading'} onChange={(event) => selectConfiguredNarrator(event.target.value)} value={configuredNarratorVoiceKey}>
                       <option value="">選擇聲線</option>
                       {voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}
                     </select>
@@ -950,17 +989,30 @@ export function SeriesCastPanel() {
                   {details.characters.length > 0 && (
                     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {details.characters.map((character) => (
-                        <label className="text-xs text-stone-500" key={character.id}>
+                        <div className="text-xs text-stone-500" key={character.id}>
+                          <label>
                           {character.canonicalName}
                           <select
                             className="auth-input mt-2"
-                            onChange={(event) => setConfiguredCharacterVoiceKeys((current) => ({ ...current, [character.id]: event.target.value }))}
+                            aria-describedby={castingSuggestions[character.id] ? `casting-reason-${character.id}` : undefined}
+                            disabled={formState === 'loading'}
+                            onChange={(event) => {
+                              manualVoiceOverrides.current.add(character.id)
+                              setConfiguredCharacterVoiceKeys((current) => ({ ...current, [character.id]: event.target.value }))
+                              setCastingSuggestions((current) => {
+                                const next = { ...current }
+                                delete next[character.id]
+                                return next
+                              })
+                            }}
                             value={configuredCharacterVoiceKeys[character.id] ?? ''}
                           >
                             <option value="">選擇相容聲線</option>
                             {configuredCharacterVoiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}
                           </select>
-                        </label>
+                          </label>
+                          {castingSuggestions[character.id] && <p className="mt-2 leading-5" id={`casting-reason-${character.id}`}>{castingSuggestions[character.id].reason}</p>}
+                        </div>
                       ))}
                     </div>
                   )}

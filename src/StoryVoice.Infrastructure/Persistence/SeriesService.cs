@@ -742,7 +742,11 @@ internal sealed class SeriesService(
                     || _blueMagpieFormalNarrationEnabled,
                 string.Equals(voice.Provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
                     ? "private-self-hosted"
-                    : "standard"))
+                    : "standard",
+                voice.Gender,
+                voice.MinimumAge,
+                voice.MaximumAge,
+                voice.CharacterTags.ToArray()))
             .ToArray();
 
     private SeriesVoiceCatalogEntry ResolveVoice(string provider, string voice)

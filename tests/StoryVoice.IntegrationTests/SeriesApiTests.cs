@@ -7,11 +7,32 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Series;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
 public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Fact]
+    public async Task Catalog_returns_operator_supplied_casting_metadata_for_synthetic_voices()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var configured = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.PostConfigure<SeriesVoiceCatalogOptions>(options => options.Voices =
+            [
+                new SeriesVoiceCatalogEntry { Provider = "edge", Voice = "synthetic-voice", DisplayName = "測試聲線", Locale = "zh-TW",
+                    Gender = "female", MinimumAge = 18, MaximumAge = 40, CharacterTags = ["calm", "健談"] },
+            ])));
+        using var owner = await configured.CreateAuthenticatedClientAsync(ct);
+        var response = await owner.GetFromJsonAsync<SeriesVoiceOptionResponse[]>("/api/series/voice-options", ct);
+        var voice = Assert.Single(response!);
+        Assert.Equal("synthetic-voice", voice.Voice);
+        Assert.Equal("female", voice.Gender);
+        Assert.Equal(18, voice.MinimumAge);
+        Assert.Equal(40, voice.MaximumAge);
+        Assert.Equal(new[] { "calm", "健談" }, voice.CharacterTags);
+    }
+
     [Fact]
     public async Task Series_endpoints_require_authentication_and_mutations_require_csrf()
     {
@@ -41,6 +62,14 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(voices);
+        Assert.Equal("female", voices.Single(voice => voice.Voice == "zh-TW-HsiaoChenNeural").Gender);
+        Assert.Equal("male", voices.Single(voice => voice.Voice == "zh-TW-YunJheNeural").Gender);
+        Assert.All(voices, voice =>
+        {
+            Assert.Null(voice.MinimumAge);
+            Assert.Null(voice.MaximumAge);
+            Assert.Empty(voice.CharacterTags!);
+        });
         Assert.Contains(voices, voice =>
             voice.Provider == "voai"
             && voice.Voice == "v1:Neo:佑希:預設"
@@ -66,6 +95,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             voice =>
             {
                 Assert.Equal("female_voice", voice.Voice);
+                Assert.Equal("female", voice.Gender);
                 Assert.Equal("BlueMagpie 內建女聲（私人自架）", voice.DisplayName);
                 Assert.Equal("zh-TW", voice.Locale);
                 Assert.True(voice.FormalNarrationAvailable);
@@ -74,6 +104,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             voice =>
             {
                 Assert.Equal("hung_yi_lee", voice.Voice);
+                Assert.Equal("male", voice.Gender);
                 Assert.Equal("BlueMagpie 內建男聲（私人自架）", voice.DisplayName);
                 Assert.Equal("zh-TW", voice.Locale);
                 Assert.True(voice.FormalNarrationAvailable);

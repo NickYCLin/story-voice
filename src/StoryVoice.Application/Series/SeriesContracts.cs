@@ -88,7 +88,11 @@ public sealed record SeriesVoiceOptionResponse(
     string DisplayName,
     string Locale,
     bool FormalNarrationAvailable,
-    string UsageScope);
+    string UsageScope,
+    string? Gender = null,
+    int? MinimumAge = null,
+    int? MaximumAge = null,
+    IReadOnlyList<string>? CharacterTags = null);
 
 public sealed record StorySeriesSummaryResponse(
     Guid Id,

@@ -1448,7 +1448,7 @@ AI 能合理判斷是否同一角色。
 - [x] TTS Provider Interface／registry
 - [x] Voice Listing
 - [x] Voice Sample
-- [ ] Automatic Casting
+- [x] Automatic Casting（角色庫資料與明確聲線標籤的規則式建議，人工儲存後固定使用）
 - [x] Manual Casting
 - [x] Character Voice Lock（不可變 cast revision）
 
