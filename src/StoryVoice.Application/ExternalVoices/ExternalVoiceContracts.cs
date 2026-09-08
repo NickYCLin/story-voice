@@ -23,6 +23,11 @@ public interface IExternalVoiceRequestRateLimiter
     bool TryAcquire(string consumerKeyId, out int retryAfterSeconds);
 }
 
+public interface IExternalVoiceSharedRateLimiter
+{
+    Task EnsureAllowedAsync(string consumerKeyId, CancellationToken cancellationToken);
+}
+
 public enum ExternalVoiceSynthesisFailureKind
 {
     InvalidRequest = 0,

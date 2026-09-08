@@ -26,6 +26,8 @@ public sealed class ExternalVoiceApiOptions
 
     public int RequestsPerMinute { get; set; } = DefaultRequestsPerMinute;
 
+    public bool SharedRateLimitEnabled { get; set; }
+
     public int PreAuthenticationRequestsPerMinute { get; set; } =
         DefaultPreAuthenticationRequestsPerMinute;
 

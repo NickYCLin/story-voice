@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using StackExchange.Redis;
 using StoryVoice.Application.ExternalVoices;
 using StoryVoice.Infrastructure.ExternalVoices;
 using StoryVoice.Infrastructure.Identity;
@@ -28,6 +29,81 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
     private const string Secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     private static readonly string AccessToken = $"svd1.{ConsumerKeyId}.{Secret}";
+
+    [Fact]
+    public async Task Separate_api_instances_share_external_and_playground_limits_across_restart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var redis = new RedisRateLimitFixture();
+        await redis.InitializeAsync();
+        using var firstConnection = await redis.ConnectAsync();
+        using var secondConnection = await redis.ConnectAsync();
+        var ownerId = Guid.NewGuid();
+        using var first = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedConnection: firstConnection, sharedRateLimit: true);
+        using var second = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedConnection: secondConnection, sharedRateLimit: true);
+        using var external = first.CreateClient();
+        using var owner = await CreateOwnerClientAsync(second, ownerId, ct);
+
+        using var anonymous = await external.PostAsJsonAsync("/api/external/v1/speech", new { voice = VoiceAlias, text = InputText }, ct);
+        using var missingCsrf = await owner.PostAsJsonAsync("/api/developer/external-voice/playground", CreateRequest(InputText, "shared-missing-csrf-01"), ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
+
+        using var one = await SendExternalAsync(external, ct);
+        using var two = await owner.PostWithCsrfAsync("/api/developer/external-voice/playground", CreateRequest(InputText, "shared-budget-playground-01"), ct);
+        using var three = await SendExternalAsync(external, ct);
+        Assert.Equal(HttpStatusCode.OK, one.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, two.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, three.StatusCode);
+
+        using var externalLimited = await SendExternalAsync(external, ct);
+        using var playgroundLimited = await owner.PostWithCsrfAsync("/api/developer/external-voice/playground", CreateRequest(InputText, "shared-budget-playground-02"), ct);
+        foreach (var response in new[] { externalLimited, playgroundLimited })
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+            Assert.InRange(response.Headers.RetryAfter!.Delta!.Value.TotalSeconds, 1, 60);
+            Assert.Contains("rate_limited", await response.Content.ReadAsStringAsync(ct));
+        }
+
+        // This factory has no local request history but must retain the shared limit.
+        using var restarted = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedConnection: secondConnection, sharedRateLimit: true);
+        using var restartedClient = restarted.CreateClient();
+        using var afterRestart = await SendExternalAsync(restartedClient, ct);
+        Assert.Equal(HttpStatusCode.TooManyRequests, afterRestart.StatusCode);
+    }
+
+    [Fact]
+    public async Task Shared_limit_unavailability_stops_both_entry_points_before_synthesis()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ownerId = Guid.NewGuid();
+        // Testing has no registered Redis connection. Enabled shared limits must fail closed.
+        using var configured = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedRateLimit: true);
+        using var owner = await CreateOwnerClientAsync(configured, ownerId, ct);
+        using var external = configured.CreateClient();
+        using var externalUnavailable = await SendExternalAsync(external, ct);
+        using var playgroundUnavailable = await owner.PostWithCsrfAsync("/api/developer/external-voice/playground", CreateRequest(InputText, "shared-unavailable-01"), ct);
+        foreach (var response in new[] { externalUnavailable, playgroundUnavailable })
+        {
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal(TimeSpan.FromSeconds(30), response.Headers.RetryAfter?.Delta);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            Assert.Contains("synthesis_unavailable", body);
+            Assert.DoesNotContain("Redis", body);
+            Assert.DoesNotContain(InputText, body);
+        }
+    }
+
+    private static async Task<HttpResponseMessage> SendExternalAsync(HttpClient client, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/external/v1/speech")
+        {
+            Content = JsonContent.Create(new { voice = VoiceAlias, text = InputText }),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+        request.Headers.Add("Idempotency-Key", $"shared-budget-{Guid.NewGuid():N}");
+        return await client.SendAsync(request, cancellationToken);
+    }
 
     [Fact]
     public async Task Playground_is_owner_scoped_csrf_protected_and_records_safe_usage()
@@ -227,7 +303,9 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
     private WebApplicationFactory<Program> CreateConfiguredFactory(
         Guid ownerId,
         DateTimeOffset now,
-        int requestsPerMinute = 3) =>
+        int requestsPerMinute = 3,
+        IConnectionMultiplexer? sharedConnection = null,
+        bool sharedRateLimit = false) =>
         factory.WithWebHostBuilder(builder =>
         {
             var profileId = Guid.NewGuid();
@@ -246,6 +324,7 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
             var consumerPrefix = $"ExternalVoiceApi:Consumers:{ConsumerKeyId}";
             var voicePrefix = $"{consumerPrefix}:AllowedVoices:{VoiceAlias}";
             builder.UseSetting("ExternalVoiceApi:Enabled", "true");
+            builder.UseSetting("ExternalVoiceApi:SharedRateLimitEnabled", sharedRateLimit.ToString());
             builder.UseSetting(
                 "ExternalVoiceApi:RequestsPerMinute",
                 requestsPerMinute.ToString(CultureInfo.InvariantCulture));
@@ -269,6 +348,10 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
             builder.UseSetting($"{voicePrefix}:AuthorizationEvidenceSha256", new string('b', 64));
             builder.ConfigureServices(services =>
             {
+                if (sharedConnection is not null)
+                {
+                    services.AddSingleton(sharedConnection);
+                }
                 services.RemoveAll<IExternalVoiceSynthesisService>();
                 services.AddScoped<IExternalVoiceSynthesisService, FakeExternalVoiceSynthesisService>();
             });

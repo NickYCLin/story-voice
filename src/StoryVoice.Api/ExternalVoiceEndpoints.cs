@@ -43,9 +43,35 @@ public static class ExternalVoiceEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .RequireAuthorization(StoryVoicePolicies.ExternalVoiceSynthesis)
-            .RequireRateLimiting(RateLimitPolicy);
+            .RequireRateLimiting(RateLimitPolicy)
+            .AddEndpointFilter(CheckSharedRateLimitAsync);
 
         return endpoints;
+    }
+
+    private static async ValueTask<object?> CheckSharedRateLimitAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var consumerKeyId = context.HttpContext.User.FindFirst(
+            ExternalVoiceAuthenticationDefaults.ConsumerKeyIdClaim)?.Value;
+        if (string.IsNullOrEmpty(consumerKeyId))
+        {
+            return Problem(StatusCodes.Status401Unauthorized, "Invalid API key",
+                "A valid external voice API key is required.", "invalid_api_key");
+        }
+
+        try
+        {
+            await context.HttpContext.RequestServices.GetRequiredService<IExternalVoiceSharedRateLimiter>()
+                .EnsureAllowedAsync(consumerKeyId, context.HttpContext.RequestAborted);
+        }
+        catch (ExternalVoiceSynthesisException exception)
+        {
+            return MapSynthesisFailure(exception);
+        }
+
+        return await next(context);
     }
 
     public static async ValueTask WriteRateLimitRejectionAsync(

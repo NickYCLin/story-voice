@@ -13,6 +13,7 @@ internal sealed class DeveloperVoicePlaygroundService(
     ICurrentUser currentUser,
     IExternalVoiceSynthesisService synthesisService,
     IExternalVoiceRequestRateLimiter rateLimiter,
+    IExternalVoiceSharedRateLimiter sharedRateLimiter,
     IExternalVoiceUsageRecorder usageRecorder,
     TimeProvider timeProvider,
     ILogger<DeveloperVoicePlaygroundService> logger) : IDeveloperVoicePlaygroundService
@@ -80,6 +81,8 @@ internal sealed class DeveloperVoicePlaygroundService(
             {
                 throw new ExternalVoiceSynthesisException(ExternalVoiceSynthesisFailureKind.Disabled);
             }
+
+            await sharedRateLimiter.EnsureAllowedAsync(consumerKeyId, cancellationToken);
 
             var audio = await synthesisService.SynthesizeAsync(
                 consumerKeyId,

@@ -253,7 +253,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | Production credential | owner-session 的正式 create／rotate／revoke smoke | 涉及一次性正式 secret 與資料 mutation，須由 owner 明確授權操作 |
 | Public voice catalog | 核准 entry、固定 demo、creator publication／revoke workflow | list／demo／detail API 與 `/voices/:alias` 已實作；detail 每次驗證授權與素材，只回傳公開摘要。正式環境尚未部署本次 detail，feature flag 維持關閉，public API 維持 404 |
 | 商業化／營運 | 申請、subscription、billing、invoice、billing-grade metering、hard quota、admin、usage retention／archive | 現有 best-effort ledger 不作唯一計費／硬額度來源；不顯示假價格、假訂閱或假用量 |
-| 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
+| 多 replica | 共用 idempotency、single-flight、公平排程與匿名入口防洪 | 已實作預設關閉的 Redis consumer 固定視窗額度，Playground 與 external API 可跨執行個體共用；其餘協調尚未完成，不代表可直接擴增正式 replica。見 [EXTERNAL_VOICE_SHARED_LIMITS.md](EXTERNAL_VOICE_SHARED_LIMITS.md) |
 | 跨瀏覽器驗收 | 真正的 Safari、行動裝置、背景播放、弱網路，以及 MP3 長度差異 | Windows Chrome／Firefox／WebKit 已以合成 MP3、WAV 檢查播放控制、續播與窄版排版；WebKit 不等於 Safari，API 固定回應也不代表正式同步驗收。範圍與限制見 [BROWSER_PLAYBACK.md](BROWSER_PLAYBACK.md) |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復、程式 metrics 與預設關閉的 OTLP 匯出已實作，仍須營運端設定 Collector 與告警；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |

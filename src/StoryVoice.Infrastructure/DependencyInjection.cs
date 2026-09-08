@@ -260,6 +260,10 @@ public static class DependencyInjection
         services.AddScoped<ISeriesService, SeriesService>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<ExternalVoiceIdempotencyCoordinator>();
+        services.AddSingleton<IExternalVoiceSharedRateLimiter>(provider =>
+            new RedisExternalVoiceSharedRateLimiter(
+                provider.GetRequiredService<IOptions<ExternalVoiceApiOptions>>(),
+                () => provider.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>()));
         services.AddSingleton<ExternalVoiceConcurrencyGate>();
         services.AddScoped<LocalCloneProfileSynthesizer>();
         services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
