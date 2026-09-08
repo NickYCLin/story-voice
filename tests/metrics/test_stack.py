@@ -14,6 +14,14 @@ def read_json(url):
         return json.load(response)
 
 
+def post_metrics(url, payload):
+    request = urllib.request.Request(url, json.dumps(payload).encode(),
+                                     {"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        response.read()
+        return response.status == 200
+
+
 def wait_for(read, check):
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -21,7 +29,7 @@ def wait_for(read, check):
             result = read()
             if check(result):
                 return result
-        except urllib.error.URLError:
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
             pass
         time.sleep(0.5)
     raise AssertionError("Local metrics stack did not become ready or expose the expected samples")
@@ -65,6 +73,7 @@ def main():
             parser.error("Synthetic metrics are restricted to an HTTP loopback origin")
 
     wait_for(lambda: read_json(args.prometheus + "/api/v1/status/buildinfo"), lambda result: result.get("status") == "success")
+    wait_for(lambda: post_metrics(args.otlp + "/v1/metrics", {"resourceMetrics": []}), bool)
     prefix = "synthetic-metrics-" + uuid.uuid4().hex
     first, second = prefix + "-one", prefix + "-two"
     payload = {"resourceMetrics": [
@@ -73,11 +82,8 @@ def main():
         samples(prefix + "-wrong-scope", 99, scope="Synthetic.OtherMeter"),
         samples(prefix + "-wrong-name", 99, name="synthetic.other.metric"),
     ]}
-    request = urllib.request.Request(args.otlp + "/v1/metrics", json.dumps(payload).encode(),
-                                     {"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=5) as response:
-        if response.status != 200:
-            raise AssertionError("Collector rejected the synthetic OTLP request")
+    if not post_metrics(args.otlp + "/v1/metrics", payload):
+        raise AssertionError("Collector rejected the synthetic OTLP request")
 
     query = urllib.parse.urlencode({"query": '{instance=~"' + prefix + '.*"}'})
     data = wait_for(lambda: read_json(args.prometheus + "/api/v1/query?" + query),
