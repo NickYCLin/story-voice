@@ -1,68 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 
 import { apiUrl } from '../api'
+import { isPublicVoiceCard, type PublicVoiceCard } from '../publicVoiceCatalog'
+import { VoicePreviewButton } from '../components/PublicVoicePreview'
+
+const PUBLIC_VOICE_ENDPOINT = '/api/public/v1/voices'
 
 type CatalogState =
   | { status: 'loading' }
   | { status: 'ready'; voices: PublicVoiceCard[] }
   | { status: 'disabled' }
   | { status: 'error'; message: string }
-
-type PublicVoiceCard = {
-  alias: string
-  displayName: string
-  subtitle: string
-  disclosure: string
-  styles: string[]
-  useCases: string[]
-  sampleUrl: string | null
-  canPreview: boolean
-  ctaKind: string
-  subscriptionAvailable: boolean
-  status: string
-}
-
-const PUBLIC_VOICE_ENDPOINT = '/api/public/v1/voices'
-const PUBLIC_DEMO_PREFIX = '/api/public/v1/voices/'
-
-function isShortText(value: unknown, maxLength: number): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength
-}
-
-function isOptionalShortText(value: unknown, maxLength: number): value is string {
-  return typeof value === 'string' && value.length <= maxLength
-}
-
-function isShortTextList(value: unknown): value is string[] {
-  return Array.isArray(value)
-    && value.length >= 1
-    && value.length <= 8
-    && value.every((item) => isShortText(item, 40))
-}
-
-function isPublicVoiceCard(value: unknown): value is PublicVoiceCard {
-  if (!value || typeof value !== 'object') return false
-  const card = value as Record<string, unknown>
-  return typeof card.alias === 'string'
-    && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(card.alias)
-    && isShortText(card.displayName, 120)
-    && isOptionalShortText(card.subtitle, 500)
-    && isShortText(card.disclosure, 240)
-    && isShortTextList(card.styles)
-    && isShortTextList(card.useCases)
-    && (card.sampleUrl === null || typeof card.sampleUrl === 'string')
-    && typeof card.canPreview === 'boolean'
-    && typeof card.ctaKind === 'string'
-    && typeof card.subscriptionAvailable === 'boolean'
-    && typeof card.status === 'string'
-}
-
-function safeSampleUrl(voice: PublicVoiceCard) {
-  if (!voice.canPreview || !voice.sampleUrl) return null
-  const expectedPath = `${PUBLIC_DEMO_PREFIX}${encodeURIComponent(voice.alias)}/demo`
-  return voice.sampleUrl === expectedPath ? apiUrl(voice.sampleUrl) : null
-}
 
 function statusLabel(status: string) {
   switch (status) {
@@ -75,77 +24,6 @@ function statusLabel(status: string) {
     default:
       return '尚未開放'
   }
-}
-
-function VoicePreviewButton({ voice }: { voice: PublicVoiceCard }) {
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const [playback, setPlayback] = useState<'idle' | 'playing' | 'error'>('idle')
-  const sampleUrl = safeSampleUrl(voice)
-  const descriptionId = `voice-demo-${voice.alias}`
-
-  useEffect(() => {
-    const audio = audioRef.current
-    return () => {
-      audio?.pause()
-      if (audio) audio.currentTime = 0
-    }
-  }, [sampleUrl])
-
-  if (!sampleUrl) {
-    return (
-      <div>
-        <button className="public-catalog-button public-catalog-button-muted" disabled type="button">
-          固定示範尚未開放
-        </button>
-        <p className="mt-2 text-xs leading-5 text-stone-500">此聲線尚未通過公開試聽授權檢查。</p>
-      </div>
-    )
-  }
-
-  async function togglePlayback() {
-    const audio = audioRef.current
-    if (!audio) return
-
-    if (!audio.paused) {
-      audio.pause()
-      return
-    }
-
-    setPlayback('idle')
-    try {
-      await audio.play()
-    } catch {
-      setPlayback('error')
-    }
-  }
-
-  return (
-    <div>
-      <button
-        aria-describedby={descriptionId}
-        aria-pressed={playback === 'playing'}
-        className="public-catalog-button public-catalog-button-preview public-focus"
-        onClick={() => void togglePlayback()}
-        type="button"
-      >
-        <span aria-hidden="true">{playback === 'playing' ? 'Ⅱ' : '▶'}</span>
-        {playback === 'playing' ? '暫停固定示範' : '播放固定示範'}
-      </button>
-      <audio
-        onEnded={() => setPlayback('idle')}
-        onError={() => setPlayback('error')}
-        onPause={() => setPlayback('idle')}
-        onPlay={() => setPlayback('playing')}
-        preload="none"
-        ref={audioRef}
-        src={sampleUrl}
-      />
-      <p className="mt-2 text-xs leading-5 text-stone-500" id={descriptionId}>
-        固定公開示範，不會送出或合成你輸入的文字。
-      </p>
-      {playback === 'error' && <p className="mt-1 text-xs text-rose-700" role="alert">示範音檔暫時無法播放，請稍後再試。</p>}
-    </div>
-  )
 }
 
 function VoiceCard({ voice }: { voice: PublicVoiceCard }) {
@@ -166,7 +44,11 @@ function VoiceCard({ voice }: { voice: PublicVoiceCard }) {
       <div className="flex flex-1 flex-col p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="font-serif text-2xl text-stone-900">{voice.displayName}</h2>
+            <h2 className="font-serif text-2xl text-stone-900">
+              <Link className="public-focus rounded hover:text-amber-800 underline decoration-amber-300 underline-offset-4" to={`/voices/${voice.alias}`}>
+                {voice.displayName}
+              </Link>
+            </h2>
             <p className="mt-1 text-sm leading-6 text-stone-600">{voice.subtitle}</p>
           </div>
           <span className="public-status-pill" data-status={voice.status}>
@@ -245,11 +127,18 @@ function CatalogHeader() {
 }
 
 export function PublicVoicesPage() {
+  const { hash } = useLocation()
   const [catalog, setCatalog] = useState<CatalogState>({ status: 'loading' })
   const [query, setQuery] = useState('')
   const [style, setStyle] = useState('')
   const [useCase, setUseCase] = useState('')
   const [availability, setAvailability] = useState('')
+
+  useEffect(() => {
+    if (hash === '#subscription-access' || hash === '#voice-catalog') {
+      document.getElementById(hash.slice(1))?.scrollIntoView()
+    }
+  }, [hash, catalog.status])
 
   useEffect(() => {
     const controller = new AbortController()

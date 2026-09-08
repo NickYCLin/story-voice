@@ -27,9 +27,26 @@ public sealed record PublicVoiceDemo(
     byte[] Content,
     string ContentType);
 
+public sealed record PublicVoiceCatalogDetail(
+    PublicVoiceCatalogCard Voice,
+    PublicVoiceLicenseSummary License);
+
+public sealed record PublicVoiceLicenseSummary(
+    bool CommercialUseAllowed,
+    bool PublicDistributionAllowed,
+    bool CrossProjectApiAllowed,
+    DateTimeOffset EffectiveAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    string TerritoryMode,
+    IReadOnlyList<string> TerritoryCountryCodes);
+
 public interface IPublicVoiceCatalogService
 {
     Task<IReadOnlyList<PublicVoiceCatalogCard>> GetVoicesAsync(
+        CancellationToken cancellationToken);
+
+    Task<PublicVoiceCatalogDetail?> GetVoiceAsync(
+        string alias,
         CancellationToken cancellationToken);
 
     Task<PublicVoiceDemo?> GetDemoAsync(

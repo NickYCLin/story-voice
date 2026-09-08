@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const page = readFileSync(new URL('../src/pages/PublicVoicesPage.tsx', import.meta.url), 'utf8')
+const page = ['../src/pages/PublicVoicesPage.tsx', '../src/publicVoiceCatalog.ts', '../src/components/PublicVoicePreview.tsx']
+  .map(path => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
 const authScreen = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')

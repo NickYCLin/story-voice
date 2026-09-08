@@ -251,7 +251,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 區域 | 尚未完成 | 完成前的邊界 |
 |---|---|---|
 | Production credential | owner-session 的正式 create／rotate／revoke smoke | 涉及一次性正式 secret 與資料 mutation，須由 owner 明確授權操作 |
-| Public voice catalog | 核准 entry、固定 demo、detail DTO／route、creator publication／revoke workflow | `/voices` shell 已部署但 feature flag 關閉，public API 維持 404 |
+| Public voice catalog | 核准 entry、固定 demo、creator publication／revoke workflow | list／demo／detail API 與 `/voices/:alias` 已實作；detail 每次驗證授權與素材，只回傳公開摘要。正式環境尚未部署本次 detail，feature flag 維持關閉，public API 維持 404 |
 | 商業化／營運 | 申請、subscription、billing、invoice、billing-grade metering、hard quota、admin、usage retention／archive | 現有 best-effort ledger 不作唯一計費／硬額度來源；不顯示假價格、假訂閱或假用量 |
 | 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
 | 跨瀏覽器驗收 | 真正的 Safari、行動裝置、背景播放、弱網路，以及 MP3 長度差異 | Windows Chrome／Firefox／WebKit 已以合成 MP3、WAV 檢查播放控制、續播與窄版排版；WebKit 不等於 Safari，API 固定回應也不代表正式同步驗收。範圍與限制見 [BROWSER_PLAYBACK.md](BROWSER_PLAYBACK.md) |

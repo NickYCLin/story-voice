@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.VoiceCatalog;
 using StoryVoice.Domain.Characters;
 using StoryVoice.Domain.Narrations;
@@ -27,6 +28,45 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
     private const string ProjectId = "storyvoice-partner-test";
     private const string ConsumerFamilyId = "synthetic-application";
     private const string TerritoryCountryCode = "TW";
+
+    [Fact]
+    public async Task Public_detail_contains_only_public_fields_and_rechecks_assets_on_every_request()
+    {
+        await using var fixture = await CreateFixtureAsync(SyntheticState.Active);
+        using var client = fixture.Factory.CreateClient();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var response = await client.GetAsync($"/api/public/v1/voices/{Alias}", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        var detail = await response.Content.ReadFromJsonAsync<PublicVoiceCatalogDetail>(cancellationToken);
+        Assert.NotNull(detail);
+        Assert.Equal(Alias, detail.Voice.Alias);
+        Assert.Equal($"/api/public/v1/voices/{Alias}/demo", detail.Voice.SampleUrl);
+        Assert.True(detail.License.CommercialUseAllowed);
+        Assert.True(detail.License.PublicDistributionAllowed);
+        Assert.True(detail.License.CrossProjectApiAllowed);
+        Assert.Equal("country-list", detail.License.TerritoryMode);
+        Assert.Equal(["TW"], detail.License.TerritoryCountryCodes);
+        Assert.True(detail.License.EffectiveAtUtc < DateTimeOffset.UtcNow);
+        Assert.True(detail.License.ExpiresAtUtc > DateTimeOffset.UtcNow);
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        Assert.Equal(["license", "voice"], body.RootElement.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(
+            new[] { "alias", "displayName", "subtitle", "disclosure", "styles", "useCases", "sampleUrl", "canPreview", "ctaKind", "subscriptionAvailable", "status" }.Order(),
+            body.RootElement.GetProperty("voice").EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(
+            new[] { "commercialUseAllowed", "publicDistributionAllowed", "crossProjectApiAllowed", "effectiveAtUtc", "expiresAtUtc", "territoryMode", "territoryCountryCodes" }.Order(),
+            body.RootElement.GetProperty("license").EnumerateObject().Select(property => property.Name).Order());
+
+        var options = fixture.Factory.Services.GetRequiredService<IOptions<VoiceCatalogOptions>>().Value;
+        var demoPath = Path.Combine(options.AssetRootPath, options.Entries[Alias].DemoAudioRelativePath);
+        await File.WriteAllBytesAsync(demoPath, [0], cancellationToken);
+        using var removed = await client.GetAsync($"/api/public/v1/voices/{Alias}", cancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, removed.StatusCode);
+        Assert.Equal(0, fixture.Gateway.Calls);
+    }
 
     [Fact]
     public async Task Valid_authorization_derives_catalog_and_commercial_api_bindings()
@@ -128,6 +168,7 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
 
         using var catalog = await client.GetAsync("/api/public/v1/voices", cancellationToken);
         var cards = await catalog.Content.ReadFromJsonAsync<PublicVoiceCatalogCard[]>(cancellationToken);
+        using var detail = await client.GetAsync($"/api/public/v1/voices/{Alias}", cancellationToken);
         using var demo = await client.GetAsync(
             $"/api/public/v1/voices/{Alias}/demo",
             cancellationToken);
@@ -137,6 +178,8 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
 
         Assert.Equal(HttpStatusCode.OK, catalog.StatusCode);
         Assert.Empty(cards ?? []);
+        Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+        Assert.Contains("no-store", detail.Headers.CacheControl?.ToString());
         Assert.Equal(HttpStatusCode.NotFound, demo.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, speech.StatusCode);
         Assert.Equal("voice_not_available", await ReadProblemCodeAsync(speech, cancellationToken));

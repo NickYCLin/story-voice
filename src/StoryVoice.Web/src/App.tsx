@@ -6,6 +6,7 @@ import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { LandingPage } from './pages/LandingPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { PublicVoicesPage } from './pages/PublicVoicesPage'
+import { PublicVoiceDetailPage } from './pages/PublicVoiceDetailPage'
 
 const CharacterLibraryPage = lazy(() => import('./pages/CharacterLibraryPage').then(module => ({ default: module.CharacterLibraryPage })))
 const CollectionDetailPage = lazy(() => import('./pages/CollectionDetailPage').then(module => ({ default: module.CollectionDetailPage })))
@@ -25,6 +26,7 @@ function App() {
     <Routes>
       <Route element={<LandingPage publicMode />} path="/about" />
       <Route element={<PublicVoicesPage />} path="/voices" />
+      <Route element={<PublicVoiceDetailPage />} path="/voices/:alias" />
       <Route element={<DeveloperDocsPage />} path="/developers/docs" />
       <Route element={<AppLayout />} path="/">
         <Route element={<LandingPage />} index />

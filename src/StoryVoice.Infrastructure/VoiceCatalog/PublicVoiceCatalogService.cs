@@ -53,26 +53,48 @@ internal sealed class PublicVoiceCatalogService(
                 continue;
             }
 
-            var authorization = validated.Authorization;
-            cards.Add(new PublicVoiceCatalogCard(
-                alias,
-                authorization.DisplayName,
-                authorization.AttributionText ?? string.Empty,
-                "AI 合成語音",
-                authorization.Styles.ToArray(),
-                authorization.UseCases.ToArray(),
-                $"/api/public/v1/voices/{alias}/demo",
-                CanPreview: true,
-                PublicVoiceCatalogCtaKinds.ViewPlans,
-                SubscriptionAvailable: true,
-                PublicVoiceCatalogStatus.Available));
+            cards.Add(CreateCard(alias, validated.Authorization));
         }
 
         return cards;
     }
 
+    public async Task<PublicVoiceCatalogDetail?> GetVoiceAsync(
+        string alias,
+        CancellationToken cancellationToken)
+    {
+        var validated = await GetEntryAsync(alias, includeDemoContent: false, cancellationToken);
+        if (validated is null)
+        {
+            return null;
+        }
+
+        var authorization = validated.Authorization;
+        return new PublicVoiceCatalogDetail(
+            CreateCard(alias, authorization),
+            new PublicVoiceLicenseSummary(
+                CommercialUseAllowed: true,
+                PublicDistributionAllowed: true,
+                CrossProjectApiAllowed: true,
+                authorization.EffectiveAtUtc,
+                authorization.ExpiresAtUtc,
+                authorization.TerritoryMode,
+                authorization.TerritoryCountryCodes.ToArray()));
+    }
+
     public async Task<PublicVoiceDemo?> GetDemoAsync(
         string alias,
+        CancellationToken cancellationToken)
+    {
+        var validated = await GetEntryAsync(alias, includeDemoContent: true, cancellationToken);
+        return validated?.Demo is null
+            ? null
+            : new PublicVoiceDemo(validated.Demo, WaveContentType);
+    }
+
+    private async Task<ValidatedCatalogEntry?> GetEntryAsync(
+        string alias,
+        bool includeDemoContent,
         CancellationToken cancellationToken)
     {
         if (!_options.Enabled || !VoiceCatalogOptionsValidator.IsCanonicalAlias(alias))
@@ -95,17 +117,29 @@ internal sealed class PublicVoiceCatalogService(
             return null;
         }
 
-        var validated = await ValidateEntryAsync(
+        return await ValidateEntryAsync(
             physicalRoot,
             alias,
             configuredEntry,
             timeProvider.GetUtcNow(),
-            includeDemoContent: true,
+            includeDemoContent,
             cancellationToken);
-        return validated?.Demo is null
-            ? null
-            : new PublicVoiceDemo(validated.Demo, WaveContentType);
     }
+
+    private static PublicVoiceCatalogCard CreateCard(
+        string alias,
+        SyntheticVoiceAuthorizationEvidence authorization) => new(
+            alias,
+            authorization.DisplayName,
+            authorization.AttributionText ?? string.Empty,
+            "AI 合成語音",
+            authorization.Styles.ToArray(),
+            authorization.UseCases.ToArray(),
+            $"/api/public/v1/voices/{alias}/demo",
+            CanPreview: true,
+            PublicVoiceCatalogCtaKinds.ViewPlans,
+            SubscriptionAvailable: true,
+            PublicVoiceCatalogStatus.Available);
 
     private string? TryResolveRoot()
     {
