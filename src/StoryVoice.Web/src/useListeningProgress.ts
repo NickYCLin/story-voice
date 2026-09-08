@@ -19,6 +19,7 @@ class ProgressSession {
   private pending: Position | null = null
   private busy = false
   private conflicted = false
+  private retryRequested = false
   private listener: ((status: Status, progress?: ListeningProgress) => void) | null = null
 
   private readonly jobId: string
@@ -37,6 +38,15 @@ class ProgressSession {
 
   save(positionMs: number, durationMs: number) {
     this.pending = { positionMs, durationMs }
+    void this.flush()
+  }
+
+  retry() {
+    if (!this.listener || this.conflicted) return
+    if (this.busy) {
+      this.retryRequested = true
+      return
+    }
     void this.flush()
   }
 
@@ -68,6 +78,7 @@ class ProgressSession {
   private async flush() {
     if (this.busy || this.conflicted) return
     this.busy = true
+    let writing: Position | null = null
     try {
       if (this.version === undefined) {
         const response = await this.request('GET')
@@ -77,9 +88,9 @@ class ProgressSession {
         this.listener?.('ready', progress)
       }
       while (this.pending) {
-        const position = this.pending
+        writing = this.pending
         this.pending = null
-        const response = await this.request('PUT', { ...position, expectedVersion: this.version })
+        const response = await this.request('PUT', { ...writing, expectedVersion: this.version })
         if (response.status === 409) {
           this.conflicted = true
           this.pending = null
@@ -89,22 +100,42 @@ class ProgressSession {
         if (!response.ok) throw new Error('Progress save failed')
         const saved = response.progress!
         this.version = saved.version
+        writing = null
         this.listener?.('ready')
       }
     } catch {
+      // Keep the last unsent position while paused/offline. A newer seek or
+      // completed position takes precedence over the request that just failed.
+      if (writing && !this.pending) this.pending = writing
       this.listener?.('error')
     } finally {
       this.busy = false
+      if (this.retryRequested) {
+        this.retryRequested = false
+        if (this.listener) void this.flush()
+      }
     }
   }
 }
 
 export function useListeningProgress(jobId: string, csrfToken: string) {
   const session = useMemo(() => new ProgressSession(jobId, csrfToken), [jobId, csrfToken])
-  const [state, setState] = useState<{ status: Status; progress?: ListeningProgress }>({ status: 'loading' })
-  useEffect(() => session.subscribe((status, progress) => {
-    setState((current) => ({ status, progress: progress ?? current.progress }))
-  }), [session])
+  const [state, setState] = useState<{ session: ProgressSession; status: Status; progress?: ListeningProgress }>({ session, status: 'loading' })
+  useEffect(() => {
+    const unsubscribe = session.subscribe((status, progress) => {
+      setState((current) => ({ session, status, progress: progress ?? (current.session === session ? current.progress : undefined) }))
+    })
+    const retry = () => session.retry()
+    window.addEventListener('online', retry)
+    return () => {
+      window.removeEventListener('online', retry)
+      unsubscribe()
+    }
+  }, [session])
   const save = useCallback((positionMs: number, durationMs: number) => session.save(positionMs, durationMs), [session])
-  return { ...state, save }
+  return {
+    status: state.session === session ? state.status : 'loading' as Status,
+    progress: state.session === session ? state.progress : undefined,
+    save,
+  }
 }

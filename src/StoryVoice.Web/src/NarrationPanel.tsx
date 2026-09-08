@@ -96,7 +96,7 @@ function CompletedNarrationPlayer({ job, csrfToken }: { job: NarrationJob; csrfT
       <p className="mt-2 text-sm text-amber-700" role="status">
         {progress.status === 'conflict'
           ? localize(locale, '其他分頁或裝置已更新進度，目前只保存在此瀏覽器。重新開啟播放器可讀取最新位置。', 'Another tab or device updated your progress. Progress is saved only in this browser. Reopen the player to load the latest position.')
-          : localize(locale, '播放進度尚未同步，目前只保存在此瀏覽器。連線恢復後會再嘗試。', 'Progress has not synced and is saved only in this browser. We will retry when you continue listening.')}
+          : localize(locale, '播放進度尚未同步，目前只保存在此瀏覽器。連線恢復或繼續播放時會再嘗試。', 'Progress has not synced and is saved only in this browser. We will retry when the connection returns or you continue listening.')}
       </p>
     )}
     </>
