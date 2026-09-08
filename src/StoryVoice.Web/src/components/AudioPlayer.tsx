@@ -126,6 +126,7 @@ function AudioPlayerSession({
   const [showChapterList, setShowChapterList] = useState(false)
 
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isBuffering, setIsBuffering] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [playbackRate, setPlaybackRate] = useState(1.0)
@@ -285,6 +286,7 @@ function AudioPlayerSession({
     } catch (error) {
       if (request.signal.aborted || audioRef.current !== audio || (error instanceof DOMException && error.name === 'AbortError')) return
       setIsPlaying(false)
+      setIsBuffering(false)
       setPlaybackError(true)
     } finally {
       if (playbackRequest.current === request) playbackRequest.current = null
@@ -360,6 +362,7 @@ function AudioPlayerSession({
         onDurationChange={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? Math.max(0, e.currentTarget.duration) : 0)}
         onEnded={(e) => {
           setIsPlaying(false)
+          setIsBuffering(false)
           setSavedResumeTime(null)
           progressChanged.current = true
           persistProgress(e.currentTarget.duration, e.currentTarget.duration)
@@ -374,12 +377,18 @@ function AudioPlayerSession({
           setSavedResumeTime((saved) => saved !== null && saved < nextDuration - 5 ? saved : null)
           e.currentTarget.playbackRate = playbackRate
         }}
-        onError={() => { setIsPlaying(false); setPlaybackError(true) }}
+        onError={() => { setIsPlaying(false); setIsBuffering(false); setPlaybackError(true) }}
         onPause={(e) => {
           setIsPlaying(false)
+          setIsBuffering(false)
           persistProgress(e.currentTarget.currentTime, e.currentTarget.duration)
         }}
         onPlay={() => { progressChanged.current = true; setIsPlaying(true) }}
+        onWaiting={(e) => {
+          if (!e.currentTarget.paused && !e.currentTarget.ended) setIsBuffering(true)
+        }}
+        onPlaying={(e) => { setIsBuffering(false); setIsPlaying(!e.currentTarget.paused) }}
+        onEmptied={() => { setIsPlaying(false); setIsBuffering(false) }}
         onTimeUpdate={(e) => {
           const cur = e.currentTarget.currentTime
           setCurrentTime(cur)
@@ -405,12 +414,14 @@ function AudioPlayerSession({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800 pb-3">
         <div className="min-w-0 grow basis-40">
           {title && <p className="truncate text-sm font-medium text-stone-200">{title}</p>}
-          <span className="text-xs text-stone-400">
+          <span className="text-xs text-stone-400" role="status">
             {playbackError
               ? localize(locale, '播放失敗', 'Playback failed')
-              : isPlaying
-                ? localize(locale, '正在播放', 'Playing')
-                : localize(locale, '按播放開始聆聽', 'Press play to listen')}
+              : isBuffering
+                ? localize(locale, '等待音訊載入…', 'Waiting for audio…')
+                : isPlaying
+                  ? localize(locale, '正在播放', 'Playing')
+                  : localize(locale, '按播放開始聆聽', 'Press play to listen')}
           </span>
         </div>
 

@@ -34,6 +34,48 @@ beforeEach(() => {
 })
 
 describe('播放器實際互動', () => {
+  it('等待音訊時顯示載入狀態，資料恢復或使用者暫停時清除提示', () => {
+    const { container } = render(player())
+    const audio = loadAudio(container)
+    let paused = true
+    Object.defineProperty(audio, 'paused', { configurable: true, get: () => paused })
+    fireEvent.waiting(audio)
+    expect(screen.queryByText('等待音訊載入…')).toBeNull()
+    paused = false
+    fireEvent.play(audio)
+    fireEvent.waiting(audio)
+    expect(screen.getByRole('status').textContent).toBe('等待音訊載入…')
+    expect(screen.getByRole('button', { name: '暫停', exact: true })).toBeTruthy()
+    fireEvent.playing(audio)
+    expect(screen.getByRole('status').textContent).toBe('正在播放')
+    // Fetching may stall while already buffered audio continues playing.
+    fireEvent.stalled(audio)
+    expect(screen.getByRole('status').textContent).toBe('正在播放')
+    fireEvent.waiting(audio)
+    vi.mocked(audio.pause).mockImplementation(() => { paused = true; fireEvent.pause(audio) })
+    fireEvent.click(screen.getByRole('button', { name: '暫停', exact: true }))
+    expect(screen.queryByText('等待音訊載入…')).toBeNull()
+    expect(screen.getByRole('button', { name: '播放', exact: true })).toBeTruthy()
+    fireEvent.playing(audio)
+    expect(screen.getByRole('button', { name: '播放', exact: true })).toBeTruthy()
+    expect(audio.play).not.toHaveBeenCalled()
+  })
+
+  it('播放失敗或更換音檔後不保留上一段的等待狀態', () => {
+    const { container, rerender } = render(player())
+    const audio = loadAudio(container)
+    Object.defineProperty(audio, 'paused', { configurable: true, value: false })
+    fireEvent.play(audio)
+    fireEvent.waiting(audio)
+    fireEvent.error(audio)
+    expect(screen.getByRole('status').textContent).toBe('播放失敗')
+    expect(screen.getByRole('alert')).toBeTruthy()
+    rerender(player('/second.mp3', 'second'))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('等待音訊載入…')).toBeNull()
+    expect(screen.getByRole('button', { name: '播放', exact: true })).toBeTruthy()
+  })
+
   it('解碼失敗後重試會恢復選定位置，不因重新載入音檔回到開頭', async () => {
     const { container } = render(player())
     const audio = loadAudio(container)
