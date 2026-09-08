@@ -1473,7 +1473,7 @@ Chapter 50
 - [x] Audio Cache（BlueMagpie durable chunk cache）
 - [x] Retry
 - [x] Regenerate / Preview Segment（單段語音試聽與生成效果預覽）
-- [ ] Parallel Generation
+- [x] Parallel Generation（不同工作間有界平行，預設 1、最多 4；單工作片段仍依序生成）
 - [ ] Cost Logging
 
 Acceptance Criteria：

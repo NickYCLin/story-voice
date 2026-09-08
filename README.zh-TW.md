@@ -114,6 +114,10 @@ Open:
 - Liveness: <http://localhost:8080/health/live>
 - Readiness: <http://localhost:8080/health/ready>
 
+Worker 預設一次處理一份配音工作；需要平行處理不同書籍時，可設定
+`NARRATION_MAX_CONCURRENT_JOBS`（1～4）。設定與限制見
+[Worker 平行配音](docs/WORKER_CONCURRENCY.md)。單 GPU 環境先維持 1。
+
 ### Private BlueMagpie Taiwan-Mandarin preview and short canary (ARM64 + NVIDIA GPU)
 
 The `bluemagpie` Compose profile adds a self-hosted gateway with no host port on an
@@ -130,8 +134,9 @@ at 32 GiB by default, retained for seven days, and deliberately excluded from pu
 audio backups. A restart/resume canary and a bounded 36-chunk cold long-form benchmark
 have passed without activating their staged audio. Admission now rejects oversized jobs
 before creating rows, progress writes are percentage-throttled, and owners can discard a
-staged rebuild. Keep complete-book use disabled until exhausted-attempt recovery,
-structured long-run metrics, and GPU/LLM coexistence are verified. The model weights are
+staged rebuild. Same-job recovery after exhausted retries and structured metrics are
+implemented; keep complete-book use disabled until production monitoring and GPU/LLM
+coexistence are verified. The model weights are
 marked with license `other`, so do not assume redistribution or commercial-use rights.
 
 Preload the pinned model cache, create a random secret of at least 32 characters,

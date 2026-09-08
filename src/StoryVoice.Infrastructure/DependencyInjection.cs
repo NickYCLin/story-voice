@@ -64,6 +64,7 @@ public static class DependencyInjection
             .Validate(options => !string.IsNullOrWhiteSpace(options.AudioRootPath), "Narration audio root is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Voice), "Narration voice is required.")
             .Validate(options => options.MaxAttempts is >= 1 and <= 10, "Narration attempts must be between 1 and 10.")
+            .Validate(options => options.MaximumConcurrentJobs is >= 1 and <= 4, "Narration concurrent jobs must be between 1 and 4.")
             .Validate(options => options.ProviderTimeoutMinutes >= 1, "Narration provider timeout must be positive.")
             .Validate(options => options.LeaseMinutes is >= 2 and <= 60,
                 "Narration lease must be between 2 and 60 minutes; the Worker renews it while synthesis is active.")

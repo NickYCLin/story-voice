@@ -1,12 +1,22 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-08（帳號續播、播放時間軸與 BlueMagpie 恢復／監測）
+最後更新：2026-09-08（帳號續播、BlueMagpie 恢復／監測與有界平行配音）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 Worker 平行配音
+
+- 新增每個 Worker process 的 `MaximumConcurrentJobs` 設定，預設 1、最多 4；只有空位可用才領取工作，領取與租約回收仍走單一循環。
+- 不同工作可各自進行合成；每份使用獨立 scope、租約、取消／timeout 與檔案。完成便補下一份，停止時等待所有執行中的工作收尾，既有 provider 重試與整批啟用規則保持有效。
+- 真實 PostgreSQL 測試啟動 Worker，驗證 2 份同時執行、第三份等空位、租約與音訊隔離，以及停止後由新 Worker 回收過期租約並完成剩餘工作。
+
+本機完整回歸：609 項單元測試、256 項整合測試通過；Compose 設定解析與 `git diff --check` 通過。
+
+設定、資源限制與恢復行為見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)。本輪沒有修改正式環境的並行數，也沒有用外部 TTS 或 GPU 進行負載測試。單 GPU 仍先保留 1；單一工作內的片段依序生成，跨 replica 公平排程仍未實作。
 
 ## 2026-09-08 BlueMagpie 合成監測
 
@@ -226,7 +236,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復與程式 metrics 已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
-| 長期有聲書 UX | automatic casting、平行生成、cost logging | 單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
+| 長期有聲書 UX | automatic casting、單工作片段平行、cost logging | 不同工作間有界平行、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界

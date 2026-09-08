@@ -25,32 +25,12 @@ public sealed class StoryPipelineWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("StoryVoice narration worker {WorkerId} is ready", _workerId);
+        logger.LogInformation("StoryVoice narration worker {WorkerId} is ready with {MaximumConcurrentJobs} processing slots",
+            _workerId, options.Value.MaximumConcurrentJobs);
         Directory.CreateDirectory(options.Value.AudioRootPath);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                var claim = await ClaimNextAsync(stoppingToken);
-                if (claim is null)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                    continue;
-                }
-
-                await ProcessAsync(claim, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Narration worker loop failed");
-                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
-            }
-        }
+        await NarrationJobScheduler.RunAsync(
+            options.Value.MaximumConcurrentJobs, ClaimNextAsync, ProcessAsync,
+            exception => logger.LogError(exception, "Narration worker loop failed"), stoppingToken);
     }
 
     private async Task<ClaimedJob?> ClaimNextAsync(CancellationToken cancellationToken)
