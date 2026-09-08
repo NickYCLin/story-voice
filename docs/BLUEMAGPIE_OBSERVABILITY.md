@@ -51,13 +51,51 @@ dotnet-counters collect --process-id <worker-pid> --counters StoryVoice.BlueMagp
 工具需另外備妥；容器外連線也需可達的 diagnostic socket／port 與相同權限。
 參數與連線方式見 [Microsoft 的 dotnet-counters 文件](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-counters)。
 
-目前 repository 沒有安裝常駐 metrics exporter 或儀表板。若營運環境接入
-OpenTelemetry，需自行訂閱 `StoryVoice.BlueMagpie` Meter、設定儲存與告警；單元測試讀到
-指標不代表正式監測已收集資料。Log 與收集檔可能包含營運識別資料，保留在 Git 外。
+## 匯出至監測系統
+
+Worker 已接上 OpenTelemetry OTLP/HTTP exporter，預設關閉。準備好可接受 protobuf metrics
+的內網 Collector 後，設定以下環境變數並重新啟動 Worker：
+
+```dotenv
+WORKER_METRICS_ENABLED=true
+WORKER_METRICS_ENDPOINT=http://otel-collector:4318/v1/metrics
+WORKER_METRICS_EXPORT_INTERVAL_SECONDS=30
+WORKER_METRICS_EXPORT_TIMEOUT_SECONDS=5
+```
+
+`otel-collector` 是示意服務名稱；目前 Compose 不會自動建立 Collector、資料儲存或儀表板。
+端點必須完整包含 `/v1/metrics`，可帶前置路徑，但不能含帳密、query 或 fragment。
+遠端傳輸可使用 HTTPS；此入口不設定授權 header，需要外送至有驗證的監測服務時，由
+受信任的內網 Collector 處理。不要將正式端點或監測憑證寫入 repository。
+
+不使用 Compose 時，對應設定為 `WorkerMetrics__Enabled`、`WorkerMetrics__Endpoint`、
+`WorkerMetrics__ExportIntervalSeconds`、`WorkerMetrics__ExportTimeoutSeconds`。
+匯出間隔限定 5 至 3600 秒，逾時限定 1 至 30 秒且不得長於間隔。啟用但設定無效時，
+Worker 會在啟動時拒絕該設定；關閉時不註冊 OpenTelemetry pipeline，也不發送資料。
+
+匯出只訂閱 `StoryVoice.BlueMagpie`，不另外匯出 log、trace、HTTP／資料庫 instrumentation
+或 exemplar。Resource 使用固定 `service.name=storyvoice-worker` 與每次啟動產生的隨機
+`service.instance.id`，讓多個 Worker 的累計值可分開辨識；不繼承環境的 resource attributes。
+Exporter 的端點、protocol、header、間隔與逾時由上述程式設定決定，不套用通用
+`OTEL_EXPORTER_OTLP_*` 的連線設定。
+
+Counter 與 histogram 採 cumulative temporality；Worker 重啟後會重新計數。耗時 histogram
+以秒分桶，涵蓋 0.1 秒到 3 小時以上；RTF 分桶涵蓋 0.05 至 10 以上。這些指標仍是診斷
+統計，不是唯一工作數或計費來源。
+
+匯出在背景執行，Collector 錯誤或無回應不會重新合成、停止 Worker 或跟隨 HTTP redirect。
+沒有持久化的匯出佇列；程序退出前未成功匯出的資料可能遺失。營運端仍須確認 Collector
+實際收到資料、設定保留期間與告警，並演練接收中斷及 Worker 重啟。
+
+協定與 SDK 設定見 [OpenTelemetry .NET exporter 文件](https://opentelemetry.io/docs/languages/dotnet/exporters/)
+及 [OTLP exporter 1.18.0 說明](https://github.com/open-telemetry/opentelemetry-dotnet/blob/core-1.18.0/src/OpenTelemetry.Exporter.OpenTelemetryProtocol/README.md)。
+Log 與收集檔可能包含營運識別資料，保留在 Git 外。
 
 ## 驗證邊界
 
-測試使用合成 WAV、固定測試回應與真實檔案快取，驗證中斷後部分命中、全命中時不再呼叫
+測試以本機 HTTP 接收端確認真正的 OTLP protobuf request、九項指標、累計值、標籤與
+resource 範圍，並確認停用、503、redirect 與逾時行為；這不代表正式監測已收集資料。
+另以合成 WAV、固定測試回應與真實檔案快取，驗證中斷後部分命中、全命中時不再呼叫
 gateway、取消／失敗歸類、active gauge 以及缺少時間軸時不捏造 RTF。這些證據不包含
 NVIDIA／ARM64 上的實際模型速度、GPU／LLM 共存壓力或完整書籍生成。
 `BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 仍預設為 `false`。

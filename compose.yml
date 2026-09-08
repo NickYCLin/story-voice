@@ -157,6 +157,10 @@ services:
       Narration__ProviderTimeoutMinutes: ${NARRATION_PROVIDER_TIMEOUT_MINUTES:-180}
       Narration__MaximumConcurrentJobs: ${NARRATION_MAX_CONCURRENT_JOBS:-1}
       EdgeTts__MaximumConcurrentChunks: ${EDGE_TTS_MAX_CONCURRENT_CHUNKS:-1}
+      WorkerMetrics__Enabled: ${WORKER_METRICS_ENABLED:-false}
+      WorkerMetrics__Endpoint: ${WORKER_METRICS_ENDPOINT:-}
+      WorkerMetrics__ExportIntervalSeconds: ${WORKER_METRICS_EXPORT_INTERVAL_SECONDS:-30}
+      WorkerMetrics__ExportTimeoutSeconds: ${WORKER_METRICS_EXPORT_TIMEOUT_SECONDS:-5}
       Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-5}
     volumes:
       - book-storage:/data/books

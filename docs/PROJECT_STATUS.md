@@ -223,7 +223,7 @@ JSON/音訊回應大小。
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart
   canary 只重算缺少 chunks；另一次 36-chunk cold benchmark 在約 6.15 分鐘內產生
   690.58 秒 staged 音訊（RTF 0.534），沒有重啟、沒有啟用測試音訊，且測試後 formal
-  flag 已關閉。exhausted-attempt 後的同工作恢復與結構化 metrics 已實作；完整書籍啟用前
+  flag 已關閉。exhausted-attempt 後的同工作恢復、結構化 metrics 與預設關閉的 OTLP 匯出已實作；完整書籍啟用前
   仍須建立正式監測收集與完成 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
   重新散布或商業使用；`BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 預設並應持續為 `false`。
 - BlueMagpie 自架 canary 不需要 VoAI；`VOAI_API_KEY` 與 `VOAI_PAID_API_KEY` 都必須保持
@@ -256,7 +256,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
 | 跨瀏覽器驗收 | 真正的 Safari、行動裝置、背景播放、弱網路，以及 MP3 長度差異 | Windows Chrome／Firefox／WebKit 已以合成 MP3、WAV 檢查播放控制、續播與窄版排版；WebKit 不等於 Safari，API 固定回應也不代表正式同步驗收。範圍與限制見 [BROWSER_PLAYBACK.md](BROWSER_PLAYBACK.md) |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
-| BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復與程式 metrics 已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
+| BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復、程式 metrics 與預設關閉的 OTLP 匯出已實作，仍須營運端設定 Collector 與告警；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
 | 長期有聲書 UX | 非 Edge provider 的單工作片段平行、金額估算與供應商用量對帳 | Edge 多角色片段與不同工作間有界平行、配音嘗試用量／耗時、規則式聲線建議、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；平行上限各自預設 1；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |

@@ -72,7 +72,7 @@ builder.Services.AddHttpClient(VoAiTtsClient.HttpClientName, client =>
         string.Equals(headerName, "x-api-key", StringComparison.OrdinalIgnoreCase));
 builder.Services.AddSingleton<IVoAiTtsClient, VoAiTtsClient>();
 builder.Services.AddSingleton<IBlueMagpieChunkCache, BlueMagpieChunkCache>();
-builder.Services.AddMetrics();
+builder.Services.AddStoryVoiceWorkerMetrics(builder.Configuration);
 builder.Services.AddSingleton<BlueMagpieNarrationMetrics>();
 builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, EdgeTtsMultiVoiceNarrationProvider>();
