@@ -130,7 +130,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                         entry.InputWavPath,
                         turn.Volume,
                         effectivePauseBeforeMs,
-                        DeleteInputAfterNormalization: false));
+                        DeleteInputAfterNormalization: false,
+                        TurnIndex: turnIndex));
                     completedChunks++;
                     if (progressCallback is not null)
                     {
@@ -141,7 +142,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 }
             }
 
-            await composer.ComposeAsync(
+            var result = await composer.ComposeAsync(
                 audioSegments,
                 fullOutputPath,
                 OutputSampleRate,
@@ -152,6 +153,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
             }
 
             completed = true;
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -200,7 +202,6 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
             }
         }
 
-        return MultiVoiceSynthesisResult.None;
     }
 
     internal static IReadOnlyList<string> SplitText(string text)

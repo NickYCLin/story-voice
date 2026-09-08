@@ -1,12 +1,24 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-07（產品介紹卡片與文字入口、角色設定改接本機 LLM、播放與試音修正）
+最後更新：2026-09-08（帳號續播與多引擎播放時間軸）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 續播與播放時間軸
+
+- 新增帳號內的播放進度 API 與 `listening_progress` migration；進度綁定確切朗讀工作，不會套用到重產後的另一份音檔。只有擁有者可讀寫已完成、已發布且未封存書籍的進度，寫入需通過 CSRF。
+- 儲存使用版本檢查；兩個分頁或裝置同時建立／更新時只有一方成功，過期要求回 409。播放器會停止覆寫並提示重新開啟以取得最新位置。
+- 播放器可讀取帳號進度並提供續播，播放、跳轉、暫停、切到背景與離頁時保存；單純查看不會清除舊進度。網路失敗保留本機續播，後續操作再嘗試同步；尚未同步的本機位置不代表其他裝置已取得。
+- BlueMagpie／VoAI 由共用 FFmpeg composer 量測重採樣、音量與停頓處理後的 PCM；3wa 量測實際串接的 MP3 與靜音片段。分塊會合併回原本 turn，累積邊界後才取整數毫秒，避免長篇逐塊四捨五入偏移。BlueMagpie 仍保留可續用的 chunk cache。
+- 新產生的四種 provider 多角色音訊都可附章節／文字／角色時間軸；既有音檔不會自動補出時間軸。3wa 成品改以同磁碟 rename 發布，Windows 含空白與單引號路徑也有合成測試。
+
+新增測試涵蓋 API 權限、PostgreSQL migration／真正的併發寫入、前端同步與晚到回應，以及合成測試音的 FFmpeg／ffprobe 實際處理。這些修改尚不代表正式站已更新，也不代表外部 provider 或 GPU 模型的實際生成品質已驗收。
+
+本機驗證：592 項單元測試、245 項整合測試、164 項前端靜態檢查與 33 項互動測試通過；前端 lint、根路徑／子路徑建置與 EF migration 一致性檢查通過。Chromium 使用合成 WAV 與模擬進度 API，檢查續播、鍵盤回到開頭、下一章、清除 localStorage 後讀回帳號位置，以及 1440／390／320px 排版；真實資料庫行為另由 PostgreSQL 整合測試驗證。
 
 ## 2026-09-07 產品介紹整理
 
@@ -89,7 +101,7 @@
 - BlueMagpie 正式工作在建立任何 cast／batch／job 前會逐冊執行保守的 chunk 與 PCM/WAV budget preflight；Worker 再以實際 chunks 與快取／gateway 音訊 bytes 重驗。合成進度只在整數百分比增加時寫入資料庫，暫時性失敗與 timeout 會等待 GPU lease 安全冷卻後才重試。
 - Edge 對白依情緒（緊張／開心／生氣／難過）微調 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱；BlueMagpie 維持固定中性參數。
 - 角色庫（Character Library，見下方獨立章節）：owner-scoped、跨系列共用的角色管理頁面（`/characters`），角色的基本資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格）與自訂聲線（Character Voice Studio）都掛在角色庫上，任何系列的多角色配音都能直接選用同一個角色，不用每個系列各自重建。
-- 播放器章節／句子／角色同步：Edge 多角色合成時由 provider 以 ffprobe 實測回報逐 turn 起點與時長，Worker 在完成音訊後把「時間 + 章節 + 確認片段 offset」寫入 `narration_timelines`（一 job 一份 JSON 文件，只存 offset 不存正文；寫入為 best-effort，失敗不影響完成的音訊）。owner-scoped `GET /api/narrations/{jobId}/timeline` 讀取時會重算書籍 source hash，僅在與工作鎖定的正文一致時才切出逐 turn 文字，否則保留時間軸但不供文；合併 turn 若混合旁白與角色片段會誠實標為 mixed，不會誤標為單一角色。前端播放器據此顯示章節列表（點擊跳轉、上一章／下一章）、目前句子文字與目前說話角色（含內心獨白標示）；無時間軸的舊工作與 VoAI／BlueMagpie／3wa 路徑（provider 尚未回報 timing）維持原本純播放 UI。
+- 播放器章節／句子／角色同步：Edge／VoAI／BlueMagpie／3wa 多角色合成時由 provider 以 ffprobe 實測回報逐 turn 起點與時長，Worker 在完成音訊後把「時間 + 章節 + 確認片段 offset」寫入 `narration_timelines`（一 job 一份 JSON 文件，只存 offset 不存正文；寫入為 best-effort，失敗不影響完成的音訊）。owner-scoped `GET /api/narrations/{jobId}/timeline` 讀取時會重算書籍 source hash，僅在與工作鎖定的正文一致時才切出逐 turn 文字，否則保留時間軸但不供文；合併 turn 若混合旁白與角色片段會誠實標為 mixed，不會誤標為單一角色。前端播放器據此顯示章節列表（點擊跳轉、上一章／下一章）、目前句子文字與目前說話角色（含內心獨白標示）；無時間軸的舊工作維持原本純播放 UI。
 
 ## 多角色系列配音進度
 
@@ -165,8 +177,7 @@ JSON/音訊回應大小。
   流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以混用 Edge 固定聲線與具備
   合法授權、已完成的 3wa Clone 聲線；旁白本身永遠只能是 Edge 聲線。任何缺少 Ready
   Clone Base 或仍含 Design profile 的 3wa 角色會在設定、staging 與 Worker 三層被拒絕。
-- 角色基本資料的「AI 補完」／「AI 全部重寫」按鈕只是預留位置，沒有接 LLM（3wa
-  Cluster API 目前沒有對應的 chat/生成 mode）。
+- 角色基本資料的 AI 補完已接本機 Ollama；實際模型品質與延遲仍需另行驗收。
 - 已新增 BlueMagpie BM1 作為第二個固定聲線引擎；只有內建女聲 `female_voice` 與男聲
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart
   canary 只重算缺少 chunks；另一次 36-chunk cold benchmark 在約 6.15 分鐘內產生
@@ -195,7 +206,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
-| 長期有聲書 UX | automatic casting、平行生成、cost logging；VoAI／BlueMagpie／3wa 路徑的播放時間軸（目前只有 Edge 多角色合成回報逐 turn timing） | 單片段重生、loudness normalize、播放進度／resume 與 Edge 路徑的章節／句子／角色同步已完成；播放進度仍存於瀏覽器 localStorage，尚無伺服器端 ListeningProgress |
+| 長期有聲書 UX | automatic casting、平行生成、cost logging | 單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界
@@ -249,4 +260,4 @@ docker compose config --quiet
 git diff --check
 ```
 
-PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。
+PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。音訊合成測試需要 PATH 上有 `ffmpeg` 與 `ffprobe`，只使用測試產生的音調，不呼叫付費 API。

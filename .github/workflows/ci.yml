@@ -24,6 +24,10 @@ jobs:
           -p:NuGetAuditMode=all
           -p:WarningsAsErrors=NU1900%3BNU1901%3BNU1902%3BNU1903%3BNU1904%3BNU1905
       - run: dotnet build StoryVoice.sln --configuration Release --no-restore
+      - name: Install audio test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
       - run: dotnet test StoryVoice.sln --configuration Release --no-build --no-restore
       - run: >-
           dotnet ef migrations has-pending-model-changes

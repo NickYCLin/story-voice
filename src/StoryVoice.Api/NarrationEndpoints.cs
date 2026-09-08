@@ -81,6 +81,24 @@ public static class NarrationEndpoints
                 : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
         });
 
+        jobGroup.MapGet("/progress", async (
+            Guid jobId, HttpContext httpContext, INarrationService service, CancellationToken cancellationToken) =>
+        {
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            var progress = await service.GetListeningProgressAsync(jobId, cancellationToken);
+            return progress is null ? Results.NotFound() : Results.Ok(progress);
+        });
+
+        jobGroup.MapPut("/progress", async (
+            Guid jobId, SaveListeningProgressRequest request, HttpContext httpContext,
+            INarrationService service, CancellationToken cancellationToken) =>
+        {
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            var result = await service.SaveListeningProgressAsync(jobId, request, cancellationToken);
+            if (result is null) return Results.NotFound();
+            return result.Conflict ? Results.Conflict(result.Progress) : Results.Ok(result.Progress);
+        }).AddEndpointFilter<AntiforgeryEndpointFilter>();
+
         return endpoints;
     }
 }

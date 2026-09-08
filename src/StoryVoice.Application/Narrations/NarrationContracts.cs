@@ -22,6 +22,13 @@ public sealed record NarrationJobResponse(
 
 public sealed record NarrationAudioDescriptor(string AbsolutePath, string ContentType);
 
+public sealed record SaveListeningProgressRequest(long PositionMs, long DurationMs, Guid? ExpectedVersion);
+
+public sealed record ListeningProgressResponse(
+    Guid JobId, long PositionMs, long DurationMs, Guid? Version, DateTimeOffset? UpdatedAt);
+
+public sealed record SaveListeningProgressResult(ListeningProgressResponse Progress, bool Conflict);
+
 /// <summary>
 /// The playback timeline for one completed narration job. <see cref="TextAvailable"/> is false
 /// when the book's chapters changed after the audio was composed — timing and chapter navigation

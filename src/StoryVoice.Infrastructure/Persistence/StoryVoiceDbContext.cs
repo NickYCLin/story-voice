@@ -78,6 +78,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<NarrationTimeline> NarrationTimelines => Set<NarrationTimeline>();
 
+    public DbSet<ListeningProgress> ListeningProgress => Set<ListeningProgress>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

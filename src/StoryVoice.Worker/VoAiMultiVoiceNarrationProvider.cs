@@ -93,7 +93,8 @@ public sealed class VoAiMultiVoiceNarrationProvider(
                         audioSegments.Add(new VoAiAudioSegment(
                             wavPath,
                             turn.Volume,
-                            chunkIndex == 0 ? turn.PauseBeforeMs : 0));
+                            chunkIndex == 0 ? turn.PauseBeforeMs : 0,
+                            TurnIndex: turnIndex));
                         completedChunks++;
                         if (progressCallback is not null)
                         {
@@ -104,18 +105,18 @@ public sealed class VoAiMultiVoiceNarrationProvider(
                     }
                 }
 
-                await composer.ComposeAsync(audioSegments, outputPath, cancellationToken);
+                var result = await composer.ComposeAsync(audioSegments, outputPath, cancellationToken);
                 if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)
                 {
                     throw new InvalidOperationException("VoAI audio composition produced no MP3 output.");
                 }
+                return result;
             }
             finally
             {
                 TryDeleteDirectory(workDirectory);
             }
 
-            return MultiVoiceSynthesisResult.None;
         }
         catch (OperationCanceledException)
         {

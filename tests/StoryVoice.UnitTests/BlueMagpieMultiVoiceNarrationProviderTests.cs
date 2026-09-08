@@ -62,7 +62,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
 
         try
         {
-            await provider.SynthesizeAsync(
+            var result = await provider.SynthesizeAsync(
                 request,
                 outputPath,
                 (value, _) =>
@@ -90,6 +90,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                     Assert.Equal(BlueMagpieOptions.MaleVoice, item.Voice);
                 });
             Assert.Equal(48_000, composer.OutputSampleRate);
+            Assert.Same(composer.Result, result);
+            Assert.Equal(new[] { 0, 0, 1 }, composer.Segments.Select(segment => segment.TurnIndex));
             Assert.Collection(
                 composer.Segments,
                 item =>
@@ -702,8 +704,9 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
     {
         public IReadOnlyList<FfmpegAudioSegment> Segments { get; private set; } = [];
         public int OutputSampleRate { get; private set; }
+        public MultiVoiceSynthesisResult Result { get; } = new([new(0, 250, 2000), new(1, 2750, 1000)]);
 
-        public async Task ComposeAsync(
+        public async Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<FfmpegAudioSegment> segments,
             string outputPath,
             int outputSampleRate,
@@ -717,17 +720,18 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 outputPath,
                 Encoding.ASCII.GetBytes("ID3-mock"),
                 cancellationToken);
+            return Result;
         }
     }
 
     private sealed class ThrowingComposer : IFfmpegAudioComposer
     {
-        public Task ComposeAsync(
+        public Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<FfmpegAudioSegment> segments,
             string outputPath,
             int outputSampleRate,
             CancellationToken cancellationToken) =>
-            Task.FromException(new InvalidOperationException("synthetic composer failure"));
+            Task.FromException<MultiVoiceSynthesisResult>(new InvalidOperationException("synthetic composer failure"));
     }
 
     private sealed class EphemeralChunkCache : IBlueMagpieChunkCache

@@ -71,17 +71,20 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             }
 
             var sequence = new List<string>();
+            var timing = new NarrationTimingAccumulator();
             var completed = 0;
             for (var turnIndex = 0; turnIndex < turnChunks.Length; turnIndex++)
             {
                 var (turn, chunks) = turnChunks[turnIndex];
                 var reference = parsedReferences[turnIndex];
+                double pauseSeconds = 0;
 
                 if (turn.PauseBeforeMs > 0)
                 {
                     var silencePath = Path.Combine(workDirectory, $"{turnIndex:0000}-pause.mp3");
                     await GenerateSilenceAsync(silencePath, turn.PauseBeforeMs, cancellationToken);
                     sequence.Add(silencePath);
+                    pauseSeconds = await ProbeDurationSecondsAsync(silencePath, cancellationToken);
                 }
 
                 for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
@@ -90,6 +93,9 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
                     var partPath = Path.Combine(workDirectory, $"{turnIndex:0000}-{chunkIndex:0000}.mp3");
                     await SynthesizeChunkAsync(reference, turn, chunks[chunkIndex], partPath, workDirectory, cancellationToken);
                     sequence.Add(partPath);
+                    var chunkSeconds = await ProbeDurationSecondsAsync(partPath, cancellationToken);
+                    timing.Add(turnIndex, chunkSeconds + pauseSeconds, pauseSeconds * 1000);
+                    pauseSeconds = 0;
                     completed++;
                     if (progressCallback is not null)
                     {
@@ -101,19 +107,19 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             var candidate = Path.Combine(workDirectory, "complete.mp3");
             await ConcatAsync(sequence, candidate, cancellationToken);
             var duration = await ProbeDurationSecondsAsync(candidate, cancellationToken);
-            if (duration <= 0 || !File.Exists(candidate) || new FileInfo(candidate).Length < 1)
+            if (!double.IsFinite(duration) || duration <= 0 || !File.Exists(candidate) || new FileInfo(candidate).Length < 1)
             {
                 throw new InvalidOperationException("3wa 聲線合成沒有產生可用音訊。");
             }
 
-            File.Copy(candidate, outputPath, overwrite: true);
+            File.Move(candidate, outputPath, overwrite: true);
+            return timing.ToResult(turnChunks.Length);
         }
         finally
         {
             TryDeleteDirectory(workDirectory, logger);
         }
 
-        return MultiVoiceSynthesisResult.None;
     }
 
     private async Task SynthesizeChunkAsync(
@@ -367,7 +373,7 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
         }
 
         var listPath = Path.Combine(Path.GetDirectoryName(outputPath)!, "concat_list.txt");
-        var lines = parts.Select(part => $"file '{part.Replace("'", "'\\''")}'");
+        var lines = parts.Select(part => $"file '{part.Replace('\\', '/').Replace("'", "'\\''")}'");
         await File.WriteAllLinesAsync(listPath, lines, cancellationToken);
         await RunFfmpegAsync(
             ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outputPath],

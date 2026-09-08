@@ -192,6 +192,69 @@ internal sealed class NarrationService(
         }
     }
 
+    public async Task<ListeningProgressResponse?> GetListeningProgressAsync(
+        Guid jobId, CancellationToken cancellationToken)
+    {
+        if (!await CanSaveListeningProgressAsync(jobId, cancellationToken)) return null;
+        var progress = await dbContext.ListeningProgress.AsNoTracking().SingleOrDefaultAsync(
+            item => item.NarrationJobId == jobId && item.OwnerId == currentUser.UserId, cancellationToken);
+        return ToProgressResponse(jobId, progress);
+    }
+
+    public async Task<SaveListeningProgressResult?> SaveListeningProgressAsync(
+        Guid jobId, SaveListeningProgressRequest request, CancellationToken cancellationToken)
+    {
+        if (!await CanSaveListeningProgressAsync(jobId, cancellationToken)) return null;
+        var progress = await dbContext.ListeningProgress.SingleOrDefaultAsync(
+            item => item.NarrationJobId == jobId && item.OwnerId == currentUser.UserId, cancellationToken);
+        if (progress?.Version != request.ExpectedVersion)
+            return new(ToProgressResponse(jobId, progress), Conflict: true);
+
+        var creating = progress is null;
+        if (progress is null)
+        {
+            progress = ListeningProgress.Create(currentUser.UserId, jobId, request.PositionMs, request.DurationMs);
+            dbContext.ListeningProgress.Add(progress);
+        }
+        else
+        {
+            progress.Update(request.PositionMs, request.DurationMs);
+        }
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new(ToProgressResponse(jobId, progress), Conflict: false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            dbContext.Entry(progress).State = EntityState.Detached;
+            return await ReadProgressConflictAsync(jobId, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (creating
+            && exception.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
+        {
+            dbContext.Entry(progress).State = EntityState.Detached;
+            return await ReadProgressConflictAsync(jobId, cancellationToken);
+        }
+    }
+
+    private Task<bool> CanSaveListeningProgressAsync(Guid jobId, CancellationToken cancellationToken) =>
+        OwnedRegularJobs().AnyAsync(job => job.Id == jobId && job.Status == NarrationJobStatus.Completed
+            && job.AudioRelativePath != null && job.AudioBytes > 0
+            && dbContext.Books.Any(book => book.Id == job.BookId && book.OwnerId == currentUser.UserId && !book.IsArchived),
+            cancellationToken);
+
+    private async Task<SaveListeningProgressResult> ReadProgressConflictAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var latest = await dbContext.ListeningProgress.AsNoTracking().SingleOrDefaultAsync(
+            item => item.NarrationJobId == jobId && item.OwnerId == currentUser.UserId, cancellationToken);
+        return new(ToProgressResponse(jobId, latest), Conflict: true);
+    }
+
+    private static ListeningProgressResponse ToProgressResponse(Guid jobId, ListeningProgress? progress) =>
+        new(jobId, progress?.PositionMs ?? 0, progress?.DurationMs ?? 0, progress?.Version, progress?.UpdatedAt);
+
     private async Task<IReadOnlyDictionary<Guid, string>> LoadCharacterNamesAsync(
         Guid? seriesId,
         NarrationTimelineDocument document,

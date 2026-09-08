@@ -7,6 +7,7 @@ import {
 } from 'react'
 
 import { localize, useLocale } from '../i18n'
+import type { ListeningProgress } from '../useListeningProgress'
 
 export type NarrationTimelineChapter = {
   chapterId: string
@@ -43,6 +44,8 @@ type AudioPlayerProps = {
   onNext?: () => void
   timeline?: NarrationTimeline | null
   className?: string
+  serverProgress?: ListeningProgress
+  onSaveProgress?: (positionMs: number, durationMs: number) => void
 }
 
 /** Last turn whose startMs is at or before the playhead; -1 before the first turn starts. */
@@ -90,6 +93,8 @@ function AudioPlayerSession({
   onNext,
   timeline = null,
   className = '',
+  serverProgress,
+  onSaveProgress,
 }: AudioPlayerProps) {
   const { locale } = useLocale()
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -105,6 +110,8 @@ function AudioPlayerSession({
   const [playbackError, setPlaybackError] = useState(false)
   const lastPersistedAt = useRef(0)
   const progressChanged = useRef(false)
+  const saveToServer = useRef(onSaveProgress)
+  useEffect(() => { saveToServer.current = onSaveProgress }, [onSaveProgress])
 
   const effectiveStorageKey = storageKey ? `storyvoice.progress.${storageKey}` : null
 
@@ -172,11 +179,23 @@ function AudioPlayerSession({
     }
   }, [effectiveStorageKey])
 
+  useEffect(() => {
+    // A late read may offer a resume position, but never move a player already in use.
+    // A server record at the beginning/end also overrides an old local resume marker.
+    if (!serverProgress?.version || progressChanged.current) return
+    const time = serverProgress.positionMs / 1000
+    const dur = serverProgress.durationMs / 1000
+    const actualDuration = audioRef.current?.duration
+    const withinAudio = !Number.isFinite(actualDuration) || time < actualDuration! - 5
+    setSavedResumeTime(time > 3 && time < dur - 5 && withinAudio ? time : null)
+  }, [serverProgress])
+
   // Save playback position periodically
   const persistProgress = useCallback((time: number, dur: number) => {
     if (!effectiveStorageKey || typeof window === 'undefined') return
     if (!progressChanged.current) return
     if (!Number.isFinite(time) || !Number.isFinite(dur) || dur <= 0) return
+    saveToServer.current?.(Math.round(Math.max(0, Math.min(time, dur)) * 1000), Math.round(dur * 1000))
     try {
       if (time > 2 && dur > 0 && time < dur - 2) {
         window.localStorage.setItem(
@@ -195,11 +214,14 @@ function AudioPlayerSession({
     const audio = audioRef.current
     if (!audio) return
     const save = () => persistProgress(audio.currentTime, audio.duration)
+    const saveWhenHidden = () => { if (document.visibilityState === 'hidden') save() }
     window.addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', saveWhenHidden)
     return () => {
       save()
       audio.pause()
       window.removeEventListener('pagehide', save)
+      document.removeEventListener('visibilitychange', saveWhenHidden)
     }
   }, [persistProgress])
 
@@ -295,9 +317,11 @@ function AudioPlayerSession({
         className="sr-only"
         tabIndex={-1}
         onDurationChange={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? Math.max(0, e.currentTarget.duration) : 0)}
-        onEnded={() => {
+        onEnded={(e) => {
           setIsPlaying(false)
           setSavedResumeTime(null)
+          progressChanged.current = true
+          persistProgress(e.currentTarget.duration, e.currentTarget.duration)
           if (effectiveStorageKey) {
             try { window.localStorage.removeItem(effectiveStorageKey) } catch { /* ignore */ }
           }

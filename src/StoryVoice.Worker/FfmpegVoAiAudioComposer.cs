@@ -9,7 +9,7 @@ public sealed class FfmpegVoAiAudioComposer(
     ILogger<FfmpegVoAiAudioComposer> logger,
     IOptions<AudioComposerOptions>? composerOptions = null) : IVoAiAudioComposer, IFfmpegAudioComposer
 {
-    public Task ComposeAsync(
+    public Task<MultiVoiceSynthesisResult> ComposeAsync(
         IReadOnlyList<VoAiAudioSegment> segments,
         string outputPath,
         CancellationToken cancellationToken) =>
@@ -17,19 +17,20 @@ public sealed class FfmpegVoAiAudioComposer(
             segments.Select(segment => new FfmpegAudioSegment(
                 segment.InputWavPath,
                 segment.Volume,
-                segment.PauseBeforeMs)).ToArray(),
+                segment.PauseBeforeMs,
+                TurnIndex: segment.TurnIndex)).ToArray(),
             outputPath,
             options.Value.SampleRate,
             cancellationToken);
 
-    Task IFfmpegAudioComposer.ComposeAsync(
+    Task<MultiVoiceSynthesisResult> IFfmpegAudioComposer.ComposeAsync(
         IReadOnlyList<FfmpegAudioSegment> segments,
         string outputPath,
         int outputSampleRate,
         CancellationToken cancellationToken) =>
         ComposeCoreAsync(segments, outputPath, outputSampleRate, cancellationToken);
 
-    private async Task ComposeCoreAsync(
+    private async Task<MultiVoiceSynthesisResult> ComposeCoreAsync(
         IReadOnlyList<FfmpegAudioSegment> segments,
         string outputPath,
         int outputSampleRate,
@@ -60,6 +61,7 @@ public sealed class FfmpegVoAiAudioComposer(
         try
         {
             var normalizedPaths = new List<string>(segments.Count);
+            var timing = new NarrationTimingAccumulator();
             for (var index = 0; index < segments.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -88,6 +90,9 @@ public sealed class FfmpegVoAiAudioComposer(
                     ],
                     cancellationToken);
                 normalizedPaths.Add(normalizedPath);
+                // Measure the PCM after resampling, volume and leading silence are applied.
+                timing.Add(segment.TurnIndex,
+                    await ProbeDurationSecondsAsync(normalizedPath, cancellationToken), segment.PauseBeforeMs);
                 if (segment.DeleteInputAfterNormalization)
                 {
                     File.Delete(segment.InputWavPath);
@@ -124,7 +129,7 @@ public sealed class FfmpegVoAiAudioComposer(
             }
 
             var duration = await ProbeDurationSecondsAsync(candidatePath, cancellationToken);
-            if (duration <= 0)
+            if (!double.IsFinite(duration) || duration <= 0)
             {
                 throw new InvalidOperationException("Audio composition produced a zero-duration MP3.");
             }
@@ -132,6 +137,7 @@ public sealed class FfmpegVoAiAudioComposer(
             // candidatePath and outputPath share a filesystem, so the final rename exposes either
             // the previous complete artifact or the new complete artifact, never a partial MP3.
             File.Move(candidatePath, outputPath, overwrite: true);
+            return timing.ToResult(segments[^1].TurnIndex + 1);
         }
         finally
         {
