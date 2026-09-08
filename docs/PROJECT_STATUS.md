@@ -1,12 +1,23 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-08（帳號續播與多引擎播放時間軸）
+最後更新：2026-09-08（帳號續播、播放時間軸與 BlueMagpie 批次恢復）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 BlueMagpie 失敗批次恢復
+
+- 系列頁重新開啟時會載入最近批次；BlueMagpie 批次因暫時性 provider／timeout／lease 錯誤耗盡重試後，可重新確認書籍處理權利並接續原工作。已完成冊次保留音訊，失敗與被連帶取消的冊次重新排程，不會自動啟用成品。
+- 恢復沿用 job、cast 與 confirmed plan ID，因此仍可使用原本的 chunk cache。會重新檢查正式 admission gate、chunk／音訊預算，以及正文、劇本、系列成員、目前啟用版本、聲線與合成設定；任一版本已變更便要求建立新批次，永久 contract 錯誤也不可直接恢復。
+- PostgreSQL 依系列、批次、工作順序鎖定，重複要求不會建立另一份工作。Worker 取得批次鎖後重讀工作狀態，避免先前的失敗回報把剛恢復的批次再次標成失敗。
+- UI 以中文顯示批次狀態，恢復期間停用重複操作；切換系列會取消輪詢並忽略晚到的批次清單、重試與啟用回應。清單與重試 API 維持登入、owner isolation 與 CSRF 邊界。
+
+本機驗證：16 項批次 domain 測試與 45 項相關整合測試通過，包含真實 PostgreSQL 併發恢復、延遲回報與既有啟用流程；前端 164 項靜態檢查、37 項互動測試、lint 與建置通過。Chromium 以合成資料和模擬 API 檢查 1440／390／320px 恢復畫面、權利勾選及恢復後狀態，未使用正式帳號或 GPU。
+
+這項程式修改不代表已啟用正式長篇生成；BlueMagpie formal flag 仍預設為 `false`，GPU 長時間運行與模型品質需要另外驗收。
 
 ## 2026-09-08 續播與播放時間軸
 
@@ -182,8 +193,8 @@ JSON/音訊回應大小。
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart
   canary 只重算缺少 chunks；另一次 36-chunk cold benchmark 在約 6.15 分鐘內產生
   690.58 秒 staged 音訊（RTF 0.534），沒有重啟、沒有啟用測試音訊，且測試後 formal
-  flag 已關閉。完整書籍啟用前仍須補 exhausted-attempt 後的同工作恢復、結構化長跑
-  metrics 與 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
+  flag 已關閉。exhausted-attempt 後的同工作恢復已實作；完整書籍啟用前仍須補結構化
+  長跑 metrics 與 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
   重新散布或商業使用；`BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 預設並應持續為 `false`。
 - BlueMagpie 自架 canary 不需要 VoAI；`VOAI_API_KEY` 與 `VOAI_PAID_API_KEY` 都必須保持
   空值。Worker 只認獨立 opt-in 的 `VOAI_PAID_API_KEY`，避免舊 key 意外產生付費呼叫。
@@ -204,7 +215,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
 | 跨瀏覽器驗收 | Safari／Firefox 與真實行動裝置媒體播放 | CI 已有 DOM 互動回歸；本輪 Chromium 實測不代表所有瀏覽器或真實手機皆已驗收 |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
-| BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
+| BlueMagpie 正式長篇 | 結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
 | 長期有聲書 UX | automatic casting、平行生成、cost logging | 單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |

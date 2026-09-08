@@ -21,7 +21,7 @@ namespace StoryVoice.Infrastructure.Persistence;
 /// changes active playback pointers; only PostgreSqlCastEpochActivationPublisher can publish a
 /// completed cohort.
 /// </summary>
-internal sealed class SeriesNarrationService(
+internal sealed partial class SeriesNarrationService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
     ChineseSpeechSegmenter segmenter,

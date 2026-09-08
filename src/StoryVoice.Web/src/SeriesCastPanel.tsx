@@ -94,8 +94,13 @@ type SeriesDetails = {
 
 type RebuildBatch = {
   id: string
-  status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
+  status: 'Draft' | 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
   members: Array<{ id: string; bookId: string; status: string; stagedNarrationJobId: string | null }>
+}
+
+const rebuildStatusLabels: Record<string, string> = {
+  Draft: '待排程', Pending: '待排程', Building: '配音中', Ready: '已完成',
+  ReadyToActivate: '待啟用', Activated: '已啟用', Failed: '配音失敗',
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -165,6 +170,8 @@ export function SeriesCastPanel() {
   const [bookDetails, setBookDetails] = useState<Record<string, BookDetails>>({})
   const [draftsByChapter, setDraftsByChapter] = useState<Record<string, SpeechPlanDraft>>({})
   const [batch, setBatch] = useState<RebuildBatch | null>(null)
+  const [retryRightsAttested, setRetryRightsAttested] = useState(false)
+  const [retryingBatch, setRetryingBatch] = useState(false)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
   const [expandedCharacterId, setExpandedCharacterId] = useState<string | null>(null)
   const [characterProfileSelections, setCharacterProfileSelections] = useState<Record<string, string>>({})
@@ -200,6 +207,10 @@ export function SeriesCastPanel() {
     // 側欄高亮 B、實際 details 是 A，之後所有表單都寫到錯的系列。
     const generation = detailsGenerationRef.current + 1
     detailsGenerationRef.current = generation
+    setRetryingBatch(false)
+    setRetryRightsAttested(false)
+    setActivateDialogOpen(false)
+    setBatch(null)
     if (!seriesId) {
       setDetails(null)
       return
@@ -216,6 +227,13 @@ export function SeriesCastPanel() {
       setBookId('')
       setVolumeLabel('')
       setBatch(null)
+      void fetchJson<RebuildBatch[]>(`/api/series/${seriesId}/narration-rebuilds`)
+        .then((batches) => {
+          if (detailsGenerationRef.current === generation) setBatch((current) => current ?? batches[0] ?? null)
+        })
+        .catch(() => {
+          if (detailsGenerationRef.current === generation) setMessage('無法讀取最近配音批次，請重新整理後再查看。')
+        })
       setExpandedCharacterId(null)
       setCharacterProfileSelections(Object.fromEntries(
         detail.characters.map((character) => [character.id, character.characterProfileId ?? '']),
@@ -356,17 +374,20 @@ export function SeriesCastPanel() {
   }, [details])
 
   useEffect(() => {
-    if (!details || !batch || batch.status !== 'Building') return
+    if (!details || details.id !== selectedSeriesId || !batch || batch.status !== 'Building') return
     // 批次可能在輪詢期間被清除（例如另一個分頁重建時清掉 Failed 批次，GET 變 404）；
     // 連續失敗三次就停止追蹤，不要無限空轉。
     let consecutiveFailures = 0
+    const controller = new AbortController()
     const timer = window.setInterval(() => {
-      fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}`)
+      fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}`, { signal: controller.signal })
         .then((updated) => {
+          if (controller.signal.aborted) return
           consecutiveFailures = 0
           setBatch(updated)
         })
         .catch(() => {
+          if (controller.signal.aborted) return
           consecutiveFailures += 1
           if (consecutiveFailures >= 3) {
             window.clearInterval(timer)
@@ -375,8 +396,8 @@ export function SeriesCastPanel() {
           }
         })
     }, 2_000)
-    return () => window.clearInterval(timer)
-  }, [batch, details])
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [batch, details, selectedSeriesId])
 
   const eligibleBooks = useMemo(() => {
     const memberIds = new Set(details?.books.map((member) => member.bookId) ?? [])
@@ -799,7 +820,8 @@ export function SeriesCastPanel() {
   }
 
   async function activateBatch() {
-    if (!details || !batch) return
+    if (!details || details.id !== selectedSeriesId || !batch) return
+    const generation = detailsGenerationRef.current
     setActivateDialogOpen(false)
     try {
       const activated = await fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}/activate`, {
@@ -807,11 +829,31 @@ export function SeriesCastPanel() {
         csrfToken,
         body: {},
       })
+      if (detailsGenerationRef.current !== generation) return
       setBatch(activated)
-      setMessage('已原子啟用完整 series cast epoch；舊音訊保留為歷史版本。')
+      setMessage('已啟用整個系列的新配音，舊音訊保留為歷史版本。')
       void loadDetails(details.id)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '尚未符合啟用條件。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '尚未符合啟用條件。')
+    }
+  }
+
+  async function retryBatch() {
+    if (!details || details.id !== selectedSeriesId || !batch || !retryRightsAttested || retryingBatch) return
+    const generation = detailsGenerationRef.current
+    setRetryingBatch(true)
+    try {
+      const resumed = await fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}/retry`, {
+        method: 'POST', csrfToken, body: { rightsAttested: true },
+      })
+      if (detailsGenerationRef.current !== generation) return
+      setBatch(resumed)
+      setRetryRightsAttested(false)
+      setMessage('已接續原配音工作，會重用仍有效的已完成片段。全部完成後仍需由你啟用。')
+    } catch (error) {
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '無法恢復配音工作。')
+    } finally {
+      if (detailsGenerationRef.current === generation) setRetryingBatch(false)
     }
   }
 
@@ -1159,13 +1201,43 @@ export function SeriesCastPanel() {
               )}
               {details.books.length > 0 && reviewEntries.length === 0 && <div className="library-state mt-8">正在讀取僅屬於你的章節與劇本狀態…</div>}
 
-              {batch && <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="staged rebuild 狀態"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-700">Staged rebuild</p><h2 className="mt-1 font-serif text-2xl text-stone-900">{batch.status}</h2></div>{batch.status === 'ReadyToActivate' && <button className="secondary-button" onClick={() => setActivateDialogOpen(true)} type="button">人工啟用完整系列音訊</button>}</div><ul className="mt-4 space-y-2">{batch.members.map((member) => <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}><span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span><span className="text-xs text-stone-500">{member.status}</span></li>)}</ul></section>}
+              {batch && (
+                <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="配音批次狀態">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-amber-700">最近的配音批次</p>
+                      <h2 className="mt-1 font-serif text-2xl text-stone-900">{rebuildStatusLabels[batch.status] ?? '狀態更新中'}</h2>
+                    </div>
+                    {batch.status === 'ReadyToActivate' && <button className="secondary-button" onClick={() => setActivateDialogOpen(true)} type="button">啟用整個系列的配音</button>}
+                  </div>
+                  <ul className="mt-4 space-y-2">
+                    {batch.members.map((member) => (
+                      <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}>
+                        <span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span>
+                        <span className="text-xs text-stone-500">{rebuildStatusLabels[member.status] ?? '狀態更新中'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {batch?.status === 'Failed' && details.narratorProvider === BLUE_MAGPIE_PROVIDER && (
+                <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5" aria-label="恢復配音">
+                  <p className="text-sm leading-6 text-stone-700">暫時性錯誤可接續原工作，保留已完成的音訊與片段快取。若正文、劇本或聲線已修改，請建立新批次。</p>
+                  <label className="mt-3 flex items-start gap-2 text-sm text-stone-700">
+                    <input checked={retryRightsAttested} disabled={retryingBatch} onChange={(event) => setRetryRightsAttested(event.target.checked)} type="checkbox" />
+                    我確認仍有權處理這些書籍，並同意接續產生配音。
+                  </label>
+                  <button className="secondary-button mt-4" disabled={!retryRightsAttested || retryingBatch || details.id !== selectedSeriesId} onClick={() => void retryBatch()} type="button">
+                    {retryingBatch ? '正在恢復…' : '接續未完成配音'}
+                  </button>
+                </section>
+              )}
             </>
           )}
         </section>
       </section>
       <p aria-live="polite" className="mt-5 min-h-5 text-sm text-stone-500">{message}</p>
-      <ConfirmDialog confirmLabel="啟用完整系列" description="這會在單一交易中切換整個系列的 current audio；只有所有 staged 冊次都完成時才能成功。" onCancel={() => setActivateDialogOpen(false)} onConfirm={() => void activateBatch()} open={activateDialogOpen} title="確定啟用完整多角色系列音訊？" />
+      <ConfirmDialog confirmLabel="啟用完整系列" description="所有冊次都完成後，會一起切換成這次產生的配音。舊音訊保留為歷史版本。" onCancel={() => setActivateDialogOpen(false)} onConfirm={() => void activateBatch()} open={activateDialogOpen} title="確定啟用整個系列的新配音？" />
     </main>
   )
 }

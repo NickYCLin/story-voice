@@ -77,9 +77,14 @@ internal sealed class StagedNarrationBatchProgressService(StoryVoiceDbContext db
             return;
         }
 
+        // A recovery can requeue this job while an older terminal callback waits for the batch
+        // lock. Re-read after acquiring that lock so the stale failure cannot fail it again.
+        var currentStatus = await dbContext.NarrationJobs.AsNoTracking()
+            .Where(candidate => candidate.Id == job.Id && candidate.RebuildBatchId == batch.Id)
+            .Select(candidate => (NarrationJobStatus?)candidate.Status).SingleOrDefaultAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var changed = false;
-        switch (job.Status)
+        switch (currentStatus)
         {
             case NarrationJobStatus.Completed when member.Status == SeriesCastRebuildMemberStatus.Building:
                 batch.MarkMemberReady(member.SeriesBookId, now);

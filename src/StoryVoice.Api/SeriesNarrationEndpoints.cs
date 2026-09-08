@@ -10,6 +10,29 @@ public static class SeriesNarrationEndpoints
             .WithTags("SeriesNarration")
             .RequireAuthorization(StoryVoicePolicies.UserSession);
 
+        group.MapGet("/", async (Guid seriesId, HttpContext httpContext, ISeriesNarrationService service, CancellationToken cancellationToken) =>
+        {
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            var batches = await service.ListRebuildsAsync(seriesId, cancellationToken);
+            return batches is null ? Results.NotFound() : Results.Ok(batches);
+        })
+        .WithName("ListSeriesNarrationRebuilds")
+        .Produces<IReadOnlyList<SeriesNarrationRebuildResponse>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("/{batchId:guid}/retry", async (
+            Guid seriesId, Guid batchId, CreateSeriesNarrationRebuildRequest request,
+            ISeriesNarrationService service, CancellationToken cancellationToken) =>
+        {
+            var batch = await service.RetryRebuildAsync(seriesId, batchId, request, cancellationToken);
+            return batch is null ? Results.NotFound() : Results.Ok(batch);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("RetrySeriesNarrationRebuild")
+        .Produces<SeriesNarrationRebuildResponse>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound);
+
         group.MapPost("/", async (
             Guid seriesId,
             CreateSeriesNarrationRebuildRequest request,
@@ -34,9 +57,11 @@ public static class SeriesNarrationEndpoints
         group.MapGet("/{batchId:guid}", async (
             Guid seriesId,
             Guid batchId,
+            HttpContext httpContext,
             ISeriesNarrationService service,
             CancellationToken cancellationToken) =>
         {
+            httpContext.Response.Headers.CacheControl = "private, no-store";
             var batch = await service.GetRebuildAsync(seriesId, batchId, cancellationToken);
             return batch is null ? Results.NotFound() : Results.Ok(batch);
         })
