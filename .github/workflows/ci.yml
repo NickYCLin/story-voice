@@ -109,3 +109,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
+      - run: docker compose -f compose.yml -f compose.metrics.yml --profile metrics config --quiet
+
+  metrics:
+    runs-on: ubuntu-latest
+    env:
+      STORYVOICE_METRICS_PORT: 19090
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Collector and Prometheus configuration
+        run: |
+          docker compose -p storyvoice-metrics-ci -f compose.metrics.yml --profile metrics run --rm --no-deps metrics-collector validate --config=/etc/storyvoice/collector.yml
+          docker compose -p storyvoice-metrics-ci -f compose.metrics.yml --profile metrics run --rm --no-deps --entrypoint /bin/promtool metrics-prometheus check config /etc/storyvoice/prometheus.yml
+          docker compose -p storyvoice-metrics-ci -f compose.metrics.yml --profile metrics run --rm --no-deps --entrypoint /bin/promtool metrics-prometheus test rules /etc/storyvoice/alerts.test.yml
+      - name: Check synthetic OTLP ingestion and filtering
+        run: |
+          docker compose -p storyvoice-metrics-ci -f compose.metrics.yml -f ops/metrics/compose.test.yml --profile metrics up -d
+          python3 tests/metrics/test_stack.py
+      - name: Remove test stack
+        if: always()
+        run: docker compose -p storyvoice-metrics-ci -f compose.metrics.yml --profile metrics down --volumes

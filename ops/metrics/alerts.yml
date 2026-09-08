@@ -1,0 +1,34 @@
+groups:
+  - name: storyvoice
+    rules:
+      - alert: StoryVoiceCollectorUnavailable
+        expr: max(up{job="storyvoice-collector"}) == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: metrics-collector
+        annotations:
+          summary: 監測收集端持續無法讀取
+      - alert: StoryVoiceWorkerMetricsMissing
+        expr: absent(storyvoice_bluemagpie_active_attempts{job="storyvoice-worker"}) and on() (max(up{job="storyvoice-collector"}) == 1)
+        for: 10m
+        labels:
+          severity: warning
+          service: storyvoice-worker
+        annotations:
+          summary: 收集端可用但沒有 Worker 指標
+      - alert: StoryVoiceBlueMagpieRepeatedFailures
+        expr: |
+          sum(increase(storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",outcome=~"failed|provider_unavailable|cache_capacity"}[15m])) >= 3
+          and
+          (
+            sum(increase(storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",outcome=~"failed|provider_unavailable|cache_capacity"}[15m]))
+            /
+            sum(increase(storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",outcome=~"success|failed|provider_unavailable|cache_capacity"}[15m]))
+          ) >= 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: storyvoice-worker
+        annotations:
+          summary: BlueMagpie 在短時間內多次合成失敗

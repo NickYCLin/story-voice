@@ -63,7 +63,8 @@ WORKER_METRICS_EXPORT_INTERVAL_SECONDS=30
 WORKER_METRICS_EXPORT_TIMEOUT_SECONDS=5
 ```
 
-`otel-collector` 是示意服務名稱；目前 Compose 不會自動建立 Collector、資料儲存或儀表板。
+`otel-collector` 是示意服務名稱；另外提供選用的 `compose.metrics.yml`，內含 Collector、Prometheus
+與經測試的告警規則，服務名稱為 `metrics-collector`。啟動與驗證見 [METRICS_STACK.md](METRICS_STACK.md)。
 端點必須完整包含 `/v1/metrics`，可帶前置路徑，但不能含帳密、query 或 fragment。
 遠端傳輸可使用 HTTPS；此入口不設定授權 header，需要外送至有驗證的監測服務時，由
 受信任的內網 Collector 處理。不要將正式端點或監測憑證寫入 repository。
