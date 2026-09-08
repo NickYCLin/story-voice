@@ -34,6 +34,84 @@ beforeEach(() => {
 })
 
 describe('播放器實際互動', () => {
+  it('解碼失敗後重試會恢復選定位置，不因重新載入音檔回到開頭', async () => {
+    const { container } = render(player())
+    const audio = loadAudio(container)
+    let error: { code: number } | null = { code: 3 }
+    let readyState = 0
+    let seeking = false
+    let time = 119
+    Object.defineProperties(audio, {
+      error: { configurable: true, get: () => error },
+      readyState: { configurable: true, get: () => readyState },
+      seeking: { configurable: true, get: () => seeking },
+      currentTime: { configurable: true, get: () => time, set: (value: number) => { time = value; seeking = true } },
+    })
+    vi.mocked(audio.load).mockImplementation(() => { error = null; time = 0 })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '播放', exact: true }))
+      fireEvent.click(screen.getByRole('button', { name: '播放', exact: true }))
+    })
+    expect(audio.load).toHaveBeenCalledTimes(1)
+    expect(audio.play).not.toHaveBeenCalled()
+    readyState = 1
+    await act(async () => fireEvent.loadedMetadata(audio))
+    expect(audio.currentTime).toBe(119)
+    expect(audio.play).not.toHaveBeenCalled()
+    seeking = false
+    await act(async () => fireEvent.seeked(audio))
+    expect(audio.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('跳轉尚未完成時先等 seeked，再從指定位置播放', async () => {
+    const { container } = render(player())
+    const audio = loadAudio(container)
+    let seeking = true
+    Object.defineProperty(audio, 'seeking', { configurable: true, get: () => seeking })
+    audio.currentTime = 119
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '播放', exact: true })))
+    expect(audio.play).not.toHaveBeenCalled()
+    // An older seek event must not resume while the latest seek is still pending.
+    await act(async () => fireEvent.seeked(audio))
+    expect(audio.play).not.toHaveBeenCalled()
+    seeking = false
+    await act(async () => fireEvent.seeked(audio))
+    expect(audio.play).toHaveBeenCalledTimes(1)
+    expect(audio.currentTime).toBe(119)
+  })
+
+  it('離開頁面會取消等待中的跳轉，不讓舊音檔稍後自行播放', async () => {
+    const { container, unmount } = render(player())
+    const audio = loadAudio(container)
+    Object.defineProperty(audio, 'seeking', { configurable: true, value: true })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '播放', exact: true })))
+    unmount()
+    await act(async () => fireEvent.seeked(audio))
+    expect(audio.play).not.toHaveBeenCalled()
+  })
+
+  it('連按播放不會重複等待，跳轉逾時後可再試', async () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(player())
+      const audio = loadAudio(container)
+      let seeking = true
+      Object.defineProperty(audio, 'seeking', { configurable: true, get: () => seeking })
+      const play = screen.getByRole('button', { name: '播放', exact: true })
+      await act(async () => { fireEvent.click(play); fireEvent.click(play) })
+      await act(async () => vi.advanceTimersByTimeAsync(10_000))
+      expect(audio.play).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert').textContent).toContain('無法播放')
+      await act(async () => { fireEvent.click(play); fireEvent.click(play) })
+      seeking = false
+      await act(async () => fireEvent.seeked(audio))
+      expect(audio.play).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('進度變更立即跳轉，鍵盤操作不依賴滑鼠或觸控放開事件', () => {
     const { container } = render(player())
     const audio = loadAudio(container)

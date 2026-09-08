@@ -67,6 +67,30 @@ function findTimelineIndex(startsMs: number[], positionMs: number): number {
 
 const SPEED_OPTIONS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
+function waitForMedia(audio: HTMLAudioElement, event: 'loadedmetadata' | 'seeked', signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      clearTimeout(timeout)
+      audio.removeEventListener(event, onReady)
+      audio.removeEventListener('error', onError)
+      signal.removeEventListener('abort', onAbort)
+      if (error) reject(error)
+      else resolve()
+    }
+    const ready = () => event === 'loadedmetadata' ? audio.readyState >= 1 : !audio.seeking
+    const onReady = () => { if (ready()) finish() }
+    const onError = () => finish(new Error('Audio unavailable'))
+    const onAbort = () => finish(new DOMException('Playback cancelled', 'AbortError'))
+    const timeout = setTimeout(() => finish(new Error('Audio timed out')), 10_000)
+    audio.addEventListener(event, onReady)
+    audio.addEventListener('error', onError)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+    else if (audio.error) onError()
+    else if (ready()) finish()
+  })
+}
+
 function formatTime(seconds: number): string {
   if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return '00:00'
   const mins = Math.floor(seconds / 60)
@@ -98,6 +122,7 @@ function AudioPlayerSession({
 }: AudioPlayerProps) {
   const { locale } = useLocale()
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const playbackRequest = useRef<AbortController | null>(null)
   const [showChapterList, setShowChapterList] = useState(false)
 
   const [isPlaying, setIsPlaying] = useState(false)
@@ -218,6 +243,7 @@ function AudioPlayerSession({
     window.addEventListener('pagehide', save)
     document.addEventListener('visibilitychange', saveWhenHidden)
     return () => {
+      playbackRequest.current?.abort()
       save()
       audio.pause()
       window.removeEventListener('pagehide', save)
@@ -238,15 +264,30 @@ function AudioPlayerSession({
 
   const playAudio = async () => {
     const audio = audioRef.current
-    if (!audio) return
+    if (!audio || playbackRequest.current) return
+    const request = new AbortController()
+    playbackRequest.current = request
     setPlaybackError(false)
     try {
-      if (audio.error) audio.load()
+      if (audio.error) {
+        // load() clears currentTime, including a position chosen after a decode error.
+        const requestedTime = audio.currentTime
+        audio.load()
+        await waitForMedia(audio, 'loadedmetadata', request.signal)
+        if (request.signal.aborted || audioRef.current !== audio) return
+        if (Number.isFinite(requestedTime) && requestedTime > 0 && requestedTime < audio.duration) {
+          audio.currentTime = requestedTime
+        }
+      }
+      if (audio.seeking) await waitForMedia(audio, 'seeked', request.signal)
+      if (request.signal.aborted || audioRef.current !== audio) return
       await audio.play()
     } catch (error) {
-      if (audioRef.current !== audio || (error instanceof DOMException && error.name === 'AbortError')) return
+      if (request.signal.aborted || audioRef.current !== audio || (error instanceof DOMException && error.name === 'AbortError')) return
       setIsPlaying(false)
       setPlaybackError(true)
+    } finally {
+      if (playbackRequest.current === request) playbackRequest.current = null
     }
   }
 
@@ -310,7 +351,7 @@ function AudioPlayerSession({
   return (
     <div
       aria-label={localize(locale, '有聲書播放器', 'Audiobook Player')}
-      className={`audio-player min-w-0 rounded-2xl border border-stone-700 bg-stone-900 p-4 text-stone-100 shadow-md sm:p-5 ${className}`}
+      className={`audio-player min-w-0 rounded-2xl border border-stone-700 bg-stone-900 p-3 text-stone-100 shadow-md sm:p-5 ${className}`}
       role="region"
     >
       <audio
@@ -447,11 +488,11 @@ function AudioPlayerSession({
       {/* Controls: Prev/Next, Play/Pause, Rewind/Forward, Speed, Volume */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-1">
         {/* Main playback buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
           {((hasPrevious && onPrevious) || hasChapterNav) && (
             <button
               aria-label={localize(locale, '上一章', 'Previous chapter')}
-              className="rounded-full p-2 text-stone-300 hover:bg-stone-800 hover:text-white"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 hover:bg-stone-800 hover:text-white"
               onClick={onPrevious ?? goToPreviousChapter}
               disabled={!onPrevious && duration <= 0}
               type="button"
@@ -462,7 +503,7 @@ function AudioPlayerSession({
 
           <button
             aria-label={localize(locale, '倒轉 10 秒', 'Rewind 10 seconds')}
-            className="rounded-full p-2 text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
+            className="h-8 shrink-0 rounded-full px-1 text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
             onClick={() => skipSeconds(-10)}
             disabled={duration <= 0}
             type="button"
@@ -472,7 +513,7 @@ function AudioPlayerSession({
 
           <button
             aria-label={isPlaying ? localize(locale, '暫停', 'Pause') : localize(locale, '播放', 'Play')}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500 font-bold text-stone-950 transition hover:bg-amber-400 active:scale-95"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500 font-bold text-stone-950 transition hover:bg-amber-400 active:scale-95"
             onClick={togglePlay}
             type="button"
           >
@@ -481,7 +522,7 @@ function AudioPlayerSession({
 
           <button
             aria-label={localize(locale, '快轉 10 秒', 'Forward 10 seconds')}
-            className="rounded-full p-2 text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
+            className="h-8 shrink-0 rounded-full px-1 text-xs text-stone-300 hover:bg-stone-800 hover:text-white"
             onClick={() => skipSeconds(10)}
             disabled={duration <= 0}
             type="button"
@@ -492,7 +533,7 @@ function AudioPlayerSession({
           {((hasNext && onNext) || hasChapterNav) && (
             <button
               aria-label={localize(locale, '下一章', 'Next chapter')}
-              className="rounded-full p-2 text-stone-300 hover:bg-stone-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 hover:bg-stone-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!onNext && (duration <= 0 || (!!timeline && currentChapterIndex >= timeline.chapters.length - 1))}
               onClick={onNext ?? goToNextChapter}
               type="button"
@@ -503,11 +544,11 @@ function AudioPlayerSession({
         </div>
 
         {/* Speed Controls */}
-        <div className="flex items-center gap-1">
-          <span className="mr-1 shrink-0 text-xs text-stone-400">
+        <div className="min-w-0">
+          <span className="mb-1 block text-xs text-stone-400">
             {localize(locale, '倍速', 'Speed')}:
           </span>
-          <div aria-label={localize(locale, '播放倍速', 'Playback speed')} className="inline-flex flex-wrap rounded-lg bg-stone-800 p-0.5" role="group">
+          <div aria-label={localize(locale, '播放倍速', 'Playback speed')} className="flex flex-wrap rounded-lg bg-stone-800 p-0.5" role="group">
             {SPEED_OPTIONS.map((speed) => (
               <button
                 aria-pressed={playbackRate === speed}
