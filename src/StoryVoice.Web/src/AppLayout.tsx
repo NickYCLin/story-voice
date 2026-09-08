@@ -5,6 +5,7 @@ import { AuthScreen } from './AuthScreen'
 import { useAuthSession } from './auth'
 import type { AuthedOutletContext } from './authOutletContext'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
+import { RouteContent } from './components/RouteContent'
 import { localize, useLocale } from './i18n'
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
@@ -104,7 +105,9 @@ export function AppLayout() {
         </aside>
       )}
 
-      <Outlet context={{ email: authState.email, csrfToken: authState.csrfToken } satisfies AuthedOutletContext} />
+      <RouteContent>
+        <Outlet context={{ email: authState.email, csrfToken: authState.csrfToken } satisfies AuthedOutletContext} />
+      </RouteContent>
 
       <footer className="relative z-10 border-t border-stone-200 px-6 py-8 text-center text-xs leading-6 text-stone-400">
         {t(
