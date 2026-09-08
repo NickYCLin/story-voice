@@ -334,6 +334,8 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
             }
 
             var cut = boundary >= maxChars / 2 ? boundary + 1 : maxChars;
+            // Keep supplementary characters intact without increasing the UTF-16 request limit.
+            if (char.IsSurrogatePair(remaining, cut - 1)) cut--;
             var chunk = remaining[..cut].Trim();
             if (chunk.Length > 0)
             {

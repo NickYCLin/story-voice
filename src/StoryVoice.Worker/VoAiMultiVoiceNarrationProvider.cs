@@ -220,6 +220,8 @@ public sealed class VoAiMultiVoiceNarrationProvider(
             }
 
             var cut = boundary >= MaximumTextLength / 2 ? boundary + 1 : MaximumTextLength;
+            // Keep supplementary characters intact without increasing the UTF-16 request limit.
+            if (char.IsSurrogatePair(remaining, cut - 1)) cut--;
             var chunk = remaining[..cut].Trim();
             if (chunk.Length > 0)
             {
