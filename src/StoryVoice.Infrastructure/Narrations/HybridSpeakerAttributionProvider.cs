@@ -15,7 +15,9 @@ public sealed class HybridSpeakerAttributionProvider(
         SpeakerAttributionRequest request,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var ruleResults = await ruleProvider.AttributeAsync(request, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (ruleResults.All(result => result.Outcome == SpeakerAttributionOutcome.Confirmed))
         {
             return ruleResults;
@@ -25,6 +27,9 @@ public sealed class HybridSpeakerAttributionProvider(
         try
         {
             modelResults = await localModelProvider.AttributeAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            modelResults = LocalSpeakerAttributionProvider.ValidateResults(
+                request, modelResults, SpeakerAttributionDecisionSource.LocalModel);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -35,9 +40,7 @@ public sealed class HybridSpeakerAttributionProvider(
             return ruleResults;
         }
 
-        var modelByIndex = modelResults
-            .GroupBy(result => result.SegmentIndex)
-            .ToDictionary(group => group.Key, group => group.OrderByDescending(result => result.Confidence).First());
+        var modelByIndex = modelResults.ToDictionary(result => result.SegmentIndex);
         return ruleResults.Select(ruleResult =>
         {
             if (ruleResult.Outcome == SpeakerAttributionOutcome.Confirmed

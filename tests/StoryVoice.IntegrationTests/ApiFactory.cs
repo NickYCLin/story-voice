@@ -21,6 +21,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     }
 
     private readonly bool _narrationAdmissionEnabled;
+    private readonly ISpeakerAttributionProvider? _attributionProvider;
     private readonly string _databaseName = $"storyvoice-tests-{Guid.NewGuid()}";
     private readonly string _storageRoot = Path.Combine(
         Path.GetTempPath(),
@@ -30,6 +31,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     public ApiFactory()
         : this(narrationAdmissionEnabled: true)
     {
+    }
+
+    internal ApiFactory(ISpeakerAttributionProvider attributionProvider) : this()
+    {
+        _attributionProvider = attributionProvider;
     }
 
     internal ApiFactory(bool narrationAdmissionEnabled)
@@ -65,7 +71,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<ILocalLlmCharacterAnalysisProvider>();
             services.AddSingleton<ILocalLlmCharacterAnalysisProvider, FakeLocalLlmCharacterAnalysisProvider>();
             services.RemoveAll<ISpeakerAttributionProvider>();
-            services.AddSingleton<ISpeakerAttributionProvider, RuleBasedSpeakerAttributionProvider>();
+            services.AddSingleton<ISpeakerAttributionProvider>(_attributionProvider ?? new RuleBasedSpeakerAttributionProvider());
         });
     }
 

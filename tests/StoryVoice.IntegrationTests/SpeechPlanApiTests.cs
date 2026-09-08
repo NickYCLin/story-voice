@@ -7,11 +7,42 @@ using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Series;
 using StoryVoice.Infrastructure.Persistence;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.IntegrationTests;
 
 public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Fact]
+    public async Task Malformed_attribution_still_builds_a_reviewable_draft_and_keeps_valid_segments()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var malformedFactory = new ApiFactory(new LocalSpeakerAttributionProvider(new MalformedProvider()));
+        using var client = await malformedFactory.CreateAuthenticatedClientAsync(ct);
+        var series = await CreateSeriesAsync(client, "回應驗證測試系列", ct);
+        var book = await CreateBookAsync(client, "第一章", "「甲。」小雨說。「乙。」小晴說。「丙。」小雨說。", ct);
+        using var membership = await client.PostWithCsrfAsync($"/api/series/{series.Id}/books",
+            new { bookId = book.Id, volumeLabel = "第一冊", sortOrder = 1 }, ct);
+        membership.EnsureSuccessStatusCode();
+        await AddCharacterAsync(client, series.Id, "小雨", ct);
+        await AddCharacterAsync(client, series.Id, "小晴", ct);
+        using var response = await client.PostWithCsrfAsync(
+            $"/api/series/{series.Id}/books/{book.Id}/chapters/{book.Chapters.Single().Id}/speech-plan", new { }, ct);
+        response.EnsureSuccessStatusCode();
+        var draft = await response.Content.ReadFromJsonAsync<ChapterSpeechPlanDraftResponse>(ct);
+        Assert.NotNull(draft);
+        var dialogues = draft.Segments.Where(item => item.Kind == "Dialogue").ToArray();
+        Assert.Equal(3, dialogues.Length);
+        Assert.All(dialogues.Take(2), item =>
+        {
+            Assert.Null(item.CharacterId);
+            Assert.Equal(0, item.Confidence);
+            Assert.Equal("Suggested", item.ReviewStatus);
+        });
+        Assert.NotNull(dialogues[2].CharacterId);
+        Assert.Equal("Confirmed", dialogues[2].ReviewStatus);
+    }
+
     [Fact]
     public async Task Speech_plan_endpoints_require_authentication_and_mutations_require_csrf()
     {
@@ -547,6 +578,19 @@ public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFa
             new { },
             cancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, missingSegmentResponse.StatusCode);
+    }
+
+    private sealed class MalformedProvider : ISpeakerAttributionProvider
+    {
+        public Task<IReadOnlyList<SpeakerAttributionResult>> AttributeAsync(SpeakerAttributionRequest request, CancellationToken cancellationToken)
+        {
+            var indexes = request.Segments.Where(item => item.Kind == SpeechSegmentKind.Dialogue).Select(item => item.Index).ToArray();
+            var character = request.KnownCharacters[0].CharacterId;
+            SpeakerAttributionResult Valid(int index) => new(index, character, SpeakerAttributionOutcome.Confirmed, 90,
+                SpeakerAttributionDecisionSource.LocalModel, "synthetic");
+            return Task.FromResult<IReadOnlyList<SpeakerAttributionResult>>(
+                [Valid(indexes[0]), null!, Valid(indexes[0]), Valid(indexes[1]) with { Confidence = 101 }, Valid(indexes[2])]);
+        }
     }
 
     private static async Task<StorySeriesDetailsResponse> CreateSeriesAsync(
