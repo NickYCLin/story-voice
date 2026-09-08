@@ -1,9 +1,9 @@
-using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Options;
+using StoryVoice.Application.ExternalVoices;
 using StoryVoice.Infrastructure.ExternalVoices;
 
 namespace StoryVoice.Api;
@@ -12,7 +12,7 @@ public sealed class ExternalVoicePreAuthenticationRateLimiter : IDisposable
 {
     // Hashing normalized source networks into a fixed array gives the anti-abuse
     // guard a hard memory bound even when an attacker rotates source addresses.
-    internal const int SourceBucketCount = 256;
+    internal const int SourceBucketCount = ExternalVoiceSourceBuckets.Count;
 
     private readonly byte[] hashSalt = RandomNumberGenerator.GetBytes(32);
     private readonly FixedWindowRateLimiter[] sourceLimiters;
@@ -50,42 +50,7 @@ public sealed class ExternalVoicePreAuthenticationRateLimiter : IDisposable
         return true;
     }
 
-    internal int ResolveSourceBucket(IPAddress? sourceAddress)
-    {
-        Span<byte> normalized = stackalloc byte[17];
-        var length = NormalizeSource(sourceAddress, normalized);
-        Span<byte> digest = stackalloc byte[32];
-        HMACSHA256.HashData(hashSalt, normalized[..length], digest);
-        return (int)(BinaryPrimitives.ReadUInt32LittleEndian(digest) % SourceBucketCount);
-    }
-
-    private static int NormalizeSource(IPAddress? sourceAddress, Span<byte> destination)
-    {
-        if (sourceAddress is null)
-        {
-            destination[0] = 0;
-            return 1;
-        }
-
-        if (sourceAddress.IsIPv4MappedToIPv6)
-        {
-            sourceAddress = sourceAddress.MapToIPv4();
-        }
-
-        if (sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-        {
-            destination[0] = 4;
-            sourceAddress.TryWriteBytes(destination[1..], out var written);
-            return written + 1;
-        }
-
-        destination[0] = 6;
-        sourceAddress.TryWriteBytes(destination[1..], out _);
-        // Native IPv6 clients are grouped by /64 so rotating privacy addresses
-        // cannot manufacture a fresh bucket for every request.
-        destination[9..17].Clear();
-        return destination.Length;
-    }
+    internal int ResolveSourceBucket(IPAddress? sourceAddress) => ExternalVoiceSourceBuckets.Resolve(sourceAddress, hashSalt);
 
     private static FixedWindowRateLimiter CreateLimiter(int permitLimit) =>
         new(new FixedWindowRateLimiterOptions
@@ -119,14 +84,13 @@ internal sealed class ExternalVoicePreAuthenticationRateLimitMiddleware(
     public async Task InvokeAsync(
         HttpContext httpContext,
         IOptions<ExternalVoiceApiOptions> options,
-        ExternalVoicePreAuthenticationRateLimiter rateLimiter)
+        ExternalVoicePreAuthenticationRateLimiter rateLimiter,
+        IExternalVoiceSharedRateLimiter sharedRateLimiter)
     {
         if (!options.Value.Enabled
             || !HttpMethods.IsPost(httpContext.Request.Method)
-            || !string.Equals(
-                httpContext.Request.Path.Value,
-                "/api/external/v1/speech",
-                StringComparison.Ordinal))
+            || httpContext.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName
+                != ExternalVoiceEndpoints.EndpointName)
         {
             await next(httpContext);
             return;
@@ -136,6 +100,25 @@ internal sealed class ExternalVoicePreAuthenticationRateLimitMiddleware(
                 httpContext.Connection.RemoteIpAddress,
                 out var retryAfterSeconds))
         {
+            try
+            {
+                await sharedRateLimiter.EnsurePreAuthenticationAllowedAsync(
+                    httpContext.Connection.RemoteIpAddress, httpContext.RequestAborted);
+            }
+            catch (ExternalVoiceSynthesisException exception)
+            {
+                var limited = exception.FailureKind == ExternalVoiceSynthesisFailureKind.RateLimited;
+                httpContext.Response.Headers.RetryAfter = (exception.RetryAfterSeconds ?? 30).ToString(CultureInfo.InvariantCulture);
+                await ExternalVoiceEndpoints.WriteProblemAsync(
+                    httpContext,
+                    limited ? StatusCodes.Status429TooManyRequests : StatusCodes.Status503ServiceUnavailable,
+                    limited ? "Rate limit exceeded" : "Service unavailable",
+                    limited ? "The external voice pre-authentication request limit was reached." : "External voice requests are temporarily unavailable.",
+                    limited ? "rate_limited" : "synthesis_unavailable",
+                    httpContext.RequestAborted);
+                return;
+            }
+
             await next(httpContext);
             return;
         }

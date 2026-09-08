@@ -1,5 +1,6 @@
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
+using System.Net;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using StoryVoice.Application.ExternalVoices;
@@ -10,6 +11,85 @@ namespace StoryVoice.IntegrationTests;
 public sealed class ExternalVoiceSharedRateLimiterTests(RedisRateLimitFixture redis)
     : IClassFixture<RedisRateLimitFixture>
 {
+    [Fact]
+    public async Task Shared_sources_use_one_budget_for_mapped_ipv4_and_ipv6_privacy_addresses()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var firstConnection = await redis.ConnectAsync();
+        using var secondConnection = await redis.ConnectAsync();
+        var options = PreAuthOptions(sourceLimit: 1, globalLimit: 20);
+        var first = new RedisExternalVoiceSharedRateLimiter(options, () => firstConnection);
+        var second = new RedisExternalVoiceSharedRateLimiter(options, () => secondConnection);
+        var database = firstConnection.GetDatabase();
+        await ClearPreAuthKeysAsync(database);
+        foreach (var pair in new[] {
+            new[] { IPAddress.Parse("192.0.2.10"), IPAddress.Parse("::ffff:192.0.2.10") },
+            new[] { IPAddress.Parse("2001:db8:1:2::1"), IPAddress.Parse("2001:db8:1:2:ffff::99") },
+            new IPAddress?[] { null, null },
+        })
+        {
+            await ClearPreAuthKeysAsync(database);
+            await first.EnsurePreAuthenticationAllowedAsync(pair[0], ct);
+            var limited = await Assert.ThrowsAsync<ExternalVoiceSynthesisException>(() => second.EnsurePreAuthenticationAllowedAsync(pair[1], ct));
+            Assert.Equal(ExternalVoiceSynthesisFailureKind.RateLimited, limited.FailureKind);
+            Assert.Equal("1", (string?)await database.StringGetAsync(RedisExternalVoiceSharedRateLimiter.PreAuthenticationGlobalKey));
+        }
+    }
+
+    [Fact]
+    public async Task Rotating_sources_share_one_global_budget_without_partial_consumption()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var firstConnection = await redis.ConnectAsync();
+        using var secondConnection = await redis.ConnectAsync();
+        var options = PreAuthOptions(sourceLimit: 3, globalLimit: 3);
+        var first = new RedisExternalVoiceSharedRateLimiter(options, () => firstConnection);
+        var second = new RedisExternalVoiceSharedRateLimiter(options, () => secondConnection);
+        var database = firstConnection.GetDatabase();
+        await ClearPreAuthKeysAsync(database);
+        var results = await Task.WhenAll(Enumerable.Range(1, 32).Select(async index =>
+        {
+            try
+            {
+                await (index % 2 == 0 ? first : second).EnsurePreAuthenticationAllowedAsync(IPAddress.Parse($"192.0.2.{index}"), ct);
+                return true;
+            }
+            catch (ExternalVoiceSynthesisException exception)
+            {
+                Assert.Equal(ExternalVoiceSynthesisFailureKind.RateLimited, exception.FailureKind);
+                return false;
+            }
+        }));
+        Assert.Equal(3, results.Count(allowed => allowed));
+        var sourceCounts = await database.StringGetAsync(Enumerable.Range(0, ExternalVoiceSourceBuckets.Count)
+            .Select(RedisExternalVoiceSharedRateLimiter.CreatePreAuthenticationSourceKey).ToArray());
+        Assert.Equal(3, sourceCounts.Sum(value => value.IsNull ? 0 : (int)value));
+        Assert.Equal("3", (string?)await database.StringGetAsync(RedisExternalVoiceSharedRateLimiter.PreAuthenticationGlobalKey));
+
+        // If either counter is unavailable, do not consume the other counter.
+        await ClearPreAuthKeysAsync(database);
+        var bucket = ExternalVoiceSourceBuckets.Resolve(IPAddress.Loopback, Convert.FromHexString(options.Value.SharedPreAuthenticationHashKey));
+        var sourceKey = RedisExternalVoiceSharedRateLimiter.CreatePreAuthenticationSourceKey(bucket);
+        await database.StringSetAsync(sourceKey, "corrupted", TimeSpan.FromMinutes(1));
+        var unavailable = await Assert.ThrowsAsync<ExternalVoiceSynthesisException>(() => first.EnsurePreAuthenticationAllowedAsync(IPAddress.Loopback, ct));
+        Assert.Equal(ExternalVoiceSynthesisFailureKind.SynthesisUnavailable, unavailable.FailureKind);
+        Assert.False(await database.KeyExistsAsync(RedisExternalVoiceSharedRateLimiter.PreAuthenticationGlobalKey));
+        await ClearPreAuthKeysAsync(database);
+    }
+
+    private static IOptions<ExternalVoiceApiOptions> PreAuthOptions(int sourceLimit, int globalLimit) => Options.Create(new ExternalVoiceApiOptions
+    {
+        SharedPreAuthenticationRateLimitEnabled = true,
+        SharedPreAuthenticationHashKey = new string('a', 64),
+        PreAuthenticationRequestsPerMinute = sourceLimit,
+        PreAuthenticationGlobalRequestsPerMinute = globalLimit,
+    });
+
+    private static Task<long> ClearPreAuthKeysAsync(IDatabase database) => database.KeyDeleteAsync(
+        Enumerable.Range(0, ExternalVoiceSourceBuckets.Count)
+            .Select(RedisExternalVoiceSharedRateLimiter.CreatePreAuthenticationSourceKey)
+            .Append(RedisExternalVoiceSharedRateLimiter.PreAuthenticationGlobalKey).ToArray());
+
     [Fact]
     public async Task Separate_connections_atomically_share_one_budget_and_isolate_consumers()
     {

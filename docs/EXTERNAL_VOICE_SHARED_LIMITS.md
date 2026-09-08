@@ -21,10 +21,24 @@ Redis 不可用、回應格式錯誤、計數損壞或計數缺少 TTL 時，回
 
 取消或逾時不代表已送出的 Redis command 一定未執行。程式不自動重試、不返還不確定的額度，以免重複放行；此時視窗內可用次數可能減少。
 
-Redis 重啟、資料遺失、淘汰或 failover 仍可能失去計數，因此這不是永久硬額度或計費來源。正式啟用前須確認 Redis 可用性、持久化與淘汰策略。共用 idempotency、single-flight、公平排程與匿名入口防洪仍未完成，本次不將正式部署改成多 replica。
+Redis 重啟、資料遺失、淘汰或 failover 仍可能失去計數，因此這不是永久硬額度或計費來源。正式啟用前須確認 Redis 可用性、持久化與淘汰策略。共用 idempotency、single-flight 與公平排程仍未完成，本次不將正式部署改成多 replica。
+
+## 驗證前的共用防洪
+
+`ExternalVoiceApi.SharedPreAuthenticationRateLimitEnabled` 是獨立開關，預設 `false`。啟用時另須設定 `SharedPreAuthenticationHashKey`，值為私下產生的 32-byte 隨機金鑰，以 64 個十六進位字元表示；所有 API 執行個體必須使用相同值。設定驗證失敗不會回顯金鑰，請勿將實際值放進 Git、命令輸出或範例文件。
+
+Compose 對應 `EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_RATE_LIMIT_ENABLED` 與 `EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_HASH_KEY`。來源與全域上限沿用 `PreAuthenticationRequestsPerMinute`／`PreAuthenticationGlobalRequestsPerMinute`。本機防洪會先執行，再向 Redis 取得共用額度，避免所有拒絕請求都必須查 Redis。
+
+來源只採用可信代理處理後的 `RemoteIpAddress`。IPv4-mapped IPv6 與 IPv4 共用來源，原生 IPv6 按 `/64` 分組；正規化結果經 HMAC-SHA-256 對應到固定 256 個桶。不同來源可能共用桶，這是控制記憶體與 Redis key 數量的取捨。Redis key 只包含桶編號，不保存 IP 或 HMAC 金鑰。輪替雜湊金鑰會改變來源分桶，須讓所有執行個體同步切換，不能視為保留來源視窗的無縫輪替。
+
+來源與全域計數由同一段 Lua 一次驗證及增加，任一超限就不消耗另一份額度；任一計數損壞或缺少 TTL 均回 503。兩個 key 使用同一個 Redis Cluster hash tag；目前整合測試使用單一 Redis，沒有宣稱已驗收 Cluster 或 failover。
+
+這層在 bearer 驗證、受管金鑰查詢與 usage ledger 之前執行。它依已選中的 speech endpoint 判定，包含大小寫或尾端斜線等路由可接受的寫法；標準路徑驗證仍在原端點執行。其他頁面、Playground、公開目錄與健康檢查不使用這份匿名入口額度。無法取得 Redis 時，僅外部 speech POST 回 503，不會阻擋其他路由。
 
 ## 驗證範圍
 
 使用真正的 Redis 7.4 測試兩條獨立連線並行送出 32 個請求只放行 3 個、不同 consumer 隔離、新連線保留額度、視窗過期、異常計數、無 TTL 與 Redis 暫停回應。另以兩個 API host 混合外部與 Playground 請求，確認共用額度及重啟後仍回 429；Redis 無法取得時兩個入口均回 503。測試合成使用固定回應，沒有呼叫真實 GPU 或付費 provider。
 
 本次未啟用正式設定，未執行正式多 replica 驗收。
+
+驗證前防洪另以真正的 Redis 檢查跨連線來源正規化、32 個不同來源並行共用全域上限、拒絕與計數異常時沒有部分扣額度；兩個 API host 則驗證匿名要求先回 401，來源額度用完後改回 429、路由變體同樣受限、Redis 不可用時回 503，以及健康檢查不受影響。

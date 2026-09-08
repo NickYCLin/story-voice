@@ -8,6 +8,31 @@ namespace StoryVoice.UnitTests;
 public sealed class ExternalVoiceApiOptionsValidatorTests
 {
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("private-invalid-hash-key")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
+    public void Shared_pre_authentication_requires_a_valid_hash_key_without_echoing_it(string? key)
+    {
+        var options = new ExternalVoiceApiOptions { SharedPreAuthenticationRateLimitEnabled = true, SharedPreAuthenticationHashKey = key! };
+        var result = CreateValidator().Validate(null, options);
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Failures ?? [], failure => failure.Contains("hashing key", StringComparison.Ordinal));
+        if (!string.IsNullOrEmpty(key)) Assert.DoesNotContain(key, string.Join(" ", result.Failures ?? []));
+    }
+
+    [Fact]
+    public void Shared_pre_authentication_hash_key_is_only_required_when_enabled()
+    {
+        var options = new ExternalVoiceApiOptions();
+        Assert.True(CreateValidator().Validate(null, options).Succeeded);
+        options.SharedPreAuthenticationRateLimitEnabled = true;
+        options.SharedPreAuthenticationHashKey = new string('a', 64);
+        Assert.True(CreateValidator().Validate(null, options).Succeeded);
+    }
+
+    [Theory]
     [InlineData(0, 600)]
     [InlineData(601, 601)]
     [InlineData(60, 59)]

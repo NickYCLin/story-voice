@@ -59,14 +59,15 @@ curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE
 
 失敗的請求不會被冪等快取釘住：收到 429／503 後用同一個 Idempotency-Key 重試會真正重新執行；只有成功的音訊會在 TTL 內以同一 key 重播。
 
-精確的 speech POST 在 bearer authentication 與受管金鑰資料庫查詢前，會先通過一層
+路由到 speech endpoint 的 POST 在 bearer authentication 與受管金鑰資料庫查詢前，會先通過一層
 process-local 防濫用閘門：預設每個來源網段 60 次／分鐘、全 process 600 次／分鐘，分別可用
 `ExternalVoiceApi__PreAuthenticationRequestsPerMinute` 與
 `ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute` 調整。來源只採用可信代理鏈已解析的
 remote address；IPv4-mapped IPv6 會歸回 IPv4，native IPv6 以 `/64` 分組，並雜湊到固定 256 個
 bucket，攻擊者輪換地址不會讓記憶體無界增長。這層 429 尚未可靠歸屬 owner／consumer，因此不寫
 usage ledger；通過驗證後，Playground 與 external API 才共同消耗既有 consumer 額度。匿名入口
-防洪仍為單一 process 狀態；consumer 額度可另啟用預設關閉的 Redis 共用固定視窗，詳見
+與 consumer 額度可分別啟用預設關閉的 Redis 共用固定視窗。來源防洪依實際選中的 endpoint
+判定，路由接受的大寫或尾端斜線也會先受限；正式 API 仍只接受原本的標準路徑。詳見
 [共用請求額度](EXTERNAL_VOICE_SHARED_LIMITS.md)。
 
 ## 安全產生 credential
@@ -245,7 +246,7 @@ API process 內的 bounded background queue，不持有 request-scoped `DbContex
 可用 `ExternalVoiceApi__UsageLedgerQueueCapacity` 調整為 1 至 10000。owner 可由
 `GET /api/developer/external-voice/usage` 或 `/developer/usage` 查詢最多 90 天的使用量。
 
-目前 single-flight、idempotency cache 與匿名入口防洪仍是單一 API process 內的有界狀態，
-正式部署仍只支援一個 API replica。consumer rate limit 已可選用 Redis 共用額度；正式多
+目前 single-flight 與 idempotency cache 仍是單一 API process 內的有界狀態，
+正式部署仍只支援一個 API replica。consumer rate limit 與匿名入口防洪已可選用 Redis 共用額度；正式多
 replica 或付費訂閱前，仍須完成其餘共享協調／entitlement
 storage、決定 usage retention／歸檔政策，並完成實際 provider terms 與商用權利審查。

@@ -28,6 +28,10 @@ public sealed class ExternalVoiceApiOptions
 
     public bool SharedRateLimitEnabled { get; set; }
 
+    public bool SharedPreAuthenticationRateLimitEnabled { get; set; }
+
+    public string SharedPreAuthenticationHashKey { get; set; } = string.Empty;
+
     public int PreAuthenticationRequestsPerMinute { get; set; } =
         DefaultPreAuthenticationRequestsPerMinute;
 

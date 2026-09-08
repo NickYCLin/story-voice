@@ -13,6 +13,7 @@ public sealed class ExternalVoiceSharedRateLimiterTests
         var limiter = new RedisExternalVoiceSharedRateLimiter(Options.Create(new ExternalVoiceApiOptions()),
             () => throw new InvalidOperationException("Must not resolve Redis"));
         await limiter.EnsureAllowedAsync("consumer_01", TestContext.Current.CancellationToken);
+        await limiter.EnsurePreAuthenticationAllowedAsync(null, TestContext.Current.CancellationToken);
     }
 
     [Theory]

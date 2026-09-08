@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace StoryVoice.Application.ExternalVoices;
 
 public sealed record ExternalVoiceSynthesisRequest(
@@ -26,6 +28,8 @@ public interface IExternalVoiceRequestRateLimiter
 public interface IExternalVoiceSharedRateLimiter
 {
     Task EnsureAllowedAsync(string consumerKeyId, CancellationToken cancellationToken);
+
+    Task EnsurePreAuthenticationAllowedAsync(IPAddress? sourceAddress, CancellationToken cancellationToken);
 }
 
 public enum ExternalVoiceSynthesisFailureKind

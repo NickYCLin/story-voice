@@ -31,6 +31,55 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
     private static readonly string AccessToken = $"svd1.{ConsumerKeyId}.{Secret}";
 
     [Fact]
+    public async Task Unauthenticated_requests_share_source_limits_before_authentication_including_route_variants()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var redis = new RedisRateLimitFixture();
+        await redis.InitializeAsync();
+        using var firstConnection = await redis.ConnectAsync();
+        using var secondConnection = await redis.ConnectAsync();
+        var ownerId = Guid.NewGuid();
+        using var first = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedConnection: firstConnection,
+            sharedPreAuthentication: true, preAuthenticationRequestsPerMinute: 2);
+        using var second = CreateConfiguredFactory(ownerId, DateTimeOffset.UtcNow, sharedConnection: secondConnection,
+            sharedPreAuthentication: true, preAuthenticationRequestsPerMinute: 2);
+        using var firstClient = first.CreateClient();
+        using var secondClient = second.CreateClient();
+        using var one = await firstClient.PostAsJsonAsync("/api/external/v1/speech", new { }, ct);
+        using var two = await secondClient.PostAsJsonAsync("/api/external/v1/speech", new { }, ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, one.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, two.StatusCode);
+
+        using var blocked = await firstClient.PostAsJsonAsync("/API/EXTERNAL/V1/SPEECH", new { }, ct);
+        using var trailingSlash = await secondClient.PostAsJsonAsync("/api/external/v1/speech/", new { }, ct);
+        foreach (var response in new[] { blocked, trailingSlash })
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+            Assert.InRange(response.Headers.RetryAfter!.Delta!.Value.TotalSeconds, 1, 60);
+            Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+            Assert.DoesNotContain("aaaa", await response.Content.ReadAsStringAsync(ct));
+        }
+
+        using var healthy = await firstClient.GetAsync("/health/live", ct);
+        Assert.Equal(HttpStatusCode.OK, healthy.StatusCode);
+        var counter = await firstConnection.GetDatabase().StringGetAsync(RedisExternalVoiceSharedRateLimiter.PreAuthenticationGlobalKey);
+        Assert.Equal("2", (string?)counter);
+    }
+
+    [Fact]
+    public async Task Unavailable_shared_anonymous_limits_do_not_block_unrelated_routes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var configured = CreateConfiguredFactory(Guid.NewGuid(), DateTimeOffset.UtcNow, sharedPreAuthentication: true);
+        using var client = configured.CreateClient();
+        using var blocked = await client.PostAsJsonAsync("/api/external/v1/speech", new { }, ct);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, blocked.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(30), blocked.Headers.RetryAfter?.Delta);
+        using var healthy = await client.GetAsync("/health/live", ct);
+        Assert.Equal(HttpStatusCode.OK, healthy.StatusCode);
+    }
+
+    [Fact]
     public async Task Separate_api_instances_share_external_and_playground_limits_across_restart()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -305,7 +354,9 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
         DateTimeOffset now,
         int requestsPerMinute = 3,
         IConnectionMultiplexer? sharedConnection = null,
-        bool sharedRateLimit = false) =>
+        bool sharedRateLimit = false,
+        bool sharedPreAuthentication = false,
+        int preAuthenticationRequestsPerMinute = 60) =>
         factory.WithWebHostBuilder(builder =>
         {
             var profileId = Guid.NewGuid();
@@ -325,6 +376,9 @@ public sealed class DeveloperPlaygroundApiTests(ApiFactory factory) : IClassFixt
             var voicePrefix = $"{consumerPrefix}:AllowedVoices:{VoiceAlias}";
             builder.UseSetting("ExternalVoiceApi:Enabled", "true");
             builder.UseSetting("ExternalVoiceApi:SharedRateLimitEnabled", sharedRateLimit.ToString());
+            builder.UseSetting("ExternalVoiceApi:SharedPreAuthenticationRateLimitEnabled", sharedPreAuthentication.ToString());
+            builder.UseSetting("ExternalVoiceApi:SharedPreAuthenticationHashKey", sharedPreAuthentication ? new string('a', 64) : string.Empty);
+            builder.UseSetting("ExternalVoiceApi:PreAuthenticationRequestsPerMinute", preAuthenticationRequestsPerMinute.ToString(CultureInfo.InvariantCulture));
             builder.UseSetting(
                 "ExternalVoiceApi:RequestsPerMinute",
                 requestsPerMinute.ToString(CultureInfo.InvariantCulture));

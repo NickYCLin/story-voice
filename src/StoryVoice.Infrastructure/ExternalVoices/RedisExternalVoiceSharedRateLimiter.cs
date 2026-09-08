@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -13,20 +14,32 @@ internal sealed class RedisExternalVoiceSharedRateLimiter(
     private const string KeyPrefix = "storyvoice:external-voice:rate-limit:v1:";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(2);
     private const string AcquireScript = """
-        local value = redis.call('GET', KEYS[1])
-        if not value then
-            redis.call('SET', KEYS[1], 1, 'PX', 60000)
-            return {1, 0}
+        local counts = {}
+        local retry = 0
+        for i, key in ipairs(KEYS) do
+            local value = redis.call('GET', key)
+            local count = 0
+            local ttl = 60000
+            if value then
+                count = tonumber(value)
+                ttl = redis.call('PTTL', key)
+                if not count or count < 1 or count ~= math.floor(count) or ttl <= 0 or ttl > 60000 then
+                    return {-1, 0}
+                end
+            end
+            counts[i] = count
+            if count >= tonumber(ARGV[i]) then
+                retry = math.max(retry, math.ceil(ttl / 1000))
+            end
         end
-        local count = tonumber(value)
-        local ttl = redis.call('PTTL', KEYS[1])
-        if not count or count < 1 or count ~= math.floor(count) or ttl <= 0 or ttl > 60000 then
-            return {-1, 0}
+        if retry > 0 then return {0, retry} end
+        for i, key in ipairs(KEYS) do
+            if counts[i] == 0 then
+                redis.call('SET', key, 1, 'PX', 60000)
+            else
+                redis.call('INCR', key)
+            end
         end
-        if count >= tonumber(ARGV[1]) then
-            return {0, math.ceil(ttl / 1000)}
-        end
-        redis.call('INCR', KEYS[1])
         return {1, 0}
         """;
 
@@ -45,13 +58,34 @@ internal sealed class RedisExternalVoiceSharedRateLimiter(
             throw new ExternalVoiceSynthesisException(ExternalVoiceSynthesisFailureKind.VoiceNotAvailable);
         }
 
+        await EnsureAsync([CreateKey(consumerKeyId)], [currentOptions.RequestsPerMinute], cancellationToken);
+    }
+
+    public async Task EnsurePreAuthenticationAllowedAsync(IPAddress? sourceAddress, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var currentOptions = options.Value;
+        if (!currentOptions.SharedPreAuthenticationRateLimitEnabled) return;
+        if (currentOptions.SharedPreAuthenticationHashKey is not { Length: 64 }
+            || !currentOptions.SharedPreAuthenticationHashKey.All(Uri.IsHexDigit)) throw Unavailable();
+
+        var bucket = ExternalVoiceSourceBuckets.Resolve(sourceAddress,
+            Convert.FromHexString(currentOptions.SharedPreAuthenticationHashKey));
+        await EnsureAsync(
+            [PreAuthenticationGlobalKey, CreatePreAuthenticationSourceKey(bucket)],
+            [currentOptions.PreAuthenticationGlobalRequestsPerMinute, currentOptions.PreAuthenticationRequestsPerMinute],
+            cancellationToken);
+    }
+
+    private async Task EnsureAsync(RedisKey[] keys, RedisValue[] limits, CancellationToken cancellationToken)
+    {
         try
         {
             var database = connectionFactory().GetDatabase();
             var result = await database.ScriptEvaluateAsync(
                     AcquireScript,
-                    [CreateKey(consumerKeyId)],
-                    [currentOptions.RequestsPerMinute],
+                    keys,
+                    limits,
                     CommandFlags.DemandMaster)
                 .WaitAsync(CommandTimeout, cancellationToken);
             var values = (RedisResult[]?)result;
@@ -89,6 +123,12 @@ internal sealed class RedisExternalVoiceSharedRateLimiter(
 
     internal static RedisKey CreateKey(string consumerKeyId) =>
         KeyPrefix + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(consumerKeyId)));
+
+    // Both counters use one Redis Cluster slot so Lua can update them atomically.
+    internal const string PreAuthenticationGlobalKey = "storyvoice:external-voice:{pre-auth:v1}:global";
+
+    internal static RedisKey CreatePreAuthenticationSourceKey(int bucket) =>
+        $"storyvoice:external-voice:{{pre-auth:v1}}:source:{bucket}";
 
     private static ExternalVoiceSynthesisException Unavailable() =>
         new(ExternalVoiceSynthesisFailureKind.SynthesisUnavailable, retryAfterSeconds: 30);

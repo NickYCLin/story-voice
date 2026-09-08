@@ -88,6 +88,8 @@ services:
       ExternalVoiceApi__MaximumResponseBytes: ${EXTERNAL_VOICE_API_MAXIMUM_RESPONSE_BYTES:-3145728}
       ExternalVoiceApi__RequestsPerMinute: ${EXTERNAL_VOICE_API_REQUESTS_PER_MINUTE:-3}
       ExternalVoiceApi__SharedRateLimitEnabled: ${EXTERNAL_VOICE_API_SHARED_RATE_LIMIT_ENABLED:-false}
+      ExternalVoiceApi__SharedPreAuthenticationRateLimitEnabled: ${EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_RATE_LIMIT_ENABLED:-false}
+      ExternalVoiceApi__SharedPreAuthenticationHashKey: ${EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_HASH_KEY:-}
       ExternalVoiceApi__PreAuthenticationRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_REQUESTS_PER_MINUTE:-60}
       ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_GLOBAL_REQUESTS_PER_MINUTE:-600}
       ExternalVoiceApi__IdempotencyCacheEntries: ${EXTERNAL_VOICE_API_IDEMPOTENCY_CACHE_ENTRIES:-32}
