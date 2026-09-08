@@ -1,12 +1,21 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-08（帳號續播、播放時間軸與 BlueMagpie 批次恢復）
+最後更新：2026-09-08（帳號續播、播放時間軸與 BlueMagpie 恢復／監測）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 BlueMagpie 合成監測
+
+- Worker 新增 `StoryVoice.BlueMagpie` Meter，記錄每次嘗試的執行中數量、耗時、結束原因、片段快取命中／未命中、WAV bytes、片段處理與實際 gateway 呼叫延遲。
+- 成功且有完整有效 PCM 時間軸才計算音訊秒數與 RTF；有重用快取的資料另加標示，不拿來冒充冷啟動的模型速度。取消、失敗與無時間軸都不填入成功音訊指標。
+- 結束與長時間處理的進度 log 只記錄工作識別與統計，不記正文、路徑或 provider 例外內容；metrics 標籤不放 owner／book／job ID，避免識別資料與無界標籤數量。
+- 本機 597 項單元測試通過；另補清理失敗與 log 資料邊界後，27 項 BlueMagpie provider／metrics 測試通過。測試以真正的 .NET MeterListener 和檔案快取驗證中斷恢復、全命中、取消、失敗，以及中途接上 active gauge。
+
+讀取方法、指標定義與驗證範圍見 [`BLUEMAGPIE_OBSERVABILITY.md`](BLUEMAGPIE_OBSERVABILITY.md)。目前沒有安裝正式 metrics exporter／儀表板，也尚未進行 GPU 長時間壓力驗收。
 
 ## 2026-09-08 BlueMagpie 失敗批次恢復
 
@@ -193,8 +202,8 @@ JSON/音訊回應大小。
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart
   canary 只重算缺少 chunks；另一次 36-chunk cold benchmark 在約 6.15 分鐘內產生
   690.58 秒 staged 音訊（RTF 0.534），沒有重啟、沒有啟用測試音訊，且測試後 formal
-  flag 已關閉。exhausted-attempt 後的同工作恢復已實作；完整書籍啟用前仍須補結構化
-  長跑 metrics 與 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
+  flag 已關閉。exhausted-attempt 後的同工作恢復與結構化 metrics 已實作；完整書籍啟用前
+  仍須建立正式監測收集與完成 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
   重新散布或商業使用；`BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 預設並應持續為 `false`。
 - BlueMagpie 自架 canary 不需要 VoAI；`VOAI_API_KEY` 與 `VOAI_PAID_API_KEY` 都必須保持
   空值。Worker 只認獨立 opt-in 的 `VOAI_PAID_API_KEY`，避免舊 key 意外產生付費呼叫。
@@ -215,7 +224,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
 | 跨瀏覽器驗收 | Safari／Firefox 與真實行動裝置媒體播放 | CI 已有 DOM 互動回歸；本輪 Chromium 實測不代表所有瀏覽器或真實手機皆已驗收 |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
-| BlueMagpie 正式長篇 | 結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
+| BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復與程式 metrics 已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
 | 長期有聲書 UX | automatic casting、平行生成、cost logging | 單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |

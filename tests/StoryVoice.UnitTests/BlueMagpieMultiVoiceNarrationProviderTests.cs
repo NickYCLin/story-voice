@@ -1,15 +1,22 @@
 using System.Text;
 using System.Buffers.Binary;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
 
-public sealed class BlueMagpieMultiVoiceNarrationProviderTests
+public sealed partial class BlueMagpieMultiVoiceNarrationProviderTests : IDisposable
 {
+    private readonly ServiceProvider _metricsServices = new ServiceCollection().AddMetrics()
+        .AddSingleton<BlueMagpieNarrationMetrics>().BuildServiceProvider();
+
+    public void Dispose() => _metricsServices.Dispose();
+
     [Fact]
     public void Job_budget_defaults_preserve_the_existing_formal_runtime_contract()
     {
@@ -343,7 +350,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 InternalToken = new string('t', 32),
                 ModelRevision = BlueMagpieOptions.PinnedModelRevision,
             }),
-            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance,
+            _metricsServices.GetRequiredService<BlueMagpieNarrationMetrics>());
 
         var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() =>
             provider.SynthesizeAsync(
@@ -555,11 +563,12 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
         Assert.Empty(client.Requests);
     }
 
-    private static BlueMagpieMultiVoiceNarrationProvider CreateProvider(
+    private BlueMagpieMultiVoiceNarrationProvider CreateProvider(
         IBlueMagpieTtsClient client,
         IFfmpegAudioComposer composer,
         IBlueMagpieChunkCache? cache = null,
-        BlueMagpieOptions? providerOptions = null)
+        BlueMagpieOptions? providerOptions = null,
+        ILogger<BlueMagpieMultiVoiceNarrationProvider>? logger = null)
     {
         var configured = providerOptions ?? new BlueMagpieOptions();
         configured.Enabled = true;
@@ -571,7 +580,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
             cache ?? new EphemeralChunkCache(),
             composer,
             Options.Create(configured),
-            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+            logger ?? NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance,
+            _metricsServices.GetRequiredService<BlueMagpieNarrationMetrics>());
     }
 
     private static BlueMagpieChunkCache CreatePersistentCache(string root) =>
