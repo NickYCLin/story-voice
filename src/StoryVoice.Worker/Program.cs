@@ -10,6 +10,11 @@ builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfigurati
     .Enrich.FromLogContext()
     .WriteTo.Console());
 builder.Services.AddStoryVoiceInfrastructure(builder.Configuration);
+builder.Services.AddOptions<EdgeTtsOptions>()
+    .Bind(builder.Configuration.GetSection(EdgeTtsOptions.SectionName))
+    .Validate(options => options.MaximumConcurrentChunks is >= 1 and <= 4,
+        "Edge TTS chunks per job must use between 1 and 4 concurrent slots.")
+    .ValidateOnStart();
 builder.Services.AddOptions<BlueMagpieChunkCacheOptions>()
     .Bind(builder.Configuration.GetSection(BlueMagpieChunkCacheOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath),

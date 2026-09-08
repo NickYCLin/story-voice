@@ -256,7 +256,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復與程式 metrics 已實作；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
-| 長期有聲書 UX | 單工作片段平行、金額估算與供應商用量對帳 | 配音嘗試用量／耗時、規則式聲線建議、不同工作間有界平行、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
+| 長期有聲書 UX | 非 Edge provider 的單工作片段平行、金額估算與供應商用量對帳 | Edge 多角色片段與不同工作間有界平行、配音嘗試用量／耗時、規則式聲線建議、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；平行上限各自預設 1；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界

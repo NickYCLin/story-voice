@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 import tempfile
@@ -48,11 +49,18 @@ async def run_subprocess(args: list[str], *, input_bytes: bytes | None = None) -
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate(input_bytes)
+    try:
+        stdout, _stderr = await process.communicate(input_bytes)
+    except BaseException:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        await process.communicate()
+        raise
     if process.returncode != 0:
-        raise RuntimeError(
-            f"{args[0]} exited with {process.returncode}: {stderr.decode('utf-8', 'replace')}"
-        )
+        raise RuntimeError(f"{Path(args[0]).name} exited with {process.returncode}")
     return stdout
 
 
@@ -136,6 +144,7 @@ async def synthesize_multi_voice(
     normalize_loudness: bool = False,
     max_chars: int = DEFAULT_MAX_CHARS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    max_concurrent_chunks: int = 1,
     communicator_factory: Callable[..., Any] | None = None,
     delay: Callable[[float], Awaitable[None]] | None = None,
     progress_reporter: Callable[[int, int], None] | None = None,
@@ -147,6 +156,8 @@ async def synthesize_multi_voice(
         raise ValueError("manifest has no turns")
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
+    if type(max_concurrent_chunks) is not int or not 1 <= max_concurrent_chunks <= 4:
+        raise ValueError("max_concurrent_chunks must be an integer between 1 and 4")
     for turn in turns:
         if not str(turn.get("text", "")).strip():
             raise ValueError("a turn's text is empty")
@@ -166,8 +177,8 @@ async def synthesize_multi_voice(
 
     async def probe_part_ms(path: Path) -> int:
         seconds = await probe_duration_seconds(path, ffprobe_bin=ffprobe_bin, runner=run)
-        if seconds < 0:
-            raise RuntimeError("ffprobe reported a negative part duration")
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise RuntimeError("ffprobe reported an unusable part duration")
         return round(seconds * 1000)
 
     completed = 0
@@ -178,7 +189,61 @@ async def synthesize_multi_voice(
     with tempfile.TemporaryDirectory(prefix="edge-tts-multi-", dir=output.parent) as directory:
         work = Path(directory)
         sequence: list[Path] = []
+        durations: dict[tuple[int, int], int] = {}
+        pending = iter(
+            (turn_index, chunk_index, turn, chunk)
+            for turn_index, (turn, chunks) in enumerate(zip(turns, turn_chunks))
+            for chunk_index, chunk in enumerate(chunks)
+        )
+        failed = False
 
+        async def synthesize_chunks() -> None:
+            nonlocal completed, failed
+            while not failed:
+                item = next(pending, None)
+                if item is None:
+                    return
+                turn_index, chunk_index, turn, chunk = item
+                part = work / f"{turn_index:04d}-{chunk_index:04d}.mp3"
+                try:
+                    for attempt in range(1, max_attempts + 1):
+                        part.unlink(missing_ok=True)
+                        try:
+                            communicate = factory(chunk, str(turn["voice"]),
+                                rate=str(turn.get("rate", "+0%")),
+                                pitch=str(turn.get("pitch", "+0Hz")),
+                                volume=str(turn.get("volume", "+0%")))
+                            await communicate.save(str(part))
+                            if not part.exists() or part.stat().st_size < 1:
+                                raise RuntimeError("edge-tts returned empty audio")
+                            break
+                        except Exception:
+                            if attempt == max_attempts:
+                                raise RuntimeError(
+                                    f"edge-tts turn {turn_index + 1} chunk {chunk_index + 1} "
+                                    f"failed after {max_attempts} attempts"
+                                ) from None
+                            await wait(float(2 ** (attempt - 1)))
+                    durations[turn_index, chunk_index] = await probe_part_ms(part)
+                    completed += 1
+                    if progress_reporter is not None:
+                        progress_reporter(completed, total_chunks)
+                except BaseException:
+                    failed = True
+                    raise
+
+        workers = [asyncio.create_task(synthesize_chunks())
+                   for _ in range(min(max_concurrent_chunks, total_chunks))]
+        try:
+            await asyncio.gather(*workers)
+        except BaseException:
+            for worker in workers:
+                worker.cancel()
+            # No task may retain a part file when TemporaryDirectory removes it.
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
+
+        # Completion order never controls playback order or speaker pauses.
         for turn_index, (turn, chunks) in enumerate(zip(turns, turn_chunks)):
             pause_before_ms = int(turn.get("pauseBeforeMs", 0) or 0)
             silence_path = work / f"{turn_index:04d}-pause.mp3"
@@ -189,32 +254,10 @@ async def synthesize_multi_voice(
                 cursor_ms += await probe_part_ms(silence_path)
 
             turn_start_ms = cursor_ms
-            voice = str(turn["voice"])
-            rate = str(turn.get("rate", "+0%"))
-            pitch = str(turn.get("pitch", "+0Hz"))
-            volume = str(turn.get("volume", "+0%"))
-            for chunk_index, chunk in enumerate(chunks):
+            for chunk_index in range(len(chunks)):
                 part = work / f"{turn_index:04d}-{chunk_index:04d}.mp3"
-                for attempt in range(1, max_attempts + 1):
-                    part.unlink(missing_ok=True)
-                    try:
-                        communicate = factory(chunk, voice, rate=rate, pitch=pitch, volume=volume)
-                        await communicate.save(str(part))
-                        if not part.exists() or part.stat().st_size < 1:
-                            raise RuntimeError("edge-tts returned empty audio")
-                        break
-                    except Exception as error:
-                        if attempt == max_attempts:
-                            raise RuntimeError(
-                                f"edge-tts turn {turn_index + 1} chunk {chunk_index + 1} "
-                                f"failed after {max_attempts} attempts"
-                            ) from error
-                        await wait(float(2 ** (attempt - 1)))
                 sequence.append(part)
-                cursor_ms += await probe_part_ms(part)
-                completed += 1
-                if progress_reporter is not None:
-                    progress_reporter(completed, total_chunks)
+                cursor_ms += durations[turn_index, chunk_index]
 
             timeline.append({
                 "index": turn_index,
@@ -241,6 +284,7 @@ async def synthesize_multi_voice(
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
+    parser.add_argument("--max-concurrent-chunks", type=int, choices=range(1, 5), default=1)
     parser.add_argument("--no-loudness-norm", action="store_true", help="Disable EBU R128 loudness normalization")
     args = parser.parse_args()
 
@@ -254,6 +298,7 @@ async def main() -> None:
         manifest["turns"],
         args.output,
         normalize_loudness=not args.no_loudness_norm,
+        max_concurrent_chunks=args.max_concurrent_chunks,
         progress_reporter=lambda completed, total: print(
             f"STORYVOICE_PROGRESS {completed}/{total}",
             file=sys.stderr,

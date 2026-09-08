@@ -1,10 +1,14 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 
 namespace StoryVoice.Worker;
 
-public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoiceNarrationProvider> logger)
+public sealed class EdgeTtsMultiVoiceNarrationProvider(
+    ILogger<EdgeTtsMultiVoiceNarrationProvider> logger,
+    IOptions<EdgeTtsOptions>? options = null)
     : IMultiVoiceNarrationProvider
 {
     private const string ManifestSchemaVersion = "storyvoice:multi-voice-manifest:v1";
@@ -42,19 +46,8 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
             new Manifest(ManifestSchemaVersion, request.Turns),
             ManifestSerializerOptions);
 
-        var scriptPath = Path.Combine(AppContext.BaseDirectory, "edge_tts_multi_voice_provider.py");
         EdgeTtsNarrationProvider.CleanupTemporaryDirectories(outputPath, logger);
-        var startInfo = new ProcessStartInfo("python3")
-        {
-            RedirectStandardInput = true,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add(scriptPath);
-        startInfo.ArgumentList.Add("--output");
-        startInfo.ArgumentList.Add(outputPath);
+        var startInfo = CreateStartInfo(outputPath);
 
         using var process = new Process { StartInfo = startInfo };
         string providerOutput;
@@ -115,6 +108,27 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
         }
 
         return new MultiVoiceSynthesisResult(turnTimings);
+    }
+
+    internal ProcessStartInfo CreateStartInfo(string outputPath)
+    {
+        var concurrency = options?.Value.MaximumConcurrentChunks ?? 1;
+        if (concurrency is < 1 or > 4)
+            throw new InvalidOperationException("Edge TTS chunks per job must use between 1 and 4 concurrent slots.");
+        var startInfo = new ProcessStartInfo("python3")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "edge_tts_multi_voice_provider.py"));
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(outputPath);
+        startInfo.ArgumentList.Add("--max-concurrent-chunks");
+        startInfo.ArgumentList.Add(concurrency.ToString(CultureInfo.InvariantCulture));
+        return startInfo;
     }
 
     internal static IReadOnlyList<NarrationTurnTiming>? TryParseTurnTimings(

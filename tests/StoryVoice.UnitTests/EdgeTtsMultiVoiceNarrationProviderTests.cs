@@ -1,10 +1,43 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
 
 public sealed class EdgeTtsMultiVoiceNarrationProviderTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Configured_chunk_limit_is_forwarded_as_a_separate_python_argument(int concurrency)
+    {
+        var provider = new EdgeTtsMultiVoiceNarrationProvider(NullLogger<EdgeTtsMultiVoiceNarrationProvider>.Instance,
+            Options.Create(new EdgeTtsOptions { MaximumConcurrentChunks = concurrency }));
+        var start = provider.CreateStartInfo("synthetic folder/book's audio.mp3");
+        Assert.False(start.UseShellExecute);
+        Assert.Contains("synthetic folder/book's audio.mp3", start.ArgumentList);
+        Assert.Equal("--max-concurrent-chunks", start.ArgumentList[^2]);
+        Assert.Equal(concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture), start.ArgumentList[^1]);
+    }
+
+    [Fact]
+    public void Existing_callers_keep_one_chunk_at_a_time()
+    {
+        var provider = new EdgeTtsMultiVoiceNarrationProvider(NullLogger<EdgeTtsMultiVoiceNarrationProvider>.Instance);
+        Assert.Equal("1", provider.CreateStartInfo("unused.mp3").ArgumentList[^1]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    public void Invalid_chunk_limits_are_rejected_before_starting_python(int concurrency)
+    {
+        var provider = new EdgeTtsMultiVoiceNarrationProvider(NullLogger<EdgeTtsMultiVoiceNarrationProvider>.Instance,
+            Options.Create(new EdgeTtsOptions { MaximumConcurrentChunks = concurrency }));
+        Assert.Throws<InvalidOperationException>(() => provider.CreateStartInfo("unused.mp3"));
+    }
+
     [Fact]
     public void ProviderName_is_edge()
     {

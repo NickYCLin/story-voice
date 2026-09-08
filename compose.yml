@@ -156,6 +156,7 @@ services:
       Narration__Rate: -5%
       Narration__ProviderTimeoutMinutes: ${NARRATION_PROVIDER_TIMEOUT_MINUTES:-180}
       Narration__MaximumConcurrentJobs: ${NARRATION_MAX_CONCURRENT_JOBS:-1}
+      EdgeTts__MaximumConcurrentChunks: ${EDGE_TTS_MAX_CONCURRENT_CHUNKS:-1}
       Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-5}
     volumes:
       - book-storage:/data/books

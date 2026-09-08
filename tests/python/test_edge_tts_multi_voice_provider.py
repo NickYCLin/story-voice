@@ -2,12 +2,13 @@ import asyncio
 import importlib.util
 import json
 import shutil
-import subprocess
 from pathlib import Path
 import sys
 import tempfile
+import traceback
 import types
 import unittest
+from unittest.mock import AsyncMock, patch
 
 
 fake_edge_tts = types.ModuleType("edge_tts")
@@ -49,6 +50,241 @@ class RecordingRunner:
 
 
 class EdgeTtsMultiVoiceProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_waits_for_one_chunk_before_starting_the_next(self):
+        entered = asyncio.Queue()
+        release = asyncio.Event()
+
+        class WaitingCommunicate:
+            def __init__(self, text, voice, rate, pitch, volume):
+                self.text = text
+
+            async def save(self, path):
+                await entered.put(self.text)
+                await release.wait()
+                Path(path).write_bytes(b"chunk")
+
+        with tempfile.TemporaryDirectory() as directory:
+            task = asyncio.create_task(provider.synthesize_multi_voice(
+                [{"text": text, "voice": "v"} for text in ["first", "second"]],
+                str(Path(directory) / "book.mp3"), communicator_factory=WaitingCommunicate,
+                subprocess_runner=RecordingRunner()))
+            try:
+                self.assertEqual("first", await asyncio.wait_for(entered.get(), 5))
+                await asyncio.sleep(0)
+                self.assertTrue(entered.empty())
+                release.set()
+                await asyncio.wait_for(task, 5)
+                self.assertEqual("second", entered.get_nowait())
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_parallel_completion_keeps_chunk_order_timing_and_a_bounded_number_of_tasks(self):
+        entered = asyncio.Queue()
+        gates = {stem: asyncio.Event() for stem in ["0000-0000", "0000-0001", "0001-0000", "0001-0001"]}
+        active = 0
+        peak = 0
+        reports = []
+        three_finished = asyncio.Event()
+        concat_lines = []
+
+        class ControlledCommunicate:
+            def __init__(self, text, voice, rate, pitch, volume):
+                pass
+
+            async def save(self, path):
+                nonlocal active, peak
+                active += 1
+                peak = max(peak, active)
+                stem = Path(path).stem
+                try:
+                    await entered.put(stem)
+                    await gates[stem].wait()
+                    Path(path).write_bytes(stem.encode())
+                finally:
+                    active -= 1
+
+        class DurationRunner(RecordingRunner):
+            async def __call__(self, args, *, input_bytes=None):
+                if "concat" in args:
+                    concat_lines.extend(Path(args[args.index("-i") + 1]).read_text(encoding="utf-8").splitlines())
+                if Path(args[0]).name == "ffprobe":
+                    stem = Path(args[-1]).stem
+                    if stem.endswith("-pause"):
+                        return b"0.25"
+                    if stem != "complete":
+                        turn, chunk = map(int, stem.split("-"))
+                        return str((turn * 2 + chunk + 1) / 10).encode()
+                return await super().__call__(args, input_bytes=input_bytes)
+
+        def report(completed, total):
+            reports.append((completed, total))
+            if completed == 3:
+                three_finished.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            task = asyncio.create_task(provider.synthesize_multi_voice(
+                [{"text": "Aa", "voice": "n"}, {"text": "Bb", "voice": "c", "pauseBeforeMs": 250}],
+                str(Path(directory) / "book.mp3"), max_chars=1, max_concurrent_chunks=2,
+                communicator_factory=ControlledCommunicate, subprocess_runner=DurationRunner(), progress_reporter=report))
+            try:
+                self.assertEqual("0000-0000", await asyncio.wait_for(entered.get(), 5))
+                self.assertEqual("0000-0001", await asyncio.wait_for(entered.get(), 5))
+                self.assertEqual(2, active)
+                gates["0000-0001"].set()
+                self.assertEqual("0001-0000", await asyncio.wait_for(entered.get(), 5))
+                gates["0001-0000"].set()
+                self.assertEqual("0001-0001", await asyncio.wait_for(entered.get(), 5))
+                gates["0001-0001"].set()
+                await asyncio.wait_for(three_finished.wait(), 5)
+                self.assertFalse(task.done())
+                gates["0000-0000"].set()
+                timeline = await asyncio.wait_for(task, 5)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            self.assertEqual(2, peak)
+            self.assertEqual(0, active)
+            self.assertEqual([(1, 4), (2, 4), (3, 4), (4, 4)], reports)
+            self.assertEqual([{"index": 0, "startMs": 0, "durationMs": 300},
+                              {"index": 1, "startMs": 550, "durationMs": 700}], timeline)
+            expected_parts = ["0000-0000.mp3", "0000-0001.mp3", "0001-pause.mp3", "0001-0000.mp3", "0001-0001.mp3"]
+            self.assertEqual(len(expected_parts), len(concat_lines))
+            for filename, line in zip(expected_parts, concat_lines):
+                self.assertIn(filename, line)
+
+    async def test_parallel_failure_cancels_siblings_before_cleanup_and_preserves_previous_output(self):
+        second_entered = asyncio.Event()
+        calls = []
+        active = 0
+
+        class FailingCommunicate:
+            def __init__(self, text, voice, rate, pitch, volume):
+                self.text = text
+
+            async def save(self, path):
+                nonlocal active
+                active += 1
+                calls.append(self.text)
+                try:
+                    if self.text == "first":
+                        await second_entered.wait()
+                        raise RuntimeError("synthetic-private-provider-detail")
+                    second_entered.set()
+                    await asyncio.Event().wait()
+                finally:
+                    await asyncio.sleep(0)
+                    # Cleanup must await siblings before removing their directory.
+                    Path(path).write_bytes(b"cleanup-marker")
+                    active -= 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "book.mp3"
+            output.write_bytes(b"previous-output")
+            with self.assertRaises(RuntimeError) as raised:
+                await asyncio.wait_for(provider.synthesize_multi_voice(
+                    [{"text": text, "voice": "v"} for text in ["first", "second", "third"]],
+                    str(output), max_concurrent_chunks=2, max_attempts=1,
+                    communicator_factory=FailingCommunicate, subprocess_runner=RecordingRunner()), 5)
+            self.assertNotIn("synthetic-private-provider-detail", "".join(traceback.format_exception(raised.exception)))
+            self.assertEqual(["first", "second"], calls)
+            self.assertEqual(0, active)
+            self.assertEqual(b"previous-output", output.read_bytes())
+            self.assertEqual([output], list(Path(directory).iterdir()))
+
+    async def test_cancelling_parallel_synthesis_waits_for_all_writers(self):
+        entered = asyncio.Queue()
+        stopped = []
+
+        class WaitingCommunicate:
+            def __init__(self, text, voice, rate, pitch, volume):
+                self.text = text
+
+            async def save(self, path):
+                await entered.put(self.text)
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    await asyncio.sleep(0)
+                    Path(path).write_bytes(b"cleanup-marker")
+                    stopped.append(self.text)
+
+        with tempfile.TemporaryDirectory() as directory:
+            task = asyncio.create_task(provider.synthesize_multi_voice(
+                [{"text": text, "voice": "v"} for text in ["first", "second", "third"]],
+                str(Path(directory) / "book.mp3"), max_concurrent_chunks=2,
+                communicator_factory=WaitingCommunicate, subprocess_runner=RecordingRunner()))
+            try:
+                await asyncio.wait_for(entered.get(), 5)
+                await asyncio.wait_for(entered.get(), 5)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            self.assertCountEqual(["first", "second"], stopped)
+            self.assertTrue(entered.empty())
+            self.assertEqual([], list(Path(directory).iterdir()))
+
+    async def test_parallel_retry_only_repeats_the_failed_chunk(self):
+        attempts = {}
+
+        class FlakyCommunicate:
+            def __init__(self, text, voice, rate, pitch, volume):
+                self.text = text
+
+            async def save(self, path):
+                attempts[self.text] = attempts.get(self.text, 0) + 1
+                if Path(path).exists():
+                    raise AssertionError("partial output was not cleared before retry")
+                Path(path).write_bytes(b"chunk")
+                if self.text == "retry" and attempts[self.text] == 1:
+                    raise RuntimeError("transient")
+
+        with tempfile.TemporaryDirectory() as directory:
+            await provider.synthesize_multi_voice(
+                [{"text": text, "voice": "v"} for text in ["retry", "success"]],
+                str(Path(directory) / "book.mp3"), max_concurrent_chunks=2,
+                communicator_factory=FlakyCommunicate, subprocess_runner=RecordingRunner(),
+                delay=lambda _: asyncio.sleep(0))
+        self.assertEqual({"retry": 2, "success": 1}, attempts)
+
+    async def test_invalid_parallel_limits_are_rejected_before_creating_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for limit in [0, 5, True, 1.5]:
+                with self.subTest(limit=limit), self.assertRaises(ValueError):
+                    await provider.synthesize_multi_voice([{"text": "test", "voice": "v"}],
+                        str(Path(directory) / "book.mp3"), max_concurrent_chunks=limit)
+            self.assertEqual([], list(Path(directory).iterdir()))
+
+    async def test_cancelled_subprocess_is_killed_and_drained(self):
+        entered = asyncio.Event()
+
+        class Process:
+            returncode = None
+            drained = False
+
+            async def communicate(self, _input=None):
+                if self.returncode is not None:
+                    self.drained = True
+                    return b"", b""
+                entered.set()
+                await asyncio.Event().wait()
+
+            def kill(self):
+                self.returncode = -9
+
+        process = Process()
+        with patch.object(provider.asyncio, "create_subprocess_exec", new=AsyncMock(return_value=process)):
+            task = asyncio.create_task(provider.run_subprocess(["synthetic-ffmpeg"]))
+            await asyncio.wait_for(entered.wait(), 5)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(-9, process.returncode)
+        self.assertTrue(process.drained)
+
     async def test_synthesizes_each_turn_with_its_own_voice_and_reports_progress(self):
         saved = []
 
@@ -244,13 +480,11 @@ class EdgeTtsMultiVoiceProviderRealFfmpegTests(unittest.IsolatedAsyncioTestCase)
                 self.text = text
 
             async def save(self, path):
-                subprocess.run(
+                await provider.run_subprocess(
                     [
                         "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                         "-t", "0.2", "-c:a", "libmp3lame", "-q:a", "9", path,
                     ],
-                    check=True,
-                    capture_output=True,
                 )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -262,6 +496,7 @@ class EdgeTtsMultiVoiceProviderRealFfmpegTests(unittest.IsolatedAsyncioTestCase)
                 ],
                 str(output),
                 communicator_factory=RealAudioCommunicate,
+                max_concurrent_chunks=2,
             )
 
             self.assertTrue(output.exists())
