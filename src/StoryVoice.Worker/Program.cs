@@ -50,6 +50,8 @@ builder.Services.AddOptions<VoAiOptions>()
         "VoAI aggregate job response limit must be between 64 MiB and 8 GiB.")
     .Validate(options => options.MaximumChunksPerJob is >= 1 and <= 10_000,
         "VoAI chunks per job must be between 1 and 10000.")
+    .Validate(options => options.MaximumConcurrentChunks is >= 1 and <= 4,
+        "VoAI chunks per job must use between 1 and 4 concurrent slots.")
     .Validate(options => options.SampleRate == 32_000,
         "VoAI synthesis currently requires a 32000 Hz WAV response.")
     .ValidateOnStart();

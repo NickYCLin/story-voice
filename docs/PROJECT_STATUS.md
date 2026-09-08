@@ -19,6 +19,12 @@
 - 公開目錄與聲線詳情共用的固定試聽，現在可辨識主動暫停造成的播放取消；舊要求或舊聲線的晚到錯誤不會污染新播放。等音訊時顯示載入提示，真正音檔失敗後可手動重新載入。
 - 74 項前端互動測試、164 項靜態檢查及 lint 通過；Chrome／Firefox／WebKit 以真正 HTTP 延遲音訊驗證暫停、恢復與 1440／390／320px 排版。範圍見 [`PUBLIC_VOICE_DETAIL.md`](PUBLIC_VOICE_DETAIL.md)，本次未部署或啟用公開聲線。
 
+## 2026-09-08 VoAI 片段平行
+
+- VoAI 多角色工作新增 `MaximumConcurrentChunks`，預設 1、最多 4；各段可先後完成，組合仍依原文與停頓順序，進度依完成數逐次回報。
+- 失敗會取消並等待其他片段收尾，再清理檔案；工作音訊預算共用同一計數，超出不組合成品。保留付費失敗／逾時不自動重送，沒有啟用金鑰或提高正式並行數。
+- 完整 677 項單元測試通過，含 42 項 VoAI 測試；VoAI staging 與 PostgreSQL Worker 工作／租約整合測試通過。Worker 測試首次因 Docker 清理逾時失敗，單獨重跑通過。設定與音訊預算的限制見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)，實際供應商限制與效能尚未驗收。
+
 ## 2026-09-08 角色聲線建議
 
 - 系列聲線設定新增「依角色資料建議聲線」與還原；依已連結、啟用中的角色庫設定及目錄明確標籤比對，只選擇與旁白相同引擎且正式可用的聲線。
@@ -36,7 +42,7 @@
 
 本機完整回歸：609 項單元測試、256 項整合測試通過；Compose 設定解析與 `git diff --check` 通過。
 
-設定、資源限制與恢復行為見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)。本輪沒有修改正式環境的並行數，也沒有用外部 TTS 或 GPU 進行負載測試。單 GPU 仍先保留 1；單一工作內的片段依序生成，跨 replica 公平排程仍未實作。
+設定、資源限制與恢復行為見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)。本輪沒有修改正式環境的並行數，也沒有用外部 TTS 或 GPU 進行負載測試。單 GPU 仍先保留 1；Edge／VoAI 已另有預設 1 的工作內片段設定，跨 replica 公平排程仍未實作。
 
 ## 2026-09-08 BlueMagpie 合成監測
 
@@ -269,7 +275,7 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
 | BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復、程式 metrics 與預設關閉的 OTLP 匯出已實作，仍須營運端設定 Collector 與告警；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
 | 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
-| 長期有聲書 UX | 非 Edge provider 的單工作片段平行、金額估算與供應商用量對帳 | Edge 多角色片段與不同工作間有界平行、配音嘗試用量／耗時、規則式聲線建議、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；平行上限各自預設 1；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
+| 長期有聲書 UX | BlueMagpie／3wa 的單工作片段平行、金額估算與供應商用量對帳 | Edge／VoAI 多角色片段與不同工作間有界平行、配音嘗試用量／耗時、規則式聲線建議、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；平行上限各自預設 1；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界

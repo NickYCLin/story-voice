@@ -135,6 +135,7 @@ services:
       VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
       # Paid VoAI calls are opt-in. A legacy VOAI_API_KEY is intentionally ignored.
       VoAi__ApiKey: ${VOAI_PAID_API_KEY:-}
+      VoAi__MaximumConcurrentChunks: ${VOAI_MAX_CONCURRENT_CHUNKS:-1}
       BlueMagpie__Enabled: ${BLUEMAGPIE_ENABLED:-false}
       BlueMagpie__FormalNarrationEnabled: ${BLUEMAGPIE_FORMAL_NARRATION_ENABLED:-false}
       BlueMagpie__BaseUrl: http://bluemagpie-gateway:8081/

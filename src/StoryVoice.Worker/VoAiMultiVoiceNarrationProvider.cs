@@ -25,6 +25,11 @@ public sealed class VoAiMultiVoiceNarrationProvider(
         try
         {
             ArgumentNullException.ThrowIfNull(request);
+            var settings = options.Value;
+            if (settings.MaximumConcurrentChunks is < 1 or > 4)
+            {
+                throw new InvalidOperationException("VoAI chunk concurrency must be between 1 and 4.");
+            }
             if (request.Turns.Count == 0)
             {
                 throw new ArgumentException("At least one VoAI narration turn is required.", nameof(request));
@@ -37,7 +42,7 @@ public sealed class VoAiMultiVoiceNarrationProvider(
                 throw new ArgumentException("VoAI narration contains no synthesizable text.", nameof(request));
             }
 
-            if (totalChunks > options.Value.MaximumChunksPerJob)
+            if (totalChunks > settings.MaximumChunksPerJob)
             {
                 throw new InvalidOperationException("VoAI narration exceeds the configured chunk budget.");
             }
@@ -48,15 +53,26 @@ public sealed class VoAiMultiVoiceNarrationProvider(
             Directory.CreateDirectory(workDirectory);
             try
             {
-                var audioSegments = new List<VoAiAudioSegment>(totalChunks);
+                var chunks = preparedTurns.SelectMany((turn, turnIndex) =>
+                    turn.Chunks.Select((_, chunkIndex) => (Turn: turn, TurnIndex: turnIndex, ChunkIndex: chunkIndex)))
+                    .ToArray();
+                var audioSegments = new VoAiAudioSegment[totalChunks];
+                using var progressGate = new SemaphoreSlim(1, 1);
                 var completedChunks = 0;
                 long receivedAudioBytes = 0;
-                for (var turnIndex = 0; turnIndex < preparedTurns.Length; turnIndex++)
-                {
-                    var turn = preparedTurns[turnIndex];
-                    for (var chunkIndex = 0; chunkIndex < turn.Chunks.Count; chunkIndex++)
+                // ForEachAsync bounds the running work, cancels siblings on failure and drains them
+                // before returning. The work directory must outlive every open response/file.
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, chunks.Length),
+                    new ParallelOptions
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        MaxDegreeOfParallelism = settings.MaximumConcurrentChunks,
+                        CancellationToken = cancellationToken,
+                    },
+                    async (index, chunkCancellation) =>
+                    {
+                        var (turn, turnIndex, chunkIndex) = chunks[index];
+                        chunkCancellation.ThrowIfCancellationRequested();
                         var wavPath = Path.Combine(workDirectory, $"{turnIndex:00000}-{chunkIndex:00000}.wav");
                         await using (var destination = new FileStream(
                             wavPath,
@@ -75,7 +91,7 @@ public sealed class VoAiMultiVoiceNarrationProvider(
                                     turn.Speed,
                                     turn.PitchShift),
                                 destination,
-                                cancellationToken);
+                                chunkCancellation);
                         }
 
                         if (!File.Exists(wavPath) || new FileInfo(wavPath).Length < 1)
@@ -83,27 +99,34 @@ public sealed class VoAiMultiVoiceNarrationProvider(
                             throw new InvalidOperationException("VoAI returned an empty WAV segment.");
                         }
 
-                        receivedAudioBytes = checked(receivedAudioBytes + new FileInfo(wavPath).Length);
-                        if (receivedAudioBytes > options.Value.MaximumJobResponseBytes)
+                        await progressGate.WaitAsync(chunkCancellation);
+                        try
                         {
-                            throw new InvalidOperationException(
-                                "VoAI narration exceeds the configured aggregate audio budget.");
-                        }
+                            receivedAudioBytes = checked(receivedAudioBytes + new FileInfo(wavPath).Length);
+                            if (receivedAudioBytes > settings.MaximumJobResponseBytes)
+                            {
+                                throw new InvalidOperationException(
+                                    "VoAI narration exceeds the configured aggregate audio budget.");
+                            }
 
-                        audioSegments.Add(new VoAiAudioSegment(
-                            wavPath,
-                            turn.Volume,
-                            chunkIndex == 0 ? turn.PauseBeforeMs : 0,
-                            TurnIndex: turnIndex));
-                        completedChunks++;
-                        if (progressCallback is not null)
-                        {
-                            await progressCallback(
-                                new NarrationSynthesisProgress(completedChunks, totalChunks),
-                                cancellationToken);
+                            audioSegments[index] = new VoAiAudioSegment(
+                                wavPath,
+                                turn.Volume,
+                                chunkIndex == 0 ? turn.PauseBeforeMs : 0,
+                                TurnIndex: turnIndex);
+                            completedChunks++;
+                            if (progressCallback is not null)
+                            {
+                                await progressCallback(
+                                    new NarrationSynthesisProgress(completedChunks, totalChunks),
+                                    chunkCancellation);
+                            }
                         }
-                    }
-                }
+                        finally
+                        {
+                            progressGate.Release();
+                        }
+                    });
 
                 var result = await composer.ComposeAsync(audioSegments, outputPath, cancellationToken);
                 if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 1)

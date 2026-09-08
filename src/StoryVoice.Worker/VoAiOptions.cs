@@ -16,5 +16,7 @@ public sealed class VoAiOptions
 
     public int MaximumChunksPerJob { get; set; } = 5_000;
 
+    public int MaximumConcurrentChunks { get; set; } = 1;
+
     public int SampleRate { get; set; } = 32_000;
 }
