@@ -10,6 +10,35 @@ StoryVoice 的 external voice API 只接受系統擁有者自行建立、沒有�
 目前 repository 預設 `ExternalVoiceApi.Enabled=false`、`VoiceCatalog.Enabled=false`、
 Consumers 與 catalog Entries 都是空集合，且不包含任何真實 token 或授權素材。
 
+## 公開聲線查詢、固定試聽與部署子路徑
+
+公開目錄啟用時，下列 GET 不需 API 金鑰，且只回傳通過公開授權檢查的聲線：
+
+| API 路徑（加在部署 base URL 後） | 用途 |
+|---|---|
+| `/api/public/v1/voices` | 取得目錄與 `alias`、`sampleUrl`、`canPreview` |
+| `/api/public/v1/voices/{alias}` | 取得單一聲線的公開資訊與目前授權摘要 |
+| `/api/public/v1/voices/{alias}/demo` | 取得固定 `audio/wav` 試聽，不觸發合成 |
+
+外部合成的 `voice` 使用配置的 `alias`，不是可變動的顯示名稱，也不是私人角色 ID。
+公開可見不會自動賦予 consumer 合成 entitlement；私人角色不會因使用公開 GET 而曝光。
+目錄停用回 404；啟用但沒有合格項目回空陣列。失效或未公開 alias 的 detail／demo 回 404。
+
+本服務的部署 base URL 為 `https://aiprod.wrbtycg.tw/StoryVoice`，例如：
+
+~~~bash
+curl --fail --silent --show-error https://aiprod.wrbtycg.tw/StoryVoice/api/public/v1/voices
+~~~
+
+目錄內的 `sampleUrl` 以 `/api/` 開頭。外部程式必須將它接在上述部署 base URL 後，
+不要以網域根目錄解析而丟失 `/StoryVoice`，也不要重複加子路徑。
+合成完整 URL 是 `https://aiprod.wrbtycg.tw/StoryVoice/api/external/v1/speech`。
+以下範例的 `<base-path>` 應填 `/StoryVoice`；若部署在網域根目錄則留空。
+
+TTS 是伺服器對伺服器介接，不以跨來源瀏覽器 CORS 作為驗收前提，也不可將 Bearer token
+放進前端。公開頁內的試聽使用同來源 URL；其他網站以 JavaScript 讀取音訊 bytes 的跨來源
+用法需要另行定義 CORS 契約，不能假設目前已支援。
+
 ## HTTP contract
 
 兩種 tier 共用：
@@ -43,7 +72,7 @@ Bearer prefix 與 tier 強制綁定：
 互換。
 
 ~~~bash
-curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" --header "Idempotency-Key: <unique-16-to-64-character-key>" --header "Content-Type: application/json" --data '{"voice":"<authorized-alias>","text":"<authorized-text>"}' --output sample.wav https://<host>/api/external/v1/speech
+curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" --header "Idempotency-Key: <unique-16-to-64-character-key>" --header "Content-Type: application/json" --data '{"voice":"<authorized-alias>","text":"<authorized-text>"}' --output sample.wav https://<host><base-path>/api/external/v1/speech
 ~~~
 
 | HTTP | code | 意義 |

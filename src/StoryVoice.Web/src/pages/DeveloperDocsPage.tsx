@@ -21,10 +21,10 @@ const CURL_EXAMPLE = `curl --fail-with-body \\
   --header "Content-Type: application/json" \\
   --data '{"voice":"<authorized-alias>","text":"<authorized-text>"}' \\
   --output sample.wav \\
-  https://<host>/api/external/v1/speech`
+  https://<host><base-path>/api/external/v1/speech`
 
 const NODE_EXAMPLE = `// Server-side only. Keep the token in a backend environment variable.
-const response = await fetch('https://<host>/api/external/v1/speech', {
+const response = await fetch('https://<host><base-path>/api/external/v1/speech', {
   method: 'POST',
   headers: {
     Authorization: \`Bearer \${process.env.STORYVOICE_VOICE_TOKEN}\`,
@@ -39,7 +39,7 @@ const wav = Buffer.from(await response.arrayBuffer())`
 const PYTHON_EXAMPLE = `import os, uuid, requests
 
 response = requests.post(
-    "https://<host>/api/external/v1/speech",
+    "https://<host><base-path>/api/external/v1/speech",
     headers={
         "Authorization": f"Bearer {os.environ['STORYVOICE_VOICE_TOKEN']}",
         "Idempotency-Key": str(uuid.uuid4()),
@@ -58,7 +58,7 @@ client.DefaultRequestHeaders.Authorization =
 client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
 
 var payload = JsonContent.Create(new { voice = "<authorized-alias>", text = "<authorized-text>" });
-using var response = await client.PostAsync("https://<host>/api/external/v1/speech", payload);
+using var response = await client.PostAsync("https://<host><base-path>/api/external/v1/speech", payload);
 response.EnsureSuccessStatusCode();
 await using var wav = await response.Content.ReadAsStreamAsync();`
 
@@ -215,10 +215,26 @@ Content-Type: application/json
           </div>
         </section>
 
+        <section className="mt-14" id="public-voices">
+          <h2 className="font-serif text-2xl text-stone-900">{isEnglish ? 'Find a public voice and preview it' : '查詢公開聲線與試聽'}</h2>
+          <p className="mt-2 text-sm leading-6 text-stone-600">
+            {isEnglish ? 'Use the configured alias returned by the public catalog as the voice identifier, not its display name. A public demo does not grant synthesis access: the API credential must separately authorize that alias.' : '以公開目錄回傳的 alias 作為 voice 識別值，不使用顯示名稱。公開試聽不代表自動取得合成權限；API 金鑰仍須個別獲准使用該 alias。'}
+          </p>
+          <CodeBlock label="Public API" code={`GET <base-path>/api/public/v1/voices
+GET <base-path>/api/public/v1/voices/<alias>
+GET <base-path>/api/public/v1/voices/<alias>/demo`} />
+          <p className="mt-2 text-sm leading-6 text-stone-600">
+            {isEnglish ? 'These GET routes are anonymous when the public catalog is enabled. The demo returns a fixed WAV without generating new speech. Prefix a catalog sampleUrl with the deployment base path once; an empty catalog or 404 does not authorize access to private voices.' : '公開目錄啟用時，以上 GET 可匿名讀取；demo 回傳固定 WAV，不會合成新語音。目錄的 sampleUrl 需加上一次部署子路徑；空目錄或 404 不代表可改用私人角色介面。'}
+          </p>
+        </section>
+
         <section className="mt-14" id="examples">
           <h2 className="font-serif text-2xl text-stone-900">{isEnglish ? 'Examples' : '範例'}</h2>
           <p className="mt-2 text-sm leading-6 text-stone-600">
             {isEnglish ? 'Every example runs on a backend and reads the token from a server-side environment variable. Never embed the token in browser code, a URL, a mobile bundle, or a frontend log.' : '全部範例都假設在伺服器端執行，token 來自後端環境變數，絕對不要放進瀏覽器程式碼、URL 或前端 log。'}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-stone-600">
+            {isEnglish ? 'Replace <host> with your hostname and <base-path> with the deployment prefix, without a trailing slash (empty for a root deployment). For this service, use https://aiprod.wrbtycg.tw/StoryVoice/api/external/v1/speech. The examples are backend integrations; cross-origin browser synthesis and exposing a bearer token in frontend code are not supported by this contract.' : '將 <host> 換成主機名稱，<base-path> 換成部署子路徑且不帶結尾斜線（根目錄部署留空）。此服務使用 https://aiprod.wrbtycg.tw/StoryVoice/api/external/v1/speech。範例提供後端介接；此契約不支援把 Bearer token 放進前端或從其他來源的瀏覽器直接呼叫合成。'}
           </p>
           <div className="mt-5 grid gap-4">
             <CodeBlock code={CURL_EXAMPLE} label="curl" />
