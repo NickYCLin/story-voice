@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useLayoutEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { apiUrl } from '../api'
@@ -23,6 +23,9 @@ export function LibraryPage() {
   const { csrfToken } = useAuthedOutletContext()
   const { bookId: routeBookId } = useParams<{ bookId?: string }>()
   const navigate = useNavigate()
+  const detailPanel = useRef<HTMLElement>(null)
+  const importPanel = useRef<HTMLDetailsElement>(null)
+  useLayoutEffect(() => { if (detailPanel.current) detailPanel.current.scrollTop = 0 }, [routeBookId])
 
   const [books, setBooks] = useState<BookSummary[]>([])
   const [libraryState, setLibraryState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -151,11 +154,11 @@ export function LibraryPage() {
   }
 
   return (
-    <section className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
-      <div className="mb-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+    <section className="workspace-page library-page">
+      <div className="workspace-page-heading">
         <div>
           <p className="eyebrow">Your library</p>
-          <h1 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">整理你的故事書庫。</h1>
+          <h1 className="mt-2 font-serif text-3xl tracking-tight">書庫</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-600">從任何來源取得、且你有權處理的 EPUB 或文字檔，都可以自行匯入、解析與整理。</p>
         </div>
         <span className="shrink-0 self-start rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500" role="status">
@@ -163,6 +166,8 @@ export function LibraryPage() {
         </span>
       </div>
 
+      <details ref={importPanel} className="library-import workspace-disclosure">
+        <summary>匯入 EPUB／TXT <span>加入新的故事</span></summary>
       <form className="mb-6 overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 sm:p-7" onSubmit={handleUpload}>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
@@ -186,15 +191,16 @@ export function LibraryPage() {
           </button>
         </div>
       </form>
+      </details>
 
-      {libraryState === 'ready' && books.length > 0 && (
+      <div className="library-matrix-slot">
         <LibraryStatusMatrix
           refreshKey={books.map((book) => `${book.id}:${book.contentBookId ?? ''}`).join('|')}
         />
-      )}
+      </div>
 
-      {libraryState === 'ready' && books.length > 0 && (
-        <section aria-label="書庫整理工具" className="mb-6 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
+      {(
+        <section aria-label="書庫整理工具" className="library-filters">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
             <label className="text-xs text-stone-500">
               搜尋書名或作者
@@ -215,7 +221,7 @@ export function LibraryPage() {
               </select>
             </label>
           </div>
-          <div className="mt-5 flex flex-col justify-between gap-3 border-t border-stone-200 pt-4 text-xs text-stone-500 sm:flex-row sm:items-center">
+          <div className="library-filter-status text-xs text-stone-500">
             <span role="status">符合 {visibleBooks.length}／全部 {books.length} 本</span>
             <button className="secondary-button disabled:opacity-40" disabled={!hasCatalogFilters} onClick={() => setCatalogFilters(defaultCatalogFilters)} type="button">清除條件</button>
           </div>
@@ -235,10 +241,13 @@ export function LibraryPage() {
               <li><span className="mr-2 text-amber-700">02</span>選擇檔案並按「匯入並解析」</li>
               <li><span className="mr-2 text-amber-700">03</span>匯入後選書、展開章節檢查解析內容</li>
             </ol>
-            <a className="mt-6 inline-flex text-sm font-semibold text-amber-700 transition hover:text-amber-800" href="#book-file">回到選擇檔案 ↑</a>
+            <a className="mt-6 inline-flex text-sm font-semibold text-amber-700 transition hover:text-amber-800" href="#book-file" onClick={() => { if (importPanel.current) importPanel.current.open = true }}>回到選擇檔案 ↑</a>
           </div>
         </div>
       )}
+      {libraryState === 'ready' && books.length > 0 && (
+        <div className="library-workbench">
+          <div className="library-book-list" aria-label="書籍清單" tabIndex={0}>
       {libraryState === 'ready' && books.length > 0 && visibleBooks.length === 0 && (
         <div className="library-state min-h-56">
           <div>
@@ -248,9 +257,6 @@ export function LibraryPage() {
           </div>
         </div>
       )}
-      {libraryState === 'ready' && visibleBooks.length > 0 && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,.82fr)_minmax(0,1.18fr)]">
-          <div className="space-y-3">
             {visibleBooks.map((book) => (
               <button
                 className={`book-card w-full text-left ${routeBookId === book.id ? 'selected-book' : ''}`}
@@ -266,7 +272,7 @@ export function LibraryPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-serif text-xl text-stone-900">{book.title}</p>
                   <p className="mt-1 truncate text-sm text-stone-500">{book.author}</p>
-                  <div className="mt-7 flex flex-wrap items-center gap-3 text-xs text-stone-400">
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-stone-400">
                     <span>{book.chapterCount} 章</span><span>·</span><span>{book.fileType.toUpperCase()}</span><span>·</span><span>{book.status}</span>
                   </div>
                 </div>
@@ -274,10 +280,10 @@ export function LibraryPage() {
             ))}
           </div>
 
-          <aside className="min-h-80 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
-            {detailState === 'loading' && <div className="library-state h-full">正在展開章節…</div>}
+          <aside ref={detailPanel} aria-label="書籍詳情與播放" aria-busy={detailState === 'loading'} className="library-detail workspace-panel" tabIndex={0}>
+            {detailState === 'loading' && <div role="status" className="library-state h-full">正在展開章節…</div>}
             {detailState === 'error' && <div className="library-state h-full border-rose-300 text-rose-700">章節讀取失敗，請重新選擇書籍。</div>}
-            {detailState === 'ready' && selectedBook && (
+            {detailState === 'ready' && selectedBook && selectedBook.id === routeBookId && (
               <div>
                 <div className="flex flex-col justify-between gap-4 border-b border-stone-200 pb-6 sm:flex-row sm:items-start">
                   <div className="min-w-0">
@@ -287,12 +293,11 @@ export function LibraryPage() {
                   </div>
                   <span className="shrink-0 rounded-full border border-stone-200 px-3 py-1 text-xs text-stone-500">{selectedBook.chapters.length} 章</span>
                 </div>
-                <BookInsightsPanel
-                  book={selectedBook}
-                  csrfToken={csrfToken}
-                  key={`insights-${selectedBook.id}`}
-                />
                 <NarrationPanel key={`narration-${selectedBook.id}`} book={selectedBook} csrfToken={csrfToken} />
+                <details className="workspace-disclosure mt-4">
+                  <summary>角色分析與閱讀筆記</summary>
+                  <BookInsightsPanel book={selectedBook} csrfToken={csrfToken} key={`insights-${selectedBook.id}`} />
+                </details>
                 <div className="mt-5 space-y-3">
                   {selectedBook.chapters.length === 0 && (
                     <div className="library-state min-h-52">
@@ -300,7 +305,7 @@ export function LibraryPage() {
                         <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-amber-200 bg-amber-50 text-amber-700">◇</span>
                         <h4 className="font-serif text-xl text-stone-800">這筆舊書目沒有可處理的正文</h4>
                         <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">請另外匯入你有權使用、無 DRM 的 EPUB 或 UTF-8 TXT，再從匯入後的書籍繼續分析與配音。</p>
-                        <a className="mt-5 inline-flex text-sm text-amber-700" href="#book-file">前往檔案匯入 ↑</a>
+                        <a className="mt-5 inline-flex text-sm text-amber-700" href="#book-file" onClick={() => { if (importPanel.current) importPanel.current.open = true }}>前往檔案匯入 ↑</a>
                       </div>
                     </div>
                   )}

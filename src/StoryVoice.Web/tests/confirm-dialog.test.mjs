@@ -16,5 +16,5 @@ test('confirmation dialog traps keyboard focus, restores its trigger and handles
   assert.match(dialog, /event\.key !== 'Tab'/)
   assert.match(dialog, /event\.shiftKey/)
   assert.match(dialog, /event\.key === 'Escape'/)
-  assert.match(dialog, /previouslyFocused\?\.focus\(\)/)
+  assert.match(dialog, /previouslyFocused\?\.focus\(\{ preventScroll: true \}\)/)
 })

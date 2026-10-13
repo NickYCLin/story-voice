@@ -25,8 +25,9 @@ export function RouteContent({ children }: { children: ReactNode }) {
   const { pathname, search } = useLocation()
   const { locale } = useLocale()
   const t = (zh: string, en: string) => localize(locale, zh, en)
-  const frame = 'relative z-10 mx-auto w-full max-w-7xl px-6 py-12 lg:px-10'
+  const frame = 'route-state'
   return (
+    <div className="route-content">
     <RouteErrorBoundary resetKey={`${pathname}${search}`} fallback={
       <div className={frame}>
         <div className="rounded-2xl border border-stone-200 bg-white p-6">
@@ -39,5 +40,6 @@ export function RouteContent({ children }: { children: ReactNode }) {
         {children}
       </Suspense>
     </RouteErrorBoundary>
+    </div>
   )
 }

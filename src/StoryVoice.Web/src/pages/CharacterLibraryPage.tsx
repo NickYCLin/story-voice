@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 
 import { apiUrl, fetchJson, responseProblem } from '../api'
 import { useAuthedOutletContext } from '../authOutletContext'
@@ -208,6 +208,9 @@ export function CharacterLibraryPage() {
   useEffect(() => {
     void loadCharacters()
   }, [loadCharacters])
+
+  const detailPanel = useRef<HTMLElement>(null)
+  useLayoutEffect(() => { if (detailPanel.current) detailPanel.current.scrollTop = 0 }, [selectedId])
 
   const selected = characters.find((character) => character.id === selectedId) ?? null
   const selectedIsActive = selected?.isActive ?? false
@@ -539,7 +542,7 @@ export function CharacterLibraryPage() {
   ]
 
   return (
-    <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
+    <main className="workspace-page character-page">
       <section className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
         <p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-700">Character library</p>
         <h1 className="mt-2 font-serif text-3xl text-stone-900">角色管理</h1>
@@ -548,8 +551,8 @@ export function CharacterLibraryPage() {
         </p>
       </section>
 
-      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className="rounded-3xl border border-stone-200 bg-white p-4">
+      <section className="character-workbench">
+        <aside className="character-sidebar workspace-panel">
           <h2 className="font-serif text-xl text-stone-900">我的角色</h2>
 
           <form className="mt-3 flex gap-2" onSubmit={createCharacter}>
@@ -568,7 +571,7 @@ export function CharacterLibraryPage() {
 
           {listState === 'loading' && <p className="mt-4 text-sm text-stone-500">正在讀取角色…</p>}
           {listState === 'error' && <p className="mt-4 text-sm text-rose-700">角色讀取失敗，請重新整理頁面。</p>}
-          <div className="mt-3 space-y-2">
+          <div aria-label="角色清單" className="character-list" tabIndex={0}>
             {characters.map((character) => (
               <button
                 className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm transition ${character.id === selectedId ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-stone-200 bg-stone-50 text-stone-500 hover:text-stone-800'} ${character.isActive ? '' : 'opacity-60'}`}
@@ -597,12 +600,12 @@ export function CharacterLibraryPage() {
           </div>
         </aside>
 
-        <section className="min-w-0">
+        <section ref={detailPanel} aria-label="角色設定" className="character-detail" tabIndex={0}>
           {!selected && <div className="library-state">選擇或建立一個角色，開始設定基本資料與自訂聲線。</div>}
           {selected && (
             <div className="space-y-6">
               <div className="min-w-0 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
-                <div className="flex flex-wrap items-center gap-4">
+                <div className="character-identity flex flex-wrap items-center gap-4">
                   {selected.hasAvatar ? (
                     <img
                       alt=""
@@ -646,7 +649,7 @@ export function CharacterLibraryPage() {
                   </div>
                 </div>
 
-                <div className="mt-5 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-4">
+                <div className="character-stats mt-5 grid grid-cols-2 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-4">
                   <div className="rounded-xl border border-stone-200 bg-stone-50 p-3">
                     <p className="text-[11px] text-stone-500">基礎聲線狀態</p>
                     <p className={`mt-1 text-sm font-medium ${baseProfileReady ? 'text-emerald-700' : 'text-stone-600'}`}>

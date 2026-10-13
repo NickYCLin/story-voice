@@ -2,6 +2,7 @@ import { lazy } from 'react'
 import { Route, Routes } from 'react-router-dom'
 
 import { AppLayout } from './AppLayout'
+import { RouteViewport } from './components/RouteViewport'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
 import { LandingPage } from './pages/LandingPage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -23,6 +24,8 @@ const SeriesCastPanel = lazy(() => import('./SeriesCastPanel').then(module => ({
 
 function App() {
   return (
+    <>
+    <RouteViewport />
     <Routes>
       <Route element={<LandingPage publicMode />} path="/about" />
       <Route element={<PublicVoicesPage />} path="/voices" />
@@ -30,8 +33,7 @@ function App() {
       <Route element={<DeveloperDocsPage />} path="/developers/docs" />
       <Route element={<AppLayout />} path="/">
         <Route element={<LandingPage />} index />
-        <Route element={<LibraryPage />} path="library" />
-        <Route element={<LibraryPage />} path="library/:bookId" />
+        <Route element={<LibraryPage />} path="library/:bookId?" />
         <Route element={<CollectionsPage />} path="collections" />
         <Route element={<CollectionDetailPage />} path="collections/:collectionId" />
         <Route element={<SharedWithMePage />} path="shared" />
@@ -46,6 +48,7 @@ function App() {
       </Route>
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
+    </>
   )
 }
 

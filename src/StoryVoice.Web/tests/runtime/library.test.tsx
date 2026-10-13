@@ -57,3 +57,13 @@ it('快速換書後，第一本晚到的詳情不能取代目前選書', async (
   expect(screen.getByRole('heading', { name: '故事 two' })).toBeTruthy()
   expect(screen.queryByRole('heading', { name: '故事 one' })).toBeNull()
 })
+
+
+it('篩選無結果時保留目前書籍的播放器與詳情，不中斷聆聽', async () => {
+  openLibrary()
+  const player = await screen.findByText('朗讀面板')
+  await userEvent.type(screen.getByRole('searchbox', { name: '搜尋書名或作者' }), '不存在的書名')
+  expect(screen.getByText('沒有符合條件的書。')).toBeTruthy()
+  expect(screen.getByText('朗讀面板')).toBe(player)
+  expect(screen.getByRole('heading', { name: '故事 one' })).toBeTruthy()
+})

@@ -93,7 +93,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
           </div>
         </div>
 
-        <div className="p-8 sm:p-12">
+        <div className="auth-form-panel p-8 sm:p-12">
           <div aria-label={t('帳號操作', 'Account action')} className="flex rounded-full border border-stone-200 bg-stone-100 p-1" role="group">
             <button aria-pressed={mode === 'login'} className={`auth-tab ${mode === 'login' ? 'active' : ''}`} onClick={() => { setMode('login'); setMessage('') }} type="button">{t('登入', 'Sign in')}</button>
             <button aria-pressed={mode === 'register'} className={`auth-tab ${mode === 'register' ? 'active' : ''}`} onClick={() => { setMode('register'); setMessage('') }} type="button">{t('建立帳號', 'Create account')}</button>
@@ -110,6 +110,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
               {t('密碼', 'Password')}
               <input autoComplete={mode === 'login' ? 'current-password' : 'new-password'} className="auth-input mt-2" minLength={10} name="password" required type="password" />
             </label>
+            <div className="auth-mode-options">
             {mode === 'register' && <p className="text-xs leading-6 text-stone-400">{t('至少 10 字元，並包含大小寫英文字母、數字與符號。', 'Use at least 10 characters with uppercase and lowercase letters, a number, and a symbol.')}</p>}
             {mode === 'login' && (
               <label className="flex items-center gap-2 text-xs text-stone-500">
@@ -117,6 +118,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
                 {t('在這台裝置保持登入', 'Keep me signed in on this device')}
               </label>
             )}
+            </div>
             <button className="primary-button w-full disabled:cursor-wait disabled:opacity-60" disabled={state === 'loading'} type="submit">
               {state === 'loading' ? t('請稍候…', 'Please wait…') : mode === 'login' ? t('登入 StoryVoice', 'Sign in to StoryVoice') : t('建立帳號並登入', 'Create account and sign in')}
             </button>

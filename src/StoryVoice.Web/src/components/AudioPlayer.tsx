@@ -404,14 +404,8 @@ function AudioPlayerSession({
         {localize(locale, '你的瀏覽器不支援音訊播放。', 'Your browser does not support audio playback.')}
       </audio>
 
-      {playbackError && (
-        <p className="mb-3 rounded-xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm leading-6 text-rose-200" role="alert">
-          {localize(locale, '無法播放這段音訊。請檢查連線後再按播放重試。', 'Unable to play this audio. Check your connection and press play to try again.')}
-        </p>
-      )}
-
       {/* Header / Title & Resume Notice */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800 pb-3">
+      <div className="audio-player-header">
         <div className="min-w-0 grow basis-40">
           {title && <p className="truncate text-sm font-medium text-stone-200">{title}</p>}
           <span className="text-xs text-stone-400" role="status">
@@ -425,6 +419,7 @@ function AudioPlayerSession({
           </span>
         </div>
 
+        <div className="audio-player-resume">
         {savedResumeTime !== null && (
           <button
             className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300 transition hover:bg-amber-500/20"
@@ -443,11 +438,12 @@ function AudioPlayerSession({
             </span>
           </button>
         )}
+        </div>
       </div>
 
       {/* Now Playing: current chapter, character and sentence synced to the playhead */}
-      {timeline && (currentChapter || currentTurn) && (
-        <div className="mt-3 rounded-xl bg-stone-800/60 p-3">
+      <div className="audio-player-now" aria-label={localize(locale, '目前朗讀內容', 'Current passage')}>
+          {!currentChapter && !currentTurn && <p className="text-xs text-stone-400">{localize(locale, '章節與逐句內容會在時間軸就緒後顯示。', 'Chapter and passage details appear when a timeline is available.')}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {currentChapter && (
               <span className="rounded-full bg-stone-700 px-2.5 py-0.5 text-stone-300">
@@ -466,13 +462,12 @@ function AudioPlayerSession({
               {currentTurn.text}
             </p>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Progress & Time Slider */}
       <div className="mt-3 space-y-1">
         <div className="flex items-center gap-3">
-          <span className="w-12 text-right font-mono text-xs text-stone-400">
+          <span className="audio-player-time text-right font-mono text-xs text-stone-400">
             {formatTime(currentTime)}
           </span>
           <input
@@ -490,7 +485,7 @@ function AudioPlayerSession({
             type="range"
             value={currentTime}
           />
-          <span className="w-12 text-left font-mono text-xs text-stone-400">
+          <span className="audio-player-time text-left font-mono text-xs text-stone-400">
             {formatTime(duration)}
           </span>
         </div>
@@ -500,8 +495,9 @@ function AudioPlayerSession({
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-1">
         {/* Main playback buttons */}
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
-          {((hasPrevious && onPrevious) || hasChapterNav) && (
+          {(
             <button
+              style={{ visibility: (hasPrevious && onPrevious) || hasChapterNav ? 'visible' : 'hidden' }}
               aria-label={localize(locale, '上一章', 'Previous chapter')}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 hover:bg-stone-800 hover:text-white"
               onClick={onPrevious ?? goToPreviousChapter}
@@ -541,8 +537,9 @@ function AudioPlayerSession({
             +10s
           </button>
 
-          {((hasNext && onNext) || hasChapterNav) && (
+          {(
             <button
+              style={{ visibility: (hasNext && onNext) || hasChapterNav ? 'visible' : 'hidden' }}
               aria-label={localize(locale, '下一章', 'Next chapter')}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-300 hover:bg-stone-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!onNext && (duration <= 0 || (!!timeline && currentChapterIndex >= timeline.chapters.length - 1))}
@@ -601,7 +598,17 @@ function AudioPlayerSession({
         </div>
       </div>
 
+      <div className="audio-player-feedback">
+      {playbackError && (
+        <p className="text-rose-200" role="alert">
+          {localize(locale, '無法播放這段音訊。請檢查連線後再按播放重試。', 'Unable to play this audio. Check your connection and press play to try again.')}
+        </p>
+      )}
+
+      </div>
+
       {/* Chapter List navigation */}
+      <div className="audio-player-chapters">
       {timeline && timeline.chapters.length > 0 && (
         <div className="mt-3 border-t border-stone-800 pt-3">
           <button
@@ -645,6 +652,7 @@ function AudioPlayerSession({
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }
