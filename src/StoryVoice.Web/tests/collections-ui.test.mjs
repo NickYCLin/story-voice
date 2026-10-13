@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const collectionsPage = readFileSync(new URL('../src/pages/CollectionsPage.tsx', import.meta.url), 'utf8')
 const collectionDetailPage = readFileSync(new URL('../src/pages/CollectionDetailPage.tsx', import.meta.url), 'utf8')
-const appLayout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const appLayout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 
 test('書冊列表可以建立新書冊，且與角色配音系列(series) API 無關', () => {
   assert.match(collectionsPage, /\/api\/collections/)

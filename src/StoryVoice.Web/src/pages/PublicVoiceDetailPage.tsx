@@ -77,7 +77,7 @@ export function PublicVoiceDetailPage() {
   return (
     <div className="min-h-screen bg-[#faf6ee] text-stone-900">
       <PublicSiteHeader />
-      <main className="mx-auto max-w-7xl px-6 py-10 lg:px-10" id="main-content" tabIndex={-1}>
+      <main className="site-page" id="main-content" tabIndex={-1}>
         <Link className="public-focus rounded text-sm text-amber-800 underline" to="/voices">← 返回公開聲線</Link>
         {current.status === 'loading' && <p className="library-state mt-8" role="status">正在載入聲線資料…</p>}
         {current.status === 'unavailable' && (

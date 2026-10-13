@@ -2,40 +2,18 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl } from '../api'
-import { LanguageSwitcher } from '../components/LanguageSwitcher'
+import { PublicSiteHeader } from '../components/PublicSiteHeader'
 import { product, productMarkdown } from '../content/productOverview'
 import { localize, useLocale } from '../i18n'
 import './LandingPage.css'
-
-function PublicLandingHeader() {
-  const { locale } = useLocale()
-  const t = (zh: string, en: string) => localize(locale, zh, en)
-  return (
-    <header className="product-header">
-      <Link aria-label={t('StoryVoice 介紹', 'About StoryVoice')} className="product-brand" to="/about">
-        <span aria-hidden="true" className="product-brand-mark">SV</span>
-        <span>StoryVoice<small>{t('從文字到有聲書', 'From text to audiobook')}</small></span>
-      </Link>
-      <nav aria-label={t('公開頁面導覽', 'Public navigation')}>
-        <a href="#workflow">{t('製作流程', 'How it works')}</a>
-        <Link to="/voices">{t('公開聲線', 'Voices')}</Link>
-        <Link to="/developers/docs">{t('API 文件', 'API docs')}</Link>
-      </nav>
-      <div className="product-header-actions">
-        <LanguageSwitcher />
-        <Link className="secondary-button" to="/">{t('登入', 'Sign in')}</Link>
-      </div>
-    </header>
-  )
-}
 
 export function LandingPage({ publicMode = false }: { publicMode?: boolean }) {
   const { locale } = useLocale()
   const copy = product.locales[locale]
   const t = (zh: string, en: string) => localize(locale, zh, en)
   const [copyStatus, setCopyStatus] = useState<{ locale: string; state: 'copied' | 'error' } | null>(null)
-  const destination = publicMode ? '/' : '/library'
-  const startLabel = t(publicMode ? '開啟工作室' : '進入書庫開始', publicMode ? 'Open the studio' : 'Open your library')
+  const destination = '/library'
+  const startLabel = t('進入書庫開始', 'Open your library')
 
   async function copyIntroduction() {
     try {
@@ -47,7 +25,7 @@ export function LandingPage({ publicMode = false }: { publicMode?: boolean }) {
   }
 
   const content = (
-    <main className="product-page" id="product-content">
+    <main className="product-page" id="product-content" tabIndex={-1}>
       <section aria-labelledby="product-title" className="product-hero">
         <div className="product-hero-copy">
           <p className="product-kicker">{copy.category}</p>
@@ -145,8 +123,7 @@ export function LandingPage({ publicMode = false }: { publicMode?: boolean }) {
   if (!publicMode) return content
   return (
     <div className="product-public">
-      <a className="product-skip" href="#product-content">{t('跳到產品介紹', 'Skip to product overview')}</a>
-      <PublicLandingHeader />
+      <PublicSiteHeader contentId="product-content" />
       {content}
       <footer className="product-footer"><span>StoryVoice · {t('開源多角色有聲書工作室', 'Open-source audiobook studio')}</span><a href={apiUrl('/llms.txt')}>{t('文字與 AI 閱讀入口', 'Text and AI reading index')}</a><span>MIT · {product.updatedAt}</span></footer>
     </div>

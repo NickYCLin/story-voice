@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const page = readFileSync(new URL('../src/pages/DeveloperDocsPage.tsx', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const layout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 const publicVoicesPage = readFileSync(new URL('../src/pages/PublicVoicesPage.tsx', import.meta.url), 'utf8')
 
 test('API 文件位於登入殼層外，並可從公開聲線館與私人導覽開啟', () => {

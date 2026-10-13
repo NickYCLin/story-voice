@@ -5,7 +5,7 @@ import test from 'node:test'
 const page = ['../src/pages/PublicVoicesPage.tsx', '../src/publicVoiceCatalog.ts', '../src/components/PublicVoicePreview.tsx']
   .map(path => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const layout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 const authScreen = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 

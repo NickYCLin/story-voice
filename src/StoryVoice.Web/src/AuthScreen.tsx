@@ -63,9 +63,9 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#faf6ee] text-[#332a1f]">
+    <div className="relative min-h-screen overflow-x-clip bg-[#faf6ee] text-[#332a1f]">
       <PublicSiteHeader />
-      <main className="relative grid place-items-center px-6 py-10 lg:py-16" id="main-content" tabIndex={-1}>
+      <main className="site-page relative grid place-items-center" id="main-content" tabIndex={-1}>
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
       <section className="relative z-10 grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-[2rem] border border-stone-200 bg-white/90 shadow-2xl shadow-stone-400/20 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">

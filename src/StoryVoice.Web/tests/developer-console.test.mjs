@@ -5,7 +5,7 @@ import test from 'node:test'
 const page = readFileSync(new URL('../src/pages/DeveloperConsolePage.tsx', import.meta.url), 'utf8')
 const shared = readFileSync(new URL('../src/developerVoiceConsole.ts', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const layout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 const implementation = `${page}\n${shared}`
 
 test('開發者總覽位於需要登入的 AppLayout 內，並可從主導覽開啟', () => {

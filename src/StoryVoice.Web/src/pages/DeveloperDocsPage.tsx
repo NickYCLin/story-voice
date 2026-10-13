@@ -1,6 +1,4 @@
-import { Link } from 'react-router-dom'
-
-import { LanguageSwitcher } from '../components/LanguageSwitcher'
+import { PublicSiteHeader } from '../components/PublicSiteHeader'
 import { useLocale } from '../i18n'
 
 const ERROR_CODES: Array<[string, string, string, string]> = [
@@ -71,43 +69,16 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
   )
 }
 
-function DocsHeader() {
-  const { isEnglish } = useLocale()
-
-  return (
-    <header className="relative z-10 border-b border-stone-200/80 bg-[#faf6ee]/90 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-5 lg:px-10">
-        <Link aria-label="StoryVoice" className="group flex items-center gap-3 public-focus rounded-xl" to="/voices">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800 shadow-[0_4px_18px_rgba(180,101,15,.14)]">
-            SV
-          </span>
-          <span>
-            <strong className="block font-serif text-lg tracking-wide text-stone-900">StoryVoice</strong>
-            <span className="block text-[10px] uppercase tracking-[.26em] text-stone-500">Developer docs</span>
-          </span>
-        </Link>
-
-        <nav aria-label={isEnglish ? 'Public navigation' : '公開頁面導覽'} className="flex flex-wrap items-center gap-2">
-          <Link className="rounded-full px-4 py-2 text-sm text-stone-600 hover:bg-white hover:text-stone-900 public-focus" to="/about">{isEnglish ? 'About' : '產品介紹'}</Link>
-          <Link className="rounded-full px-4 py-2 text-sm text-stone-600 hover:bg-white hover:text-stone-900 public-focus" to="/voices">{isEnglish ? 'Voice catalog' : '公開聲線館'}</Link>
-          <LanguageSwitcher />
-          <Link className="secondary-button public-focus" to="/">{isEnglish ? 'Sign in' : '登入 StoryVoice'}</Link>
-        </nav>
-      </div>
-    </header>
-  )
-}
-
 export function DeveloperDocsPage() {
   const { isEnglish } = useLocale()
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#faf6ee] text-[#332a1f]">
+    <div className="relative min-h-screen overflow-x-clip bg-[#faf6ee] text-[#332a1f]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
-      <DocsHeader />
+      <PublicSiteHeader />
 
-      <main className="relative z-10 mx-auto max-w-5xl px-6 pb-24 pt-12 lg:px-10 lg:pt-16">
+      <main className="site-page relative z-10" id="main-content" tabIndex={-1}>
         <p className="eyebrow">API reference</p>
         <h1 className="mt-4 max-w-3xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">
           {isEnglish ? 'Build with original synthetic character voices' : '跨專案語音合成 API'}

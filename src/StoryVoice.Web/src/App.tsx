@@ -1,6 +1,7 @@
 import { lazy } from 'react'
 import { Route, Routes } from 'react-router-dom'
 
+import { AuthSessionProvider } from './auth'
 import { AppLayout } from './AppLayout'
 import { RouteViewport } from './components/RouteViewport'
 import { DeveloperDocsPage } from './pages/DeveloperDocsPage'
@@ -24,31 +25,31 @@ const SeriesCastPanel = lazy(() => import('./SeriesCastPanel').then(module => ({
 
 function App() {
   return (
-    <>
-    <RouteViewport />
-    <Routes>
-      <Route element={<LandingPage publicMode />} path="/about" />
-      <Route element={<PublicVoicesPage />} path="/voices" />
-      <Route element={<PublicVoiceDetailPage />} path="/voices/:alias" />
-      <Route element={<DeveloperDocsPage />} path="/developers/docs" />
-      <Route element={<AppLayout />} path="/">
-        <Route element={<LandingPage />} index />
-        <Route element={<LibraryPage />} path="library/:bookId?" />
-        <Route element={<CollectionsPage />} path="collections" />
-        <Route element={<CollectionDetailPage />} path="collections/:collectionId" />
-        <Route element={<SharedWithMePage />} path="shared" />
-        <Route element={<CharacterLibraryPage />} path="characters" />
-        <Route element={<DeveloperConsolePage />} path="developer" />
-        <Route element={<DeveloperCredentialsPage />} path="developer/credentials" />
-        <Route element={<DeveloperPlaygroundPage />} path="developer/playground" />
-        <Route element={<DeveloperProjectPage />} path="developer/projects/:projectId" />
-        <Route element={<DeveloperUsagePage />} path="developer/usage" />
-        <Route element={<SeriesCastPanel />} path="/series" />
-        <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
-      </Route>
-      <Route element={<NotFoundPage />} path="*" />
-    </Routes>
-    </>
+    <AuthSessionProvider>
+      <RouteViewport />
+      <Routes>
+        <Route element={<LandingPage publicMode />} path="/" />
+        <Route element={<LandingPage publicMode />} path="/about" />
+        <Route element={<PublicVoicesPage />} path="/voices" />
+        <Route element={<PublicVoiceDetailPage />} path="/voices/:alias" />
+        <Route element={<DeveloperDocsPage />} path="/developers/docs" />
+        <Route element={<AppLayout />} path="/">
+          <Route element={<LibraryPage />} path="library/:bookId?" />
+          <Route element={<CollectionsPage />} path="collections" />
+          <Route element={<CollectionDetailPage />} path="collections/:collectionId" />
+          <Route element={<SharedWithMePage />} path="shared" />
+          <Route element={<CharacterLibraryPage />} path="characters" />
+          <Route element={<DeveloperConsolePage />} path="developer" />
+          <Route element={<DeveloperCredentialsPage />} path="developer/credentials" />
+          <Route element={<DeveloperPlaygroundPage />} path="developer/playground" />
+          <Route element={<DeveloperProjectPage />} path="developer/projects/:projectId" />
+          <Route element={<DeveloperUsagePage />} path="developer/usage" />
+          <Route element={<SeriesCastPanel />} path="/series" />
+          <Route element={<SharedCollectionPage />} path="shared/:collectionId" />
+        </Route>
+        <Route element={<NotFoundPage />} path="*" />
+      </Routes>
+    </AuthSessionProvider>
   )
 }
 

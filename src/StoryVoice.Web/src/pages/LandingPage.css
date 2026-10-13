@@ -1,5 +1,5 @@
 .product-public, .product-page { font-family: Inter, "Microsoft JhengHei", "PingFang TC", ui-sans-serif, system-ui, sans-serif; }
-.product-public { background: #faf8f2; color: #2b302b; }
+.product-public { background: var(--paper); color: var(--ink); }
 .product-header { max-width: 1280px; margin: auto; padding: 24px 40px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e6e5dc; }
 .product-brand { display: flex; align-items: center; gap: 12px; font-family: Georgia, "Noto Serif TC", serif; font-size: 24px; font-weight: 600; text-decoration: none; }
 .product-brand small { display: block; margin-top: 3px; color: #75796f; font: 11px/1.4 system-ui, sans-serif; letter-spacing: .08em; }

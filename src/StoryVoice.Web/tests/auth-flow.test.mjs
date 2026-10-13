@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const authSource = readFileSync(new URL('../src/auth.ts', import.meta.url), 'utf8')
 const authScreenSource = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')
-const appLayoutSource = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const appLayoutSource = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 const libraryPageSource = readFileSync(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')

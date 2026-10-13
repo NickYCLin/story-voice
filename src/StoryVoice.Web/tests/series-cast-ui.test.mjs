@@ -7,7 +7,7 @@ const narrationPanel = readFileSync(new URL('../src/NarrationPanel.tsx', import.
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const voiceProfilesPanel = readFileSync(new URL('../src/CharacterVoiceProfilesPanel.tsx', import.meta.url), 'utf8')
 const characterLibraryPage = readFileSync(new URL('../src/pages/CharacterLibraryPage.tsx', import.meta.url), 'utf8')
-const appLayout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const appLayout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 
 test('系列配音控制台固定使用 owner-scoped series、角色與 alias API', () => {
   assert.match(panel, /\/api\/series\/voice-options/)
