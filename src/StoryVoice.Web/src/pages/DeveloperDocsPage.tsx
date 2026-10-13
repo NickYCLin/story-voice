@@ -254,7 +254,7 @@ GET <base-path>/api/public/v1/voices/<alias>/demo`} />
               <code className="text-xs">Retry-After</code>
               {isEnglish ? ' duration before retrying.' : ' 標頭等待再重試。'}
             </li>
-            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">{isEnglish ? 'The service currently supports one API process. Shared multi-replica rate limiting, single-flight, and idempotency coordination are not available yet.' : '目前僅支援單一 API process；尚未提供跨 replica 的共用速率限制、single-flight 或冪等協調。'}</li>
+            <li className="rounded-xl border border-stone-200 bg-white px-4 py-3">{isEnglish ? 'Production currently supports one API process. Redis-backed shared consumer and pre-authentication rate limits are available as opt-in settings; single-flight and idempotency coordination remain process-local.' : '正式部署目前僅支援單一 API process。consumer 與驗證前防洪額度可選用 Redis 共用限制；single-flight 與冪等協調仍限單一 process。'}</li>
           </ul>
         </section>
 
