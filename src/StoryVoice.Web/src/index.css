@@ -153,3 +153,60 @@ textarea.auth-input { line-height: 1.65; }
   .voice-wave span { animation: none; }
   *, *::before, *::after { transition-duration: .01ms !important; }
 }
+
+/* One public shell for sign-in, voice discovery and voice details. */
+.storyvoice-brand { display: inline-flex; align-items: center; gap: .75rem; border-radius: .75rem; flex-shrink: 0; color: var(--ink); }
+.storyvoice-brand-mark { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; border: 1px solid var(--accent-line); border-radius: .9rem; background: var(--accent-soft); color: var(--accent-strong); font-family: Georgia, serif; }
+.storyvoice-brand strong { display: block; font-family: Georgia, "Noto Serif TC", serif; font-size: 1.15rem; letter-spacing: .02em; }
+.storyvoice-brand small { display: block; margin-top: .12rem; font-size: .65rem; letter-spacing: .16em; color: var(--ink-soft); }
+.public-site-header { position: relative; z-index: 10; border-bottom: 1px solid var(--line); background: var(--paper); }
+.public-site-header-inner { max-width: 80rem; margin: auto; padding: 1.25rem 2.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+.public-site-header nav { display: flex; gap: .4rem; flex-wrap: wrap; }
+.public-site-header nav a { display: inline-flex; align-items: center; min-height: 2.75rem; padding: .5rem .9rem; border-radius: 2rem; font-size: .85rem; color: var(--ink-soft); }
+.public-site-header nav a:hover, .public-site-header nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-strong); }
+.public-site-actions { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.public-skip-link { position: absolute; top: .5rem; left: 1rem; z-index: 30; transform: translateY(-200%); background: white; padding: .75rem; border: 2px solid var(--accent); }
+.public-skip-link:focus { transform: none; }
+.voice-catalog-main { position: relative; z-index: 1; max-width: 80rem; margin: auto; padding: 3rem 2.5rem; }
+.voice-catalog-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; padding-bottom: 2.25rem; }
+.voice-catalog-intro h1 { font-family: Georgia, "Noto Serif TC", serif; font-size: clamp(1.9rem, 3vw, 2.75rem); line-height: 1.3; margin: .8rem 0; }
+.voice-catalog-intro p:not(.eyebrow) { max-width: 42rem; font-size: .95rem; line-height: 1.8; color: var(--ink-soft); }
+.voice-help-link { white-space: nowrap; font-size: .85rem; color: var(--accent-strong); padding: .75rem 0; text-decoration: underline; text-underline-offset: .3rem; }
+.voice-catalog-collection { border: 1px solid var(--line); border-radius: 1.5rem; background: var(--surface); padding: 1.5rem; }
+.voice-collection-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.voice-collection-heading h2 { font-size: 1.1rem; font-weight: 650; }
+.voice-collection-heading p { font-size: .8rem; color: var(--ink-soft); }
+.voice-catalog-filters { display: flex; gap: 1rem; flex-wrap: wrap; }
+.voice-catalog-filters label { flex: 1 1 9rem; }
+.voice-catalog-filters label:first-child { flex: 2 1 15rem; }
+.voice-catalog-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 15rem; margin-top: 1.25rem; border-radius: 1rem; padding: 2rem; background: var(--surface-well); text-align: center; color: var(--ink-soft); }
+.voice-catalog-state h3 { font-size: 1.2rem; color: var(--ink); font-weight: 600; }
+.voice-state-symbol { font-size: 2.6rem; line-height: 1; margin-bottom: 1rem; color: var(--accent-strong); }
+.voice-catalog-error { background: #fff1f2; color: #9f1239; }
+.voice-next-steps { padding-top: 2.75rem; scroll-margin-top: 1rem; }
+.voice-next-intro h2 { font-family: Georgia, "Noto Serif TC", serif; font-size: 1.55rem; margin: .6rem 0; }
+.voice-next-intro > p:last-child { font-size: .875rem; line-height: 1.8; color: var(--ink-soft); }
+.voice-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem; }
+.voice-paths article { position: relative; padding: 1.5rem; border: 1px solid var(--line); border-radius: 1.25rem; background: rgba(255,253,248,.7); }
+.voice-step-number { position: absolute; right: 1.5rem; top: 1.5rem; font-size: .75rem; letter-spacing: .1em; color: var(--accent-strong); }
+.voice-paths h3 { font-weight: 650; padding-right: 2rem; }
+.voice-paths p { margin: .75rem 0; color: var(--ink-soft); font-size: .875rem; line-height: 1.8; max-width: 34rem; }
+.voice-text-link { display: inline-flex; align-items: center; gap: .75rem; min-height: 2.75rem; color: var(--accent-strong); font-size: .875rem; font-weight: 650; text-decoration: underline; text-underline-offset: .25rem; }
+.voice-paths small { display: block; color: var(--ink-soft); font-size: .75rem; line-height: 1.7; margin-top: .3rem; }
+.voice-authorization { margin-top: 1.5rem; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.voice-authorization summary { padding: 1.2rem .2rem; cursor: pointer; font-size: .875rem; font-weight: 600; }
+.voice-authorization > div { padding: 0 .2rem 1rem; max-width: 54rem; color: var(--ink-soft); font-size: .875rem; line-height: 1.9; }
+.voice-authorization p + p { margin-top: .6rem; }
+.voice-catalog-footer { max-width: 80rem; margin: auto; padding: 0 2.5rem 2rem; font-size: .75rem; color: var(--ink-soft); display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+@media (max-width: 800px) {
+  .public-site-header-inner { padding: 1rem 1.5rem; gap: 1rem; }
+  .public-site-header nav { order: 3; width: 100%; border-top: 1px solid var(--line); padding-top: .5rem; }
+  .public-site-actions { gap: .4rem; }
+  .voice-catalog-main { padding: 2rem 1.5rem; }
+  .voice-catalog-intro { display: block; padding-bottom: 1.5rem; }
+  .voice-help-link { display: inline-block; margin-top: .5rem; }
+  .voice-paths { grid-template-columns: 1fr; gap: 1rem; }
+  .voice-catalog-collection { padding: 1rem; }
+  .voice-catalog-state { padding: 1.5rem 1rem; }
+  .voice-catalog-footer { padding: 0 1.5rem 2rem; }
+}

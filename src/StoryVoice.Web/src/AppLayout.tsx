@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
+import { StoryVoiceBrand } from './components/StoryVoiceBrand'
 import { AuthScreen } from './AuthScreen'
 import { useAuthSession } from './auth'
 import type { AuthedOutletContext } from './authOutletContext'
@@ -46,15 +47,7 @@ export function AppLayout() {
           menuButton.current?.focus()
         }
       }}>
-        <NavLink className="group flex items-center gap-3" to="/" aria-label={t('StoryVoice 首頁', 'StoryVoice home')}>
-          <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800 shadow-[0_4px_18px_rgba(180,101,15,.14)] transition group-hover:border-amber-400">
-            SV
-          </span>
-          <span>
-            <strong className="block font-serif text-lg tracking-wide text-stone-900">StoryVoice</strong>
-            <span className="block text-[10px] uppercase tracking-[.26em] text-stone-500">{t('AI 故事導演', 'AI Story Director')}</span>
-          </span>
-        </NavLink>
+        <StoryVoiceBrand />
 
         <button
           aria-controls={navigationId}

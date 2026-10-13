@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { PublicSiteHeader } from '../components/PublicSiteHeader'
 import { apiUrl } from '../api'
 import { VoicePreviewButton } from '../components/PublicVoicePreview'
 import { isPublicVoiceDetail, type PublicVoiceDetail } from '../publicVoiceCatalog'
@@ -75,13 +76,8 @@ export function PublicVoiceDetailPage() {
   const current = state.alias === alias ? state : { status: 'loading' as const, alias }
   return (
     <div className="min-h-screen bg-[#faf6ee] text-stone-900">
-      <header className="border-b border-stone-200">
-        <nav aria-label="公開頁面導覽" className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-5">
-          <Link className="public-focus rounded font-serif text-xl" to="/voices">StoryVoice 聲線館</Link>
-          <Link className="secondary-button public-focus" to="/">登入 StoryVoice</Link>
-        </nav>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 py-10 sm:py-16">
+      <PublicSiteHeader />
+      <main className="mx-auto max-w-7xl px-6 py-10 lg:px-10" id="main-content" tabIndex={-1}>
         <Link className="public-focus rounded text-sm text-amber-800 underline" to="/voices">← 返回公開聲線</Link>
         {current.status === 'loading' && <p className="library-state mt-8" role="status">正在載入聲線資料…</p>}
         {current.status === 'unavailable' && (

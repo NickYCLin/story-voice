@@ -25,7 +25,7 @@ function media(container: HTMLElement) {
   const audio = container.querySelector('audio')!
   let paused = true
   Object.defineProperty(audio, 'paused', { configurable: true, get: () => paused })
-  vi.spyOn(audio, 'pause').mockImplementation(() => { paused = true; fireEvent.pause(audio) })
+  Object.defineProperty(audio, 'pause', { configurable: true, value: vi.fn(() => { paused = true; fireEvent.pause(audio) }) })
   return { audio, play: () => { paused = false; fireEvent.play(audio) } }
 }
 
@@ -68,13 +68,13 @@ it('真正的音檔錯誤可重新載入重試，恢復播放後清除等待提�
   expect(screen.getByRole('button', { name: '播放固定示範' })).toBeTruthy()
 })
 
-it('播放尚未開始時合併重複要求，離開後忽略回應', async () => {
+it('播放尚未開始時可取消等待，離開後忽略回應', async () => {
   const pending = deferred()
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockReturnValue(pending.promise)
   const view = render(<VoicePreviewButton voice={voice()} />)
   const audio = view.container.querySelector('audio')!
   fireEvent.click(screen.getByRole('button', { name: '播放固定示範' }))
-  fireEvent.click(screen.getByRole('button', { name: '播放固定示範' }))
+  fireEvent.click(screen.getByRole('button', { name: '暫停固定示範' }))
   expect(audio.play).toHaveBeenCalledTimes(1)
   view.unmount()
   expect(audio.pause).toHaveBeenCalled()
@@ -108,4 +108,23 @@ it('更換聲線會停止舊音訊，晚到的播放錯誤不會顯示在新聲�
   await act(async () => pending.reject(new Error('old source failed')))
   expect(screen.queryByRole('alert')).toBeNull()
   expect(screen.getByRole('button', { name: '播放固定示範' })).toBeTruthy()
+})
+
+
+it('開始另一張卡的試聽會停止前一張，並忽略前一次晚到的錯誤', async () => {
+  const pending = deferred()
+  const view = render(<><VoicePreviewButton voice={voice('first')} /><VoicePreviewButton voice={voice('second')} /></>)
+  const audios = view.container.querySelectorAll('audio')
+  const first = media(audios[0].parentElement!)
+  const second = media(audios[1].parentElement!)
+  vi.spyOn(first.audio, 'play').mockImplementation(() => { first.play(); return pending.promise })
+  vi.spyOn(second.audio, 'play').mockImplementation(() => { second.play(); return Promise.resolve() })
+  fireEvent.click(screen.getAllByRole('button', { name: '播放固定示範' })[0])
+  fireEvent.click(screen.getByRole('button', { name: '播放固定示範' }))
+  expect(first.audio.pause).toHaveBeenCalled()
+  expect(first.audio.paused).toBe(true)
+  expect(second.audio.paused).toBe(false)
+  await act(async () => pending.reject(new Error('interrupted old preview')))
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getAllByRole('button', { name: '暫停固定示範' })).toHaveLength(1)
 })

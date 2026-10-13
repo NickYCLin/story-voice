@@ -45,7 +45,8 @@ test('登入後引導使用者自行匯入有權處理的檔案', () => {
 })
 
 test('匿名登入畫面可切換語言，並導向公開雙語介紹', () => {
-  assert.match(authScreenSource, /<LanguageSwitcher/)
+  assert.match(authScreenSource, /<PublicSiteHeader/)
+  assert.match(readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'), /<LanguageSwitcher/)
   assert.match(authScreenSource, /to="\/about"/)
   assert.match(authScreenSource, /Learn about StoryVoice/)
   assert.match(appSource, /<LandingPage publicMode \/>.*path="\/about"/)

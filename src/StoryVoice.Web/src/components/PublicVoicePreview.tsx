@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { safeSampleUrl, type PublicVoiceCard } from '../publicVoiceCatalog'
 
+let activePreview: HTMLAudioElement | null = null
+const previewStarted = 'storyvoice:public-preview-started'
+
 export function VoicePreviewButton({ voice }: { voice: PublicVoiceCard }) {
   const sampleUrl = safeSampleUrl(voice)
   return <VoicePreviewSession key={sampleUrl ?? voice.alias} alias={voice.alias} sampleUrl={sampleUrl} />
@@ -15,7 +18,16 @@ function VoicePreviewSession({ alias, sampleUrl }: { alias: string; sampleUrl: s
 
   useEffect(() => {
     const audio = audioRef.current
+    const stopForAnotherPreview = (event: Event) => {
+      if ((event as CustomEvent<HTMLAudioElement>).detail === audio) return
+      playRequest.current = null
+      audio?.pause()
+      setPlayback('idle')
+    }
+    window.addEventListener(previewStarted, stopForAnotherPreview)
     return () => {
+      window.removeEventListener(previewStarted, stopForAnotherPreview)
+      if (activePreview === audio) activePreview = null
       playRequest.current = null
       audio?.pause()
       if (audio) audio.currentTime = 0
@@ -37,16 +49,20 @@ function VoicePreviewSession({ alias, sampleUrl }: { alias: string; sampleUrl: s
     const audio = audioRef.current
     if (!audio) return
 
-    if (!audio.paused) {
+    if (!audio.paused || playRequest.current) {
       playRequest.current = null
       audio.pause()
+      if (activePreview === audio) activePreview = null
+      setPlayback('idle')
       return
     }
 
     if (playRequest.current) return
     const request = {}
     playRequest.current = request
-    setPlayback('idle')
+    activePreview = audio
+    window.dispatchEvent(new CustomEvent(previewStarted, { detail: audio }))
+    setPlayback('waiting')
     try {
       if (audio.error) audio.load()
       await audio.play()
@@ -80,7 +96,10 @@ function VoicePreviewSession({ alias, sampleUrl }: { alias: string; sampleUrl: s
         onPause={(event) => {
           if (event.currentTarget.paused) { playRequest.current = null; setPlayback('idle') }
         }}
-        onPlay={(event) => setPlayback(event.currentTarget.paused ? 'idle' : 'playing')}
+        onPlay={(event) => {
+          if (activePreview !== event.currentTarget) { event.currentTarget.pause(); return }
+          setPlayback(event.currentTarget.paused ? 'idle' : 'playing')
+        }}
         onPlaying={(event) => setPlayback(event.currentTarget.paused ? 'idle' : 'playing')}
         onWaiting={(event) => {
           if (!event.currentTarget.paused && !event.currentTarget.ended) setPlayback('waiting')

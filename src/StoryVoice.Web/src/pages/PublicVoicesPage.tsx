@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
+import { PublicSiteHeader } from '../components/PublicSiteHeader'
 import { apiUrl } from '../api'
-import { isPublicVoiceCard, type PublicVoiceCard } from '../publicVoiceCatalog'
+import { isPublicVoiceCard, safeSampleUrl, type PublicVoiceCard } from '../publicVoiceCatalog'
 import { VoicePreviewButton } from '../components/PublicVoicePreview'
 
 const PUBLIC_VOICE_ENDPOINT = '/api/public/v1/voices'
@@ -11,12 +12,12 @@ type CatalogState =
   | { status: 'loading' }
   | { status: 'ready'; voices: PublicVoiceCard[] }
   | { status: 'disabled' }
-  | { status: 'error'; message: string }
+  | { status: 'error' }
 
 function statusLabel(status: string) {
   switch (status) {
     case 'available':
-      return '可公開試聽／可申請訂閱'
+      return '可公開試聽'
     case 'authorization-pending':
       return '授權審查中'
     case 'coming-soon':
@@ -27,11 +28,10 @@ function statusLabel(status: string) {
 }
 
 function VoiceCard({ voice }: { voice: PublicVoiceCard }) {
-  const canViewPlans = voice.ctaKind === 'view-plans' && voice.subscriptionAvailable
-  const label = statusLabel(voice.status)
+  const label = voice.status === 'available' && !safeSampleUrl(voice) ? '示範尚未開放' : statusLabel(voice.status)
 
   return (
-    <article className="public-voice-card">
+    <article className="public-voice-card" aria-labelledby={`voice-title-${voice.alias}`}>
       <div className="public-voice-card-stage" aria-hidden="true">
         <span className="public-voice-mark">聲</span>
         <div className="public-voice-wave">
@@ -44,14 +44,14 @@ function VoiceCard({ voice }: { voice: PublicVoiceCard }) {
       <div className="flex flex-1 flex-col p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="font-serif text-2xl text-stone-900">
+            <h3 className="font-serif text-2xl text-stone-900" id={`voice-title-${voice.alias}`}>
               <Link className="public-focus rounded hover:text-amber-800 underline decoration-amber-300 underline-offset-4" to={`/voices/${voice.alias}`}>
                 {voice.displayName}
               </Link>
-            </h2>
+            </h3>
             <p className="mt-1 text-sm leading-6 text-stone-600">{voice.subtitle}</p>
           </div>
-          <span className="public-status-pill" data-status={voice.status}>
+          <span className="public-status-pill" data-status={voice.status === 'available' && !safeSampleUrl(voice) ? 'unavailable' : voice.status}>
             <span aria-hidden="true" className="public-status-dot" />
             {label}
           </span>
@@ -80,55 +80,19 @@ function VoiceCard({ voice }: { voice: PublicVoiceCard }) {
 
         <div className="mt-auto grid gap-3 pt-6 sm:grid-cols-2">
           <VoicePreviewButton voice={voice} />
-          <div>
-            {canViewPlans ? (
-              <a className="public-catalog-button public-catalog-button-primary public-focus" href="#subscription-access">
-                查看訂閱與申請說明
-              </a>
-            ) : (
-              <button className="public-catalog-button public-catalog-button-muted" disabled type="button">
-                {voice.status === 'authorization-pending' ? '授權審查中' : '尚未開放訂閱'}
-              </button>
-            )}
-            <p className="mt-2 text-xs leading-5 text-stone-500">
-              {canViewPlans
-                ? '此入口只提供申請說明，不會立即結帳或顯示價格；實際 API 範圍以有效授權與方案權限為準。'
-                : '完成商用與跨專案授權後才會開放。'}
-            </p>
-          </div>
+          <Link className="public-catalog-button public-catalog-button-primary public-focus self-start" to={`/voices/${voice.alias}`}>
+            查看聲線與使用範圍 <span aria-hidden="true">→</span>
+          </Link>
         </div>
       </div>
     </article>
   )
 }
 
-function CatalogHeader() {
-  return (
-    <header className="relative z-10 border-b border-stone-200/80 bg-[#faf6ee]/90 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5 lg:px-10">
-        <Link aria-label="StoryVoice 公開聲線館" className="group flex items-center gap-3 public-focus rounded-xl" to="/voices">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800 shadow-[0_4px_18px_rgba(180,101,15,.14)]">
-            SV
-          </span>
-          <span>
-            <strong className="block font-serif text-lg tracking-wide text-stone-900">StoryVoice</strong>
-            <span className="block text-[10px] uppercase tracking-[.26em] text-stone-500">Public voice catalog</span>
-          </span>
-        </Link>
-
-        <nav aria-label="公開頁面導覽" className="flex flex-wrap items-center gap-2">
-          <a className="rounded-full px-4 py-2 text-sm text-stone-600 hover:bg-white hover:text-stone-900 public-focus" href="#voice-catalog">聲線目錄</a>
-          <a className="rounded-full px-4 py-2 text-sm text-stone-600 hover:bg-white hover:text-stone-900 public-focus" href="#subscription-access">訂閱與 API</a>
-          <Link className="secondary-button public-focus" to="/">登入 StoryVoice</Link>
-        </nav>
-      </div>
-    </header>
-  )
-}
-
 export function PublicVoicesPage() {
   const { hash } = useLocation()
   const [catalog, setCatalog] = useState<CatalogState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
   const [query, setQuery] = useState('')
   const [style, setStyle] = useState('')
   const [useCase, setUseCase] = useState('')
@@ -142,6 +106,11 @@ export function PublicVoicesPage() {
 
   useEffect(() => {
     const controller = new AbortController()
+    setCatalog({ status: 'loading' })
+    const timeout = setTimeout(() => {
+      controller.abort()
+      setCatalog({ status: 'error' })
+    }, 10_000)
 
     async function loadCatalog() {
       try {
@@ -151,6 +120,7 @@ export function PublicVoicesPage() {
           headers: { Accept: 'application/json' },
           signal: controller.signal,
         })
+        if (controller.signal.aborted) return
         if (response.status === 404) {
           setCatalog({ status: 'disabled' })
           return
@@ -158,21 +128,21 @@ export function PublicVoicesPage() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
         const body: unknown = await response.json()
-        if (!Array.isArray(body)) throw new Error('Unexpected catalog response')
-        const voices = body.filter(isPublicVoiceCard)
-        setCatalog({ status: 'ready', voices })
-      } catch (error) {
         if (controller.signal.aborted) return
-        setCatalog({
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Unknown error',
-        })
+        if (!Array.isArray(body)) throw new Error('Unexpected catalog response')
+        if (!body.every(isPublicVoiceCard)) throw new Error('Invalid catalog response')
+        const voices = body
+        setCatalog({ status: 'ready', voices })
+      } catch {
+        if (!controller.signal.aborted) setCatalog({ status: 'error' })
+      } finally {
+        clearTimeout(timeout)
       }
     }
 
     void loadCatalog()
-    return () => controller.abort()
-  }, [])
+    return () => { controller.abort(); clearTimeout(timeout) }
+  }, [attempt])
 
   const voices = useMemo(() => catalog.status === 'ready' ? catalog.voices : [], [catalog])
   const styleOptions = useMemo(() => [...new Set(voices.flatMap((voice) => voice.styles))].sort(), [voices])
@@ -202,37 +172,26 @@ export function PublicVoicesPage() {
     <div className="relative min-h-screen overflow-hidden bg-[#faf6ee] text-[#332a1f]">
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
-      <CatalogHeader />
+      <PublicSiteHeader />
 
-      <main className="relative z-10">
-        <section className="mx-auto max-w-7xl px-6 pb-14 pt-12 lg:px-10 lg:pb-20 lg:pt-16">
-          <div className="overflow-hidden rounded-[2rem] border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 px-7 py-12 text-center shadow-[0_24px_80px_rgba(96,70,30,.09)] sm:px-12 sm:py-16">
-            <p className="eyebrow">Public voice catalog</p>
-            <h1 className="mx-auto mt-4 max-w-4xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">
-              先聽固定示範，再確認這個聲線<span className="text-amber-700">適用的授權方式。</span>
-            </h1>
-            <p className="mx-auto mt-5 max-w-2xl text-sm leading-7 text-stone-600 sm:text-base">
-              這裡只展示已通過公開播放檢查的固定示範。所有聲音均為 AI 合成；跨專案 API、商用範圍、期限與撤銷條件，以有效授權及方案權限為準。
-            </p>
-            <a className="primary-button mt-8 public-focus" href="#voice-catalog">瀏覽公開聲線</a>
+      <main className="voice-catalog-main" id="main-content" tabIndex={-1}>
+        <section className="voice-catalog-intro" aria-labelledby="catalog-title">
+          <div>
+            <p className="eyebrow">STORYVOICE / VOICE COLLECTION</p>
+            <h1 id="catalog-title">為故事，找到合適的聲音。</h1>
+            <p>先聽固定示範，再查看聲線風格與使用範圍。你的私人角色與書籍不會出現在這裡。</p>
           </div>
+          <a className="voice-help-link public-focus" href="#subscription-access">如何使用聲線 <span aria-hidden="true">↓</span></a>
         </section>
 
-        <section className="mx-auto max-w-7xl px-6 pb-20 lg:px-10" id="voice-catalog">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="eyebrow">Voice collection</p>
-              <h2 className="mt-3 font-serif text-3xl text-stone-900">公開聲線</h2>
-              <p className="mt-2 text-sm leading-6 text-stone-600">搜尋名稱、風格或已核准的使用情境。</p>
-            </div>
-            {catalog.status === 'ready' && voices.length > 0 && (
-              <p aria-live="polite" className="text-sm text-stone-500">顯示 {filteredVoices.length}／{voices.length} 個聲線</p>
-            )}
+        <section className="voice-catalog-collection" id="voice-catalog" aria-labelledby="collection-title" aria-busy={catalog.status === 'loading'}>
+          <div className="voice-collection-heading">
+            <h2 id="collection-title">公開聲線館</h2>
+            {catalog.status === 'ready' && voices.length > 0 && <p aria-live="polite">顯示 {filteredVoices.length}／{voices.length} 個聲線</p>}
           </div>
-
           {catalog.status === 'ready' && voices.length > 0 && (
             <div className="mt-7 rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-sm">
-              <div className="grid gap-4 lg:grid-cols-[minmax(15rem,1.4fr)_repeat(3,minmax(9rem,.7fr))_auto]">
+              <div className="voice-catalog-filters">
                 <label className="text-xs font-semibold text-stone-600">
                   搜尋公開聲線
                   <input
@@ -282,78 +241,74 @@ export function PublicVoicesPage() {
           )}
 
           {catalog.status === 'loading' && (
-            <div aria-live="polite" className="library-state mt-8" role="status">正在載入公開聲線…</div>
+            <div aria-live="polite" className="voice-catalog-state" role="status">正在載入公開聲線…</div>
           )}
           {catalog.status === 'disabled' && (
-            <div className="library-state mt-8" role="status">
-              <strong className="text-stone-800">公開聲線館目前尚未啟用</strong>
-              <span className="mt-2 max-w-xl text-sm leading-6">啟用前不會公開任何角色、示範音檔或訂閱入口。</span>
+            <div className="voice-catalog-state" role="status">
+              <span className="voice-state-symbol" aria-hidden="true">♪</span>
+              <h3>公開聲線館目前尚未啟用</h3>
+              <span className="mt-2 max-w-xl text-sm leading-6">目前沒有開放試聽。你仍可進入私人工作區，使用自己的角色與故事。</span>
             </div>
           )}
           {catalog.status === 'error' && (
-            <div className="library-state mt-8 border-rose-200 text-rose-700" role="alert">
+            <div className="voice-catalog-state voice-catalog-error" role="alert">
               <strong>暫時無法取得公開聲線</strong>
-              <span className="mt-2 text-sm">請稍後重新整理頁面。</span>
-              <span className="sr-only">{catalog.message}</span>
+              <span className="mt-2 text-sm">連線可能暫時中斷，請重試。你的私人資料不受影響。</span>
+              <button className="secondary-button public-focus mt-4" onClick={() => setAttempt(value => value + 1)} type="button">重新載入</button>
             </div>
           )}
           {catalog.status === 'ready' && voices.length === 0 && (
-            <div className="library-state mt-8" role="status">
+            <div className="voice-catalog-state" role="status">
               <strong className="text-stone-800">目前沒有可公開展示的聲線</strong>
-              <span className="mt-2 max-w-xl text-sm leading-6">只有完成公開展示、固定示範、商用與跨專案授權驗證的聲線才會出現在這裡。</span>
+              <span className="mt-2 max-w-xl text-sm leading-6">目前沒有已核准的公開示範。私人角色仍保留在你的工作區。</span>
             </div>
           )}
           {catalog.status === 'ready' && voices.length > 0 && filteredVoices.length === 0 && (
-            <div className="library-state mt-8" role="status">
+            <div className="voice-catalog-state" role="status">
               <strong className="text-stone-800">找不到符合條件的聲線</strong>
               <button className="secondary-button mt-4 public-focus" onClick={resetFilters} type="button">清除篩選</button>
             </div>
           )}
           {catalog.status === 'ready' && filteredVoices.length > 0 && (
-            <div className="mt-8 grid gap-6 xl:grid-cols-2">
+            <div className="mt-6 grid gap-5 xl:grid-cols-2">
               {filteredVoices.map((voice) => <VoiceCard key={voice.alias} voice={voice} />)}
             </div>
           )}
         </section>
 
-        <section className="border-y border-stone-200 bg-white/70" id="subscription-access">
-          <div className="mx-auto max-w-7xl px-6 py-16 lg:px-10">
-            <div className="max-w-3xl">
-              <p className="eyebrow">Subscription & API</p>
-              <h2 className="mt-3 font-serif text-3xl text-stone-900">訂閱與跨專案 API，跟著授權狀態開放</h2>
-              <p className="mt-4 text-sm leading-7 text-stone-600 sm:text-base">
-                公開卡片只負責展示已核准的固定示範；實際合成另以角色 entitlement 控制。只有授權仍在有效期限、用途涵蓋商用與跨專案 API，且未被撤銷時，專案金鑰才可使用該聲線。
-              </p>
-              <Link className="mt-4 inline-flex text-sm font-semibold text-amber-800 underline public-focus" to="/developers/docs">
-                查看完整 API 文件 →
-              </Link>
-            </div>
-
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
-              {[
-                ['固定示範', '公開播放使用固定音檔，不接受訪客輸入文字，也不會臨時產生新語音。'],
-                ['用途與期限', '商用、公開展示與跨專案 API 個別記錄，並依授權起訖時間判定是否可用。'],
-                ['可撤銷', '授權撤銷或到期後，後續 API 要求會停止使用該角色聲線；既有資料依約定處理。'],
-              ].map(([title, description], index) => (
-                <article className="rounded-2xl border border-stone-200 bg-white p-6" key={title}>
-                  <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-full bg-amber-100 text-sm font-bold text-amber-800">{index + 1}</span>
-                  <h3 className="mt-4 font-serif text-xl text-stone-900">{title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-stone-600">{description}</p>
-                </article>
-              ))}
-            </div>
-
-            <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm leading-7 text-amber-950">
-              <strong className="block font-semibold">公開可見，不代表所有用途自動獲准。</strong>
-              API 消費者、可用角色、請求額度與授權範圍會分開核定；介面不會因聲線出現在目錄就自動授予合成權限。目前未連接即時結帳，也未提供方案價格，此處僅說明訂閱申請條件。
-            </div>
+        <section className="voice-next-steps" id="subscription-access" aria-labelledby="voice-use-title">
+          <div className="voice-next-intro">
+            <p className="eyebrow">NEXT STEP</p>
+            <h2 id="voice-use-title">找到喜歡的聲音之後</h2>
+            <p>公開試聽與私人創作分開管理。選擇符合你用途的入口。</p>
           </div>
+          <div className="voice-paths">
+            <article>
+              <span className="voice-step-number" aria-hidden="true">01</span>
+              <h3>為自己的故事配音</h3>
+              <p>進入工作區管理私人角色，再到系列配音設定角色聲線。公開聲線目前不能一鍵加入故事。</p>
+              <Link className="voice-text-link public-focus" to="/characters">前往角色管理 <span aria-hidden="true">→</span></Link>
+              <small>需要登入；只會看到自己的角色。</small>
+            </article>
+            <article>
+              <span className="voice-step-number" aria-hidden="true">02</span>
+              <h3>在你的產品中使用</h3>
+              <p>先閱讀 API 文件，確認專案授權、可用聲線與額度。公開試聽不會自動開通合成權限。</p>
+              <Link className="voice-text-link public-focus" to="/developers/docs">閱讀 API 文件 <span aria-hidden="true">→</span></Link>
+              <small>目前不提供線上訂閱或結帳。</small>
+            </article>
+          </div>
+          <details className="voice-authorization">
+            <summary>公開示範與使用授權有什麼不同？</summary>
+            <div>
+              <p>所有示範均為 AI 合成的固定音檔。訪客不能輸入文字，也不會在試聽時產生新的語音。</p>
+              <p>公開可見，不代表所有用途自動獲准。商用、公開散布與跨專案 API，需個別確認用途、地區、有效期限與撤銷條件；到期或撤銷後，後續使用會停止。</p>
+              <p>目前未連接即時結帳，也未提供方案價格。請在聲線詳細頁查看目前核准範圍。</p>
+            </div>
+          </details>
         </section>
       </main>
-
-      <footer className="relative z-10 px-6 py-8 text-center text-xs leading-6 text-stone-500">
-        StoryVoice AI-generated voice catalog. Use only within a valid, unexpired grant.
-      </footer>
+      <footer className="voice-catalog-footer">StoryVoice · AI 故事導演 <span>僅使用你擁有或獲得授權的內容。</span></footer>
     </div>
   )
 }

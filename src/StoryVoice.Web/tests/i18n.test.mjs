@@ -55,7 +55,8 @@ test('公開 about 頁不依賴登入殼層，並提供公開導覽與雙語產�
 test('登入與私人工作區 chrome 有雙語文案與誠實能力提示', () => {
   assert.match(auth, /Sign in to StoryVoice/)
   assert.match(auth, /Create a StoryVoice account/)
-  assert.match(auth, /<LanguageSwitcher/)
+  assert.match(auth, /<PublicSiteHeader/)
+  assert.match(readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'), /<LanguageSwitcher/)
   assert.match(layout, /<LanguageSwitcher/)
   assert.match(layout, /Primary navigation/)
   assert.match(layout, /production workspace is currently Taiwan-Mandarin-first/)

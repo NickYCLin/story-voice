@@ -1,3 +1,4 @@
+import { LocaleProvider } from '../../src/i18n'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
@@ -28,10 +29,10 @@ function Navigation() {
   return <button onClick={() => navigate('/voices/second-voice')} type="button">切換聲線</button>
 }
 function show(alias = 'synthetic-voice') {
-  return render(<MemoryRouter initialEntries={[`/voices/${alias}`]}>
+  return render(<LocaleProvider><MemoryRouter initialEntries={[`/voices/${alias}`]}>
     <Navigation />
     <Routes><Route path="/voices/:alias" element={<PublicVoiceDetailPage />} /></Routes>
-  </MemoryRouter>)
+  </MemoryRouter></LocaleProvider>)
 }
 
 it('reads anonymously and shows the validated scope without granting API access', async () => {

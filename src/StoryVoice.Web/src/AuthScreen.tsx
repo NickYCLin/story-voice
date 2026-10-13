@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiUrl } from './api'
-import { LanguageSwitcher } from './components/LanguageSwitcher'
+import { PublicSiteHeader } from './components/PublicSiteHeader'
+import { StoryVoiceBrand } from './components/StoryVoiceBrand'
 import { localize, useLocale } from './i18n'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -62,19 +63,14 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
   }
 
   return (
-    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#faf6ee] px-5 py-12 text-[#332a1f]">
+    <div className="relative min-h-screen overflow-hidden bg-[#faf6ee] text-[#332a1f]">
+      <PublicSiteHeader />
+      <main className="relative grid place-items-center px-6 py-10 lg:py-16" id="main-content" tabIndex={-1}>
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
-      <LanguageSwitcher className="absolute right-5 top-5 z-20 sm:right-8 sm:top-8" />
       <section className="relative z-10 grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-[2rem] border border-stone-200 bg-white/90 shadow-2xl shadow-stone-400/20 backdrop-blur-xl lg:grid-cols-[1.05fr_.95fr]">
         <div className="border-b border-stone-200 bg-gradient-to-br from-amber-50/70 to-transparent p-8 sm:p-12 lg:border-b-0 lg:border-r">
-          <div className="flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300 bg-amber-50 font-serif text-lg text-amber-800">SV</span>
-            <div>
-              <strong className="block font-serif text-xl text-stone-900">StoryVoice</strong>
-              <span className="text-[10px] uppercase tracking-[.26em] text-stone-500">{t('你的私人故事書庫', 'Your private story library')}</span>
-            </div>
-          </div>
+          <StoryVoiceBrand />
           <p className="eyebrow mt-14">{t('第一步', 'Step 1')}</p>
           <h1 className="mt-4 max-w-xl font-serif text-4xl leading-tight text-stone-900 sm:text-5xl">
             {t('先登入 StoryVoice，', 'Sign in to StoryVoice, then ')}
@@ -128,6 +124,7 @@ export function AuthScreen({ csrfToken, onAuthenticated }: AuthScreenProps) {
           </form>
         </div>
       </section>
-    </main>
+      </main>
+    </div>
   )
 }
