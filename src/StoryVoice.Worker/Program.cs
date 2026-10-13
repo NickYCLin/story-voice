@@ -86,6 +86,7 @@ builder.Services.AddSingleton<IFfmpegAudioComposer>(services =>
     services.GetRequiredService<FfmpegVoAiAudioComposer>());
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, VoAiMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, BlueMagpieMultiVoiceNarrationProvider>();
+builder.Services.AddSingleton<IMultiVoiceNarrationProvider, LocalCloneMultiVoiceNarrationProvider>();
 builder.Services.AddSingleton<INarrationProviderRegistry, NarrationProviderRegistry>();
 builder.Services.AddSingleton<NarrationProviderDispatcher>();
 builder.Services.AddHostedService<BlueMagpieChunkCacheCleanupService>();

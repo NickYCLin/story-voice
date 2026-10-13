@@ -8,6 +8,11 @@ namespace StoryVoice.Domain.Narrations;
 /// </summary>
 public static class CharacterVoiceProviders
 {
+    public const string LocalClone = "local-clone";
+    public static bool UsesCloneProfiles(string provider) =>
+        string.Equals(provider, LocalClone, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(provider, ThreeWaVoxCpm2, StringComparison.OrdinalIgnoreCase);
+
     public const string Edge = "edge";
 
     public const string VoAi = "voai";

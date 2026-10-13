@@ -142,9 +142,11 @@ public static class DependencyInjection
                     LocalClonePreviewOptions.PinnedGatewayBaseUrl,
                     StringComparison.Ordinal),
                 "Local clone preview gateway URL must be the pinned internal HTTP endpoint.")
-            .Validate(options => !options.Enabled
+            .Validate(options => (!options.Enabled && !options.FormalNarrationEnabled)
                 || IsValidLocalCloneInternalToken(options.InternalToken),
-                "Enabled local clone preview requires a 32-512 character printable ASCII internal token.")
+                "Enabled local clone preview or formal narration requires a 32-512 character printable ASCII internal token.")
+            .Validate(options => options.RetryDelaySeconds is >= 1 and <= 60,
+                "Local clone retry delay must be between 1 and 60 seconds.")
             .Validate(options => !options.Enabled || IsValidPrivateAssetRoot(options.AssetRootPath),
                 "Enabled local clone preview requires a non-root private asset directory.")
             .Validate(options => options.ConnectTimeoutSeconds is >= 1 and <= 30,

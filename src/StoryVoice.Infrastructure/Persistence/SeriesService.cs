@@ -17,7 +17,8 @@ internal sealed class SeriesService(
     ICurrentUser currentUser,
     IStorySeriesRepository repository,
     IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions,
-    IOptions<BlueMagpieOptions> blueMagpieOptions) : ISeriesService
+    IOptions<BlueMagpieOptions> blueMagpieOptions,
+    IOptions<LocalClonePreviewOptions> localCloneOptions) : ISeriesService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string NeutralRate = "+0%";
@@ -445,10 +446,7 @@ internal sealed class SeriesService(
         CancellationToken cancellationToken)
     {
         var customCharacters = series.Characters
-            .Where(character => string.Equals(
-                assignments[character.Id].Provider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(assignments[character.Id].Provider))
             .ToArray();
         if (customCharacters.Length == 0)
         {
@@ -721,6 +719,8 @@ internal sealed class SeriesService(
 
     public IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions() =>
         _voiceCatalog
+            .Where(voice => localCloneOptions.Value.FormalNarrationEnabled
+                || !string.Equals(voice.Provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase))
             .Where(voice => _blueMagpieFormalNarrationEnabled
                 || !string.Equals(
                     voice.Provider,
@@ -760,6 +760,9 @@ internal sealed class SeriesService(
 
     private void EnsureFormalNarrationAvailable(string provider)
     {
+        if (string.Equals(provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase)
+            && !localCloneOptions.Value.FormalNarrationEnabled)
+            throw new InvalidOperationException("自架克隆聲線的正式配音尚未由管理員啟用。");
         if (string.Equals(provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
             && !_blueMagpieFormalNarrationEnabled)
         {

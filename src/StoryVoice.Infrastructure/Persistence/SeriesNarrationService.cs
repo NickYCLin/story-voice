@@ -29,6 +29,7 @@ internal sealed partial class SeriesNarrationService(
     IOptions<MultiCharacterNarrationOptions> compositionOptions,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
     IOptions<NarrationOptions> narrationOptions,
+    IOptions<LocalClonePreviewOptions> localCloneOptions,
     PostgreSqlCastEpochActivationPublisher activationPublisher) : ISeriesNarrationService
 {
     public async Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
@@ -73,6 +74,10 @@ internal sealed partial class SeriesNarrationService(
                 throw new InvalidOperationException(
                     "BlueMagpie 目前只開放固定句試音；正式小說配音尚未由管理員啟用。");
             }
+
+            if (string.Equals(series.NarratorProvider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase)
+                && !localCloneOptions.Value.FormalNarrationEnabled)
+                throw new InvalidOperationException("自架克隆聲線的正式配音尚未由管理員啟用。");
 
             var isThreeWa = string.Equals(
                 series.NarratorProvider,
@@ -773,10 +778,7 @@ internal sealed partial class SeriesNarrationService(
         CancellationToken cancellationToken)
     {
         var customCharacters = series.Characters
-            .Where(character => string.Equals(
-                character.VoiceProvider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(character.VoiceProvider))
             .ToArray();
         if (customCharacters.Length == 0)
         {

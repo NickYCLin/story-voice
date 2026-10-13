@@ -61,6 +61,7 @@ services:
       BlueMagpie__MaximumResponseBytes: ${BLUEMAGPIE_MAXIMUM_RESPONSE_BYTES:-5242880}
       BlueMagpie__MaximumChunksPerJob: ${BLUEMAGPIE_MAXIMUM_CHUNKS_PER_JOB:-10000}
       BlueMagpie__MaximumJobAudioBytes: ${BLUEMAGPIE_MAXIMUM_JOB_AUDIO_BYTES:-8589934592}
+      LocalClonePreview__FormalNarrationEnabled: ${LOCAL_CLONE_FORMAL_NARRATION_ENABLED:-false}
       LocalClonePreview__Enabled: ${LOCAL_CLONE_PREVIEW_ENABLED:-false}
       LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
       LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
@@ -130,6 +131,10 @@ services:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       BookStorage__RootPath: /data/books
+      CharacterVoiceStorage__RootPath: /data/character-voices
+      LocalClonePreview__FormalNarrationEnabled: ${LOCAL_CLONE_FORMAL_NARRATION_ENABLED:-false}
+      LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
+      LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
       ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
       ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
@@ -168,6 +173,7 @@ services:
       Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-5}
     volumes:
       - book-storage:/data/books
+      - character-voice-storage:/data/character-voices:ro
       - audio-storage:/data/audio
       - bluemagpie-chunk-cache:/data/bluemagpie-cache
     depends_on:
@@ -180,6 +186,7 @@ services:
     networks:
       - default
       - bluemagpie-internal
+      - local-clone-api-internal
     stop_grace_period: 60s
     restart: unless-stopped
 

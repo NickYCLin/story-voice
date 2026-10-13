@@ -132,7 +132,7 @@ internal sealed class PublicVoiceCatalogService(
             alias,
             authorization.DisplayName,
             authorization.AttributionText ?? string.Empty,
-            "AI 合成語音",
+            authorization.SourceKind == "owner-recorded" ? "本人錄音授權的 AI 合成語音" : "AI 合成語音",
             authorization.Styles.ToArray(),
             authorization.UseCases.ToArray(),
             $"/api/public/v1/voices/{alias}/demo",

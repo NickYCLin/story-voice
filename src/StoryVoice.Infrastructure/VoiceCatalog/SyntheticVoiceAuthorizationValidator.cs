@@ -6,6 +6,7 @@ using System.Text.Json;
 namespace StoryVoice.Infrastructure.VoiceCatalog;
 
 internal sealed record SyntheticVoiceAuthorizationEvidence(
+    string SourceKind,
     Guid OwnerId,
     string VoiceAlias,
     Guid CharacterProfileId,
@@ -31,6 +32,7 @@ internal sealed record SyntheticVoiceAuthorizationEvidence(
 internal static class SyntheticVoiceAuthorizationValidator
 {
     public const string CurrentSchema = "storyvoice-synthetic-voice-authorization/v1";
+    public const string OwnerRecordedSchema = "storyvoice-voice-authorization/v2";
     public const string RequiredRevocationScope = "all-authorized-uses";
     public const int MaximumBytes = 128 * 1024;
     public const int MaximumGenerationManifestBytes = 128 * 1024;
@@ -42,6 +44,18 @@ internal static class SyntheticVoiceAuthorizationValidator
         "allowedConsumerFamilies", "territory",
         "externalProviderPolicy", "effectiveAtUtc", "expiresAtUtc",
         "revocation", "attestation");
+
+    private static readonly IReadOnlySet<string> OwnerRecordedRootProperties =
+        RootProperties.Concat(["sourceKind"]).ToHashSet(StringComparer.Ordinal);
+    private static readonly IReadOnlySet<string> OwnerRecordedClaims = Set(
+        "performerOwnerId", "serviceProviderOwnerId", "recordedByOwner",
+        "ownerIsVoicePerformer", "recordingRightsOwned", "noThirdPartyCharacterOrBrandClaimed");
+    private static readonly IReadOnlySet<string> OwnerRecordedCreationProperties =
+        CreationPropertyNamesForOwnerRecording();
+    private static IReadOnlySet<string> CreationPropertyNamesForOwnerRecording() => Set(
+        "providerId", "toolId", "modelId", "modelRevision", "createdAtUtc",
+        "provenanceManifestSha256", "licenseIdentifier", "termsUri",
+        "termsSnapshotSha256", "termsAcceptedAtUtc");
 
     private static readonly IReadOnlySet<string> VoiceProperties = Set(
         "alias", "characterProfileId", "displayName",
@@ -87,8 +101,12 @@ internal static class SyntheticVoiceAuthorizationValidator
         DateTimeOffset now)
     {
         using var document = ParseDocument(content);
-        var root = ExactObject(document.RootElement, RootProperties);
-        RequireString(root, "schema", CurrentSchema);
+        var ownerRecorded = document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty("schema", out var schema)
+            && schema.ValueKind == JsonValueKind.String && schema.GetString() == OwnerRecordedSchema;
+        var root = ExactObject(document.RootElement, ownerRecorded ? OwnerRecordedRootProperties : RootProperties);
+        RequireString(root, "schema", ownerRecorded ? OwnerRecordedSchema : CurrentSchema);
+        if (ownerRecorded) RequireString(root, "sourceKind", "owner-recorded");
         RequireIdentifier(GetString(root, "authorizationId", 8, 128));
         var ownerId = CanonicalGuid(root["ownerId"]);
 
@@ -103,7 +121,7 @@ internal static class SyntheticVoiceAuthorizationValidator
         var characterProfileId = CanonicalGuid(voice["characterProfileId"]);
         var presentation = ValidateVoicePresentation(voice);
 
-        var creation = ExactObject(root["creation"], CreationProperties);
+        var creation = ExactObject(root["creation"], ownerRecorded ? OwnerRecordedCreationProperties : CreationProperties);
         RequireIdentifier(GetString(creation, "providerId", 1, 128));
         _ = GetString(creation, "toolId", 1, 200);
         _ = GetString(creation, "modelId", 1, 200);
@@ -111,7 +129,7 @@ internal static class SyntheticVoiceAuthorizationValidator
         var createdAtUtc = CanonicalUtc(creation["createdAtUtc"]);
         var generationManifestSha256 = GetRequiredSha256(
             creation,
-            "generationManifestSha256");
+            ownerRecorded ? "provenanceManifestSha256" : "generationManifestSha256");
         _ = GetString(creation, "licenseIdentifier", 1, 200);
         RequireHttpsUri(GetString(creation, "termsUri", 8, 2_048));
         var termsSnapshotSha256 = GetRequiredSha256(creation, "termsSnapshotSha256");
@@ -126,10 +144,17 @@ internal static class SyntheticVoiceAuthorizationValidator
         var transcriptSha256 = GetRequiredSha256(
             bindings,
             "expectedTranscriptCanonicalSha256");
-        var claims = ExactObject(root["sourceClaims"], SourceClaimProperties);
-        foreach (var name in SourceClaimProperties)
+        var claims = ExactObject(root["sourceClaims"], ownerRecorded ? OwnerRecordedClaims : SourceClaimProperties);
+        if (ownerRecorded)
         {
-            RequireTrue(claims, name);
+            if (CanonicalGuid(claims["performerOwnerId"]) != ownerId
+                || CanonicalGuid(claims["serviceProviderOwnerId"]) != ownerId) throw InvalidOrigin();
+            foreach (var name in OwnerRecordedClaims.Where(name => !name.EndsWith("OwnerId", StringComparison.Ordinal)))
+                RequireTrue(claims, name);
+        }
+        else
+        {
+            foreach (var name in SourceClaimProperties) RequireTrue(claims, name);
         }
 
         var providerRights = ExactObject(root["providerRights"], ProviderRightProperties);
@@ -177,6 +202,7 @@ internal static class SyntheticVoiceAuthorizationValidator
         }
 
         return new SyntheticVoiceAuthorizationEvidence(
+            ownerRecorded ? "owner-recorded" : "original-synthetic",
             ownerId,
             voiceAlias,
             characterProfileId,

@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,10 +69,12 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
         Assert.Equal(0, fixture.Gateway.Calls);
     }
 
-    [Fact]
-    public async Task Valid_authorization_derives_catalog_and_commercial_api_bindings()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Valid_authorization_derives_catalog_and_commercial_api_bindings(bool ownerRecorded)
     {
-        await using var fixture = await CreateFixtureAsync(SyntheticState.Active);
+        await using var fixture = await CreateFixtureAsync(SyntheticState.Active, ownerRecorded: ownerRecorded);
         using var client = fixture.Factory.CreateClient();
         var cancellationToken = TestContext.Current.CancellationToken;
 
@@ -87,6 +90,7 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
         Assert.Equal(HttpStatusCode.OK, catalog.StatusCode);
         var card = Assert.Single(cards ?? []);
         Assert.Equal(Alias, card.Alias);
+        Assert.Equal(ownerRecorded ? "本人錄音授權的 AI 合成語音" : "AI 合成語音", card.Disclosure);
         Assert.Equal("Creator synthetic story character", card.DisplayName);
         Assert.Equal(["warm", "narrative"], card.Styles);
         Assert.Equal(HttpStatusCode.OK, demo.StatusCode);
@@ -94,6 +98,22 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
         Assert.Equal(HttpStatusCode.OK, speech.StatusCode);
         Assert.Equal(fixture.Output, await speech.Content.ReadAsByteArrayAsync(cancellationToken));
         Assert.Equal(1, fixture.Gateway.Calls);
+    }
+
+    [Theory]
+    [InlineData(SyntheticState.ReferenceBindingMismatch)]
+    [InlineData(SyntheticState.ManifestTampered)]
+    [InlineData(SyntheticState.DemoTampered)]
+    [InlineData(SyntheticState.AuthorizationExpired)]
+    [InlineData(SyntheticState.AuthorizationRevoked)]
+    [InlineData(SyntheticState.AuthorizationOwnerMismatch)]
+    public async Task Owner_recorded_authorization_checks_assets_dates_revocation_and_owner(SyntheticState state)
+    {
+        await using var fixture = await CreateFixtureAsync(state, ownerRecorded: true);
+        using var client = fixture.Factory.CreateClient();
+        using var speech = await client.SendAsync(CreateSpeechRequest(fixture.Token, "owner recording fixture"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, speech.StatusCode);
+        Assert.Equal(0, fixture.Gateway.Calls);
     }
 
     [Fact]
@@ -339,7 +359,8 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
     private async Task<SyntheticFixture> CreateFixtureAsync(
         SyntheticState state,
         bool publicCatalogEnabled = true,
-        string tokenPrefix = ExternalVoiceAccessTiers.SubscriptionCommercialTokenPrefix)
+        string tokenPrefix = ExternalVoiceAccessTiers.SubscriptionCommercialTokenPrefix,
+        bool ownerRecorded = false)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var assetRoot = Path.Combine(
@@ -482,6 +503,25 @@ public sealed class SyntheticVoiceAuthorizationApiTests(ApiFactory factory) : IC
                 issuedAtUtc = UtcSeconds(issuedAt),
             },
         });
+        if (ownerRecorded)
+        {
+            var node = JsonNode.Parse(authorization)!.AsObject();
+            node["schema"] = SyntheticVoiceAuthorizationValidator.OwnerRecordedSchema;
+            node["sourceKind"] = "owner-recorded";
+            var creation = node["creation"]!.AsObject();
+            creation["provenanceManifestSha256"] = creation["generationManifestSha256"]!.GetValue<string>();
+            creation.Remove("generationManifestSha256");
+            node["sourceClaims"] = JsonSerializer.SerializeToNode(new
+            {
+                performerOwnerId = ownerId.ToString("D"),
+                serviceProviderOwnerId = ownerId.ToString("D"),
+                recordedByOwner = true,
+                ownerIsVoicePerformer = true,
+                recordingRightsOwned = true,
+                noThirdPartyCharacterOrBrandClaimed = true,
+            });
+            authorization = JsonSerializer.SerializeToUtf8Bytes(node);
+        }
         var authorizationSha256 = Sha256(authorization);
 
         var usageEffective = state == SyntheticState.UsageExpired

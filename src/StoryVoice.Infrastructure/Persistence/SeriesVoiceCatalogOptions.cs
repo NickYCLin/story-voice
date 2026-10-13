@@ -94,6 +94,13 @@ public sealed class SeriesVoiceCatalogOptions
         },
         new()
         {
+            Provider = CharacterVoiceProviders.LocalClone,
+            Voice = "local-clone-narrator",
+            DisplayName = "自架角色克隆（需啟用正式配音）",
+            Locale = "zh-TW"
+        },
+        new()
+        {
             // Characters resolve to linked Clone profiles at synthesis time. Narrator and
             // explicitly confirmed narrator-fallback turns still need a real Edge voice because
             // the narrator itself has no CharacterVoiceProfile.

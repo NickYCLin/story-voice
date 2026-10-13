@@ -216,10 +216,7 @@ public static class MultiCharacterTurnBuilder
                 var emotion = segment.Kind == SpeechSegmentTurnKind.InnerMonologue
                     ? DialogueEmotion.Neutral
                     : DialogueEmotionClassifier.Classify(segmentText, precedingContext);
-                var isCustomVoiceProvider = string.Equals(
-                    assignment.VoiceProvider,
-                    CharacterVoiceProviders.ThreeWaVoxCpm2,
-                    StringComparison.OrdinalIgnoreCase);
+                var isCustomVoiceProvider = CharacterVoiceProviders.UsesCloneProfiles(assignment.VoiceProvider);
                 var isBlueMagpieProvider = string.Equals(
                     assignment.VoiceProvider,
                     CharacterVoiceProviders.BlueMagpie,
@@ -249,7 +246,7 @@ public static class MultiCharacterTurnBuilder
                             // picked, so — unlike the Edge path below — the fixed cast rate/
                             // pitch/volume pass through unchanged rather than getting a delta.
                             return (
-                                EncodeVoiceReference(profile),
+                                EncodeVoiceReference(profile, assignment.VoiceProvider),
                                 assignment.Rate,
                                 assignment.Pitch,
                                 assignment.Volume);
@@ -298,14 +295,18 @@ public static class MultiCharacterTurnBuilder
 
     /// <summary>Packs a Ready Clone profile into the opaque reference carried by a narration turn.
     /// Design profiles are rejected while the provider contract cannot distinguish voice prompts.</summary>
-    private static string EncodeVoiceReference(CharacterVoiceProfile profile)
+    public const string LocalCloneReferencePrefix = "localclone:";
+    public static string EncodeLocalCloneReference(Guid id) => $"{LocalCloneReferencePrefix}{id:N}";
+
+    private static string EncodeVoiceReference(CharacterVoiceProfile profile, string provider)
     {
         if (profile.Mode != CharacterVoiceProfileMode.Clone)
         {
             throw UnsupportedDesignVoice();
         }
 
-        return $"clone:{profile.VoiceProfileTaskId}";
+        return string.Equals(provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase)
+            ? EncodeLocalCloneReference(profile.Id) : $"clone:{profile.VoiceProfileTaskId}";
     }
 
     /// <summary>
@@ -324,10 +325,7 @@ public static class MultiCharacterTurnBuilder
     {
         var result = new Dictionary<Guid, CharacterVoiceProfileBundle>();
         var threeWaCharacterIds = castRevision.Assignments
-            .Where(assignment => string.Equals(
-                assignment.VoiceProvider,
-                CharacterVoiceProviders.ThreeWaVoxCpm2,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(assignment => CharacterVoiceProviders.UsesCloneProfiles(assignment.VoiceProvider))
             .Select(assignment => assignment.CharacterId)
             .ToHashSet();
         if (threeWaCharacterIds.Count == 0)

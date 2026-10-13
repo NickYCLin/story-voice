@@ -294,7 +294,9 @@ public sealed class StoryPipelineWorker(
                     await usage.BeginSynthesisAsync(castRevision.NarratorProvider, turnPlan.Turns.Select(turn => turn.Text));
                     var synthesisResult = await multiVoiceDispatcher.SynthesizeAsync(
                         castRevision.NarratorProvider,
-                        CreateMultiVoiceNarrationRequest(castRevision, turnPlan.Turns, cacheContext),
+                        CreateMultiVoiceNarrationRequest(castRevision, turnPlan.Turns, cacheContext,
+                            ResolveLocalCloneReferences(job.OwnerId, turnPlan.Turns, voiceProfiles,
+                                scope.ServiceProvider.GetRequiredService<IOptions<CharacterVoiceStorageOptions>>().Value.RootPath)),
                         temporaryPath,
                         reportProgress,
                         providerCancellation.Token);
@@ -333,8 +335,13 @@ public sealed class StoryPipelineWorker(
             }
 
             File.Move(temporaryPath, absolutePath, overwrite: false);
-            temporaryPath = null;
             uncommittedAudioPath = absolutePath;
+            if (string.Equals(synthesisProviderName, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase))
+            {
+                // Receipt and MP3 must both persist before the job can become Completed.
+                File.Move(temporaryPath + ".integrity.json", absolutePath + ".integrity.json", overwrite: false);
+            }
+            temporaryPath = null;
             await PersistTimelineAsync(db, job.OwnerId, claim.JobId, timelineDocument, stoppingToken);
             var completedAt = DateTimeOffset.UtcNow;
             var persistedRelativePath = relativePath.Replace('\\', '/');
@@ -470,6 +477,8 @@ public sealed class StoryPipelineWorker(
         {
             try
             {
+                if (temporaryPath is not null) DeleteIfExists(temporaryPath + ".integrity.json");
+                if (uncommittedAudioPath is not null) DeleteIfExists(uncommittedAudioPath + ".integrity.json");
                 DeleteIfExists(temporaryPath);
                 DeleteIfExists(uncommittedAudioPath);
             }
@@ -669,10 +678,36 @@ public sealed class StoryPipelineWorker(
         }
     }
 
+    internal static IReadOnlyDictionary<string, LocalCloneVoiceReference> ResolveLocalCloneReferences(
+        Guid ownerId, IReadOnlyList<NarrationTurn> turns,
+        IReadOnlyList<CharacterVoiceProfile> profiles, string rootPath)
+    {
+        var result = new Dictionary<string, LocalCloneVoiceReference>(StringComparer.Ordinal);
+        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var key in turns.Select(turn => turn.Voice)
+                     .Where(voice => voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal))
+                     .Distinct(StringComparer.Ordinal))
+        {
+            var profile = profiles.SingleOrDefault(candidate => candidate.OwnerId == ownerId
+                && MultiCharacterTurnBuilder.EncodeLocalCloneReference(candidate.Id) == key);
+            if (profile is null || profile.Mode != CharacterVoiceProfileMode.Clone
+                || profile.Status != CharacterVoiceProfileStatus.Ready || profile.TranscriptConfirmedAt is null
+                || string.IsNullOrWhiteSpace(profile.Transcript)
+                || string.IsNullOrWhiteSpace(profile.ReferenceAudioRelativePath)
+                || string.IsNullOrWhiteSpace(profile.ReferenceAudioSha256))
+                throw new PermanentNarrationProviderException(LocalCloneMultiVoiceNarrationProvider.MissingReferenceCode,
+                    "角色的參考錄音或已確認逐字稿無法使用。");
+            var path = CharacterVoiceReferenceFiles.Resolve(root, profile.ReferenceAudioRelativePath);
+            result.Add(key, new LocalCloneVoiceReference(path, profile.Transcript, profile.ReferenceAudioSha256));
+        }
+        return result;
+    }
+
     internal static MultiVoiceNarrationRequest CreateMultiVoiceNarrationRequest(
         NarrationCastRevision castRevision,
         IReadOnlyList<NarrationTurn> turns,
-        NarrationSynthesisCacheContext? cacheContext = null)
+        NarrationSynthesisCacheContext? cacheContext = null,
+        IReadOnlyDictionary<string, LocalCloneVoiceReference>? cloneReferences = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
         ArgumentNullException.ThrowIfNull(turns);
@@ -686,7 +721,8 @@ public sealed class StoryPipelineWorker(
                     assignment.VoiceProvider,
                     assignment.ProviderVersion))
                 .ToArray(),
-            cacheContext);
+            cacheContext,
+            cloneReferences);
     }
 
     internal static bool CanResumeAfterWorkerStop(string? providerName) =>

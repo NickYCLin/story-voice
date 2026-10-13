@@ -15,6 +15,7 @@ public sealed class MultiCharacterNarrationOptions
         ["3wa-voxcpm2"] = "3wa-voxcpm2-api-v1",
         ["voai"] = "voai-voice-api-v1",
         ["bluemagpie"] = BlueMagpieOptions.PinnedProviderVersion,
+        ["local-clone"] = LocalClonePreviewOptions.FormalProviderVersion,
     };
 
     public Dictionary<string, string> CompositionVersions { get; set; } = new(StringComparer.OrdinalIgnoreCase)
@@ -23,6 +24,7 @@ public sealed class MultiCharacterNarrationOptions
         ["3wa-voxcpm2"] = "3wa-voxcpm2-turn-concat-v2",
         ["voai"] = "voai-speech-turn-concat-v1",
         ["bluemagpie"] = "bluemagpie-pcm16-concat-v1",
+        ["local-clone"] = "local-clone-complete-turns-v2",
     };
 
     public Dictionary<string, string> FfmpegProfiles { get; set; } = new(StringComparer.OrdinalIgnoreCase)
@@ -31,6 +33,7 @@ public sealed class MultiCharacterNarrationOptions
         ["3wa-voxcpm2"] = "mixed-audio-to-mp3-concat-v1",
         ["voai"] = "wav-32khz-to-mp3-concat-v1",
         ["bluemagpie"] = "wav-48khz-mono-to-mp3-concat-v1",
+        ["local-clone"] = "mp3-44100-mono-concat-v1",
     };
 
     public string ResolveProviderVersion(string provider) =>
