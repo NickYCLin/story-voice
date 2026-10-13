@@ -87,10 +87,18 @@ public static class MultiCharacterTurnBuilder
             throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
         }
 
-        var profilesByCharacter = BuildProfileLookup(
-            castRevision,
-            voiceProfiles,
-            characterProfileIdsByCharacterId);
+        var managed = castRevision.NarratorVoice.StartsWith(LocalCloneReferencePrefix, StringComparison.Ordinal);
+        var profilesByCharacter = managed ? new Dictionary<Guid, CharacterVoiceProfileBundle>() : BuildProfileLookup(
+            castRevision, voiceProfiles, characterProfileIdsByCharacterId);
+        if (managed)
+        {
+            foreach (var voice in castRevision.Assignments.Select(a => a.Voice).Append(castRevision.NarratorVoice))
+            {
+                if (voiceProfiles is null || !voiceProfiles.Any(p => p.Status == CharacterVoiceProfileStatus.Ready
+                    && p.Mode == CharacterVoiceProfileMode.Clone && EncodeLocalCloneReference(p.Id) == voice))
+                    throw MissingCloneVoice();
+            }
+        }
         var orderedChapters = chapterPlans.OrderBy(plan => plan.ChapterSortOrder).ToArray();
         var turns = new List<NarrationTurn>();
         var sliceLists = new List<List<NarrationTurnSlice>>();
@@ -203,6 +211,18 @@ public static class MultiCharacterTurnBuilder
         string precedingContext,
         IReadOnlyDictionary<Guid, CharacterVoiceProfileBundle> profilesByCharacter)
     {
+        if (castRevision.NarratorVoice.StartsWith(LocalCloneReferencePrefix, StringComparison.Ordinal))
+        {
+            if (segment.CharacterId is Guid id && segment.Kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue)
+            {
+                var selected = castRevision.Assignments.SingleOrDefault(a => a.CharacterId == id)
+                    ?? throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+                return (selected.Voice, selected.Rate, selected.Pitch, selected.Volume);
+            }
+            if (segment.Kind == SpeechSegmentTurnKind.InnerMonologue)
+                throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+            return (castRevision.NarratorVoice, castRevision.NarratorRate, castRevision.NarratorPitch, castRevision.NarratorVolume);
+        }
         if ((segment.Kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue)
             && segment.CharacterId is Guid characterId)
         {

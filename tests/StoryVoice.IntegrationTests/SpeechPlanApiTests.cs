@@ -603,8 +603,8 @@ public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFa
             new
             {
                 name,
-                narratorProvider = "edge",
-                narratorVoice = "zh-TW-YunJheNeural",
+                narratorProvider = "local-clone",
+                narratorVoice = await client.ManagedVoiceAsync(cancellationToken),
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -628,8 +628,8 @@ public sealed class SpeechPlanApiTests(ApiFactory factory) : IClassFixture<ApiFa
             {
                 canonicalName,
                 role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-HsiaoChenNeural",
+                voiceProvider = "local-clone",
+                voice = await client.ManagedVoiceAsync(cancellationToken, "actor"),
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",

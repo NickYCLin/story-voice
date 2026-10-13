@@ -25,6 +25,7 @@ public sealed class StoryPipelineWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _ = provider; // Retained constructor compatibility; legacy single-voice work never invokes it.
         logger.LogInformation("StoryVoice narration worker {WorkerId} is ready with {MaximumConcurrentJobs} processing slots",
             _workerId, options.Value.MaximumConcurrentJobs);
         Directory.CreateDirectory(options.Value.AudioRootPath);
@@ -253,6 +254,16 @@ public sealed class StoryPipelineWorker(
                         job.SeriesId!.Value,
                         job.CastRevisionId!.Value,
                         stoppingToken);
+                    try
+                    {
+                        await ManagedNarrationVoices.RequireAsync(db, job.OwnerId,
+                            castRevision.Assignments.Select(a => (a.VoiceProvider, a.Voice))
+                                .Append((castRevision.NarratorProvider, castRevision.NarratorVoice)), stoppingToken);
+                    }
+                    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+                    {
+                        throw new PermanentNarrationProviderException("character_voice_required", ManagedNarrationVoices.Error, exception);
+                    }
                     synthesisProviderName = castRevision.NarratorProvider;
                     if (string.Equals(
                             castRevision.NarratorProvider,
@@ -276,6 +287,7 @@ public sealed class StoryPipelineWorker(
                         db,
                         job.OwnerId,
                         job.SeriesId.Value,
+                        castRevision,
                         stoppingToken);
                     var turnPlan = MultiCharacterTurnBuilder.BuildTurnPlan(
                         castRevision,
@@ -306,14 +318,8 @@ public sealed class StoryPipelineWorker(
                 }
                 else
                 {
-                    await usage.BeginSynthesisAsync("edge", [source.Text]);
-                    await provider.SynthesizeAsync(
-                        source.Text,
-                        temporaryPath,
-                        job.Voice,
-                        job.Rate,
-                        reportProgress,
-                        providerCancellation.Token);
+                    throw new PermanentNarrationProviderException("character_voice_required",
+                        "舊單人 Edge 排程已停用，請從角色管理選擇聲線後重新建立配音。");
                 }
             }
             finally
@@ -518,6 +524,7 @@ public sealed class StoryPipelineWorker(
             StoryVoiceDbContext db,
             Guid ownerId,
             Guid seriesId,
+            NarrationCastRevision castRevision,
             CancellationToken cancellationToken)
     {
         var characterProfileIdsByCharacterId = await db.SeriesCharacters
@@ -529,26 +536,10 @@ public sealed class StoryPipelineWorker(
                 character => character.Id,
                 character => character.CharacterProfileId!.Value,
                 cancellationToken);
-        if (characterProfileIdsByCharacterId.Count == 0)
-        {
-            return ([], characterProfileIdsByCharacterId);
-        }
-
-        var characterProfileIds = characterProfileIdsByCharacterId.Values.Distinct().ToArray();
-        var profiles = await db.CharacterVoiceProfiles
-            .AsNoTracking()
-            .Where(profile => profile.OwnerId == ownerId
-                && characterProfileIds.Contains(profile.CharacterProfileId)
-                && (profile.Mode != CharacterVoiceProfileMode.Clone
-                    || db.CharacterVoiceProfileOperations.Any(operation =>
-                        operation.OwnerId == ownerId
-                        && operation.CharacterProfileId == profile.CharacterProfileId
-                        && operation.NewProfileId == profile.Id
-                        && operation.State == CharacterVoiceProfileOperationState.Activated
-                        && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
-                        && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
-                        && operation.FormalNarrationAllowed)))
-            .ToListAsync(cancellationToken);
+        var ids = castRevision.Assignments.Select(a => ManagedNarrationVoices.Parse(a.VoiceProvider, a.Voice))
+            .Append(ManagedNarrationVoices.Parse(castRevision.NarratorProvider, castRevision.NarratorVoice)).Distinct().ToArray();
+        var profiles = await ManagedNarrationVoices.Eligible(db, ownerId)
+            .Where(p => ids.Contains(p.Id)).ToListAsync(cancellationToken);
         return (profiles, characterProfileIdsByCharacterId);
     }
 

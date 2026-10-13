@@ -19,7 +19,7 @@ const outcomes: Record<string, string> = {
   Running: '處理中', Completed: '已完成', Failed: '失敗', TimedOut: '逾時', Cancelled: '已取消',
   WorkerStopped: '服務停止', LeaseLost: '工作已由其他程序接手', Unknown: '結果未確認',
 }
-const engines: Record<string, string> = { edge: 'Edge', bluemagpie: 'BlueMagpie', voai: 'VoAI', '3wa-voxcpm2': '3wa' }
+const engines: Record<string, string> = { 'local-clone': '角色克隆', edge: 'Edge', bluemagpie: 'BlueMagpie', voai: 'VoAI', '3wa-voxcpm2': '3wa' }
 const number = (value: number | null) => value == null ? '未記錄' : value.toLocaleString('zh-TW')
 const seconds = (value: number | null) => value == null ? '未記錄' : `${(value / 1000).toLocaleString('zh-TW', { maximumFractionDigits: 2 })} 秒`
 

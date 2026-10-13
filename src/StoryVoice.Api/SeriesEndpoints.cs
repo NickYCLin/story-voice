@@ -16,8 +16,8 @@ public static class SeriesEndpoints
             Results.Ok(await service.ListAsync(cancellationToken)))
             .WithName("ListStorySeries");
 
-        group.MapGet("/voice-options", (ISeriesService service) =>
-            Results.Ok(service.ListVoiceOptions()))
+        group.MapGet("/voice-options", async (ISeriesService service, CancellationToken cancellationToken) =>
+            Results.Ok(await service.ListVoiceOptionsAsync(cancellationToken)))
             .WithName("ListSeriesVoiceOptions");
 
         group.MapPost("/voice-preview", async (

@@ -102,9 +102,7 @@ export function BookInsightsPanel({ book, csrfToken }: BookInsightsPanelProps) {
   const selectedSeries = seriesOptions.find((series) => series.id === selectedSeriesId)
   const applicableVoiceOptions = useMemo(() => {
     if (!selectedSeries) return []
-    return voiceOptions.filter((voice) => voice.provider === selectedSeries.narratorProvider
-      || (selectedSeries.narratorProvider === '3wa-voxcpm2' && voice.provider === 'edge'))
-      .filter((voice) => voice.provider !== '3wa-voxcpm2')
+    return voiceOptions.filter((voice) => voice.provider === selectedSeries.narratorProvider && voice.provider === 'local-clone')
   }, [selectedSeries, voiceOptions])
 
   useEffect(() => {

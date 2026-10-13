@@ -114,7 +114,7 @@ function previewDisabledReason(
     : narratorProvider
   if (provider === BLUE_MAGPIE_PROVIDER) return null
   if (provider === CLONE_PROVIDER) {
-    if (!segment.characterId) return '旁白使用 Edge 備援聲線，只在整批合成工作中執行。'
+    if (!segment.characterId) return '舊旁白尚未選定角色管理聲線，請先更新系列聲線。'
     const character = characters.find((candidate) => candidate.id === segment.characterId)
     return character?.characterProfileId ? null : '角色尚未連結角色庫克隆聲線，無法本機試聽。'
   }

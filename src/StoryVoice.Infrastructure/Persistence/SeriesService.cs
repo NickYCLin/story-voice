@@ -16,7 +16,6 @@ internal sealed class SeriesService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
     IStorySeriesRepository repository,
-    IOptions<SeriesVoiceCatalogOptions> voiceCatalogOptions,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
     IOptions<LocalClonePreviewOptions> localCloneOptions) : ISeriesService
 {
@@ -24,8 +23,6 @@ internal sealed class SeriesService(
     private const string NeutralRate = "+0%";
     private const string NeutralPitch = "+0Hz";
     private const string NeutralVolume = "+0%";
-    private readonly IReadOnlyList<SeriesVoiceCatalogEntry> _voiceCatalog =
-        voiceCatalogOptions.Value.Voices.ToArray();
     private readonly bool _blueMagpieFormalNarrationEnabled =
         blueMagpieOptions.Value.FormalNarrationEnabled;
 
@@ -75,7 +72,7 @@ internal sealed class SeriesService(
     {
         ArgumentNullException.ThrowIfNull(request);
         var ownerId = EnsureCurrentOwnerId();
-        var narratorVoice = ResolveVoice(request.NarratorProvider, request.NarratorVoice);
+        var narratorVoice = await ResolveVoiceAsync(request.NarratorProvider, request.NarratorVoice, cancellationToken);
         EnsureFormalNarrationAvailable(narratorVoice.Provider);
         EnsureSupportedSynthesisParameters(
             narratorVoice.Provider,
@@ -140,15 +137,16 @@ internal sealed class SeriesService(
     {
         EnsureId(seriesId, nameof(seriesId));
         ArgumentNullException.ThrowIfNull(request);
-        var voice = ResolveVoice(request.VoiceProvider, request.Voice);
-        EnsureFormalNarrationAvailable(voice.Provider);
-        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
         if (series is null)
         {
             return null;
         }
+
+        var voice = await ResolveVoiceAsync(request.VoiceProvider, request.Voice, cancellationToken);
+        EnsureFormalNarrationAvailable(voice.Provider);
+        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
 
         await EnsureCharacterProfileLinkAllowedAsync(
             ownerId,
@@ -184,9 +182,6 @@ internal sealed class SeriesService(
         EnsureId(seriesId, nameof(seriesId));
         EnsureId(characterId, nameof(characterId));
         ArgumentNullException.ThrowIfNull(request);
-        var voice = ResolveVoice(request.VoiceProvider, request.Voice);
-        EnsureFormalNarrationAvailable(voice.Provider);
-        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
         var ownerId = EnsureCurrentOwnerId();
         var series = await repository.GetForMutationAsync(seriesId, cancellationToken);
         var character = series?.Characters.SingleOrDefault(candidate => candidate.Id == characterId);
@@ -194,6 +189,10 @@ internal sealed class SeriesService(
         {
             return null;
         }
+
+        var voice = await ResolveVoiceAsync(request.VoiceProvider, request.Voice, cancellationToken);
+        EnsureFormalNarrationAvailable(voice.Provider);
+        EnsureSupportedSynthesisParameters(voice.Provider, request.Rate, request.Pitch, request.Volume);
 
         await EnsureCharacterProfileLinkAllowedAsync(
             ownerId,
@@ -347,7 +346,7 @@ internal sealed class SeriesService(
             throw new ArgumentException("切換系列聲線時必須包含每一位現有角色。", nameof(request));
         }
 
-        var narratorVoice = ResolveVoice(request.NarratorProvider, request.NarratorVoice);
+        var narratorVoice = await ResolveVoiceAsync(request.NarratorProvider, request.NarratorVoice, cancellationToken);
         EnsureFormalNarrationAvailable(narratorVoice.Provider);
         var assignments = new Dictionary<Guid, SeriesVoiceCatalogEntry>();
         foreach (var assignment in request.Characters)
@@ -356,7 +355,7 @@ internal sealed class SeriesService(
             EnsureId(assignment.CharacterId, nameof(assignment.CharacterId));
             if (!assignments.TryAdd(
                     assignment.CharacterId,
-                    ResolveVoice(assignment.VoiceProvider, assignment.Voice)))
+                    await ResolveVoiceAsync(assignment.VoiceProvider, assignment.Voice, cancellationToken)))
             {
                 throw new ArgumentException("同一位角色不可重複指定聲線。", nameof(request));
             }
@@ -374,7 +373,7 @@ internal sealed class SeriesService(
         {
             EnsureFormalNarrationAvailable(provider);
         }
-        await EnsureThreeWaCharacterProfilesAvailableAsync(series, assignments, cancellationToken);
+        await EnsureManagedCharacterVoicesAvailableAsync(series, assignments, cancellationToken);
 
         var narratorParameters = ResolveEffectiveSynthesisParameters(
             narratorVoice.Provider,
@@ -440,66 +439,10 @@ internal sealed class SeriesService(
         return await ToDetailsAsync(series, cancellationToken);
     }
 
-    private async Task EnsureThreeWaCharacterProfilesAvailableAsync(
-        StorySeries series,
-        IReadOnlyDictionary<Guid, SeriesVoiceCatalogEntry> assignments,
-        CancellationToken cancellationToken)
-    {
-        var customCharacters = series.Characters
-            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(assignments[character.Id].Provider))
-            .ToArray();
-        if (customCharacters.Length == 0)
-        {
-            return;
-        }
-
-        if (customCharacters.Any(character => character.CharacterProfileId is null))
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
-        }
-
-        var characterProfileIds = customCharacters
-            .Select(character => character.CharacterProfileId!.Value)
-            .Distinct()
-            .ToArray();
-        var containsDesignProfile = await dbContext.CharacterVoiceProfiles
-            .AsNoTracking()
-            .AnyAsync(
-                profile => profile.OwnerId == series.OwnerId
-                    && characterProfileIds.Contains(profile.CharacterProfileId)
-                    && profile.Mode == CharacterVoiceProfileMode.Design,
-                cancellationToken);
-        if (containsDesignProfile)
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
-        }
-
-        var readyCloneBaseProfileIds = await dbContext.CharacterVoiceProfiles
-            .AsNoTracking()
-            .Where(profile => profile.OwnerId == series.OwnerId
-                && characterProfileIds.Contains(profile.CharacterProfileId)
-                && profile.Kind == CharacterVoiceProfileKind.Base
-                && profile.Mode == CharacterVoiceProfileMode.Clone
-                && profile.Status == CharacterVoiceProfileStatus.Ready
-                && dbContext.CharacterVoiceProfileOperations.Any(operation =>
-                    operation.OwnerId == series.OwnerId
-                    && operation.CharacterProfileId == profile.CharacterProfileId
-                    && operation.NewProfileId == profile.Id
-                    && operation.State == CharacterVoiceProfileOperationState.Activated
-                    && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
-                    && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
-                    && operation.FormalNarrationAllowed))
-            .Select(profile => profile.CharacterProfileId)
-            .Distinct()
-            .ToArrayAsync(cancellationToken);
-        if (characterProfileIds.Except(readyCloneBaseProfileIds).Any())
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
-        }
-    }
+    private Task EnsureManagedCharacterVoicesAvailableAsync(StorySeries series,
+        IReadOnlyDictionary<Guid, SeriesVoiceCatalogEntry> assignments, CancellationToken ct) =>
+        ManagedNarrationVoices.RequireAsync(dbContext, series.OwnerId,
+            assignments.Values.Select(v => (v.Provider, v.Voice)), ct);
 
     private async Task ConfigureNarrativeVoiceAsync(
         StorySeries series,
@@ -645,7 +588,7 @@ internal sealed class SeriesService(
 
             foreach (var selection in request.Characters)
             {
-                var voice = ResolveVoice(selection.VoiceProvider, selection.Voice);
+                var voice = await ResolveVoiceAsync(selection.VoiceProvider, selection.Voice, cancellationToken);
                 EnsureFormalNarrationAvailable(voice.Provider);
                 EnsureSingleSynthesisProvider(series.NarratorProvider, [voice.Provider]);
                 EnsureSupportedSynthesisParameters(
@@ -717,45 +660,22 @@ internal sealed class SeriesService(
         }
     }
 
-    public IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions() =>
-        _voiceCatalog
-            .Where(voice => localCloneOptions.Value.FormalNarrationEnabled
-                || !string.Equals(voice.Provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase))
-            .Where(voice => _blueMagpieFormalNarrationEnabled
-                || !string.Equals(
-                    voice.Provider,
-                    CharacterVoiceProviders.BlueMagpie,
-                    StringComparison.OrdinalIgnoreCase))
-            .Where(voice => ThreeWaSynthesisCapabilities.SupportsTrustedCloneFormalNarration
-                || !string.Equals(
-                    voice.Provider,
-                    CharacterVoiceProviders.ThreeWaVoxCpm2,
-                    StringComparison.OrdinalIgnoreCase))
-            .OrderBy(voice => voice.Locale, StringComparer.Ordinal)
-            .ThenBy(voice => voice.DisplayName, StringComparer.Ordinal)
-            .Select(voice => new SeriesVoiceOptionResponse(
-                voice.Provider,
-                voice.Voice,
-                voice.DisplayName,
-                voice.Locale,
-                !string.Equals(voice.Provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
-                    || _blueMagpieFormalNarrationEnabled,
-                string.Equals(voice.Provider, CharacterVoiceProviders.BlueMagpie, StringComparison.OrdinalIgnoreCase)
-                    ? "private-self-hosted"
-                    : "standard",
-                voice.Gender,
-                voice.MinimumAge,
-                voice.MaximumAge,
-                voice.CharacterTags.ToArray()))
-            .ToArray();
-
-    private SeriesVoiceCatalogEntry ResolveVoice(string provider, string voice)
+    public async Task<IReadOnlyList<SeriesVoiceOptionResponse>> ListVoiceOptionsAsync(CancellationToken cancellationToken)
     {
-        var resolved = _voiceCatalog.SingleOrDefault(candidate =>
-            string.Equals(candidate.Provider, provider?.Trim(), StringComparison.OrdinalIgnoreCase)
-            && string.Equals(candidate.Voice, voice?.Trim(), StringComparison.Ordinal));
-        return resolved
-            ?? throw new ArgumentException("指定的語音不在伺服器允許清單內。", nameof(voice));
+        var ownerId = EnsureCurrentOwnerId();
+        var profiles = await (from voice in ManagedNarrationVoices.Eligible(dbContext, ownerId)
+                              join character in dbContext.CharacterProfiles on voice.CharacterProfileId equals character.Id
+                              orderby character.CanonicalName
+                              select new { voice.Id, character.CanonicalName, character.Gender, CharacterProfileId = character.Id }).ToListAsync(cancellationToken);
+        return profiles.Select(p => new SeriesVoiceOptionResponse(CharacterVoiceProviders.LocalClone,
+            ManagedNarrationVoices.Reference(p.Id), p.CanonicalName, "zh-TW",
+            localCloneOptions.Value.FormalNarrationEnabled, "private-self-hosted", p.Gender, null, null, [], p.CharacterProfileId)).ToArray();
+    }
+
+    private async Task<SeriesVoiceCatalogEntry> ResolveVoiceAsync(string provider, string voice, CancellationToken ct)
+    {
+        await ManagedNarrationVoices.RequireAsync(dbContext, EnsureCurrentOwnerId(), [(provider, voice)], ct);
+        return new SeriesVoiceCatalogEntry { Provider = CharacterVoiceProviders.LocalClone, Voice = ManagedNarrationVoices.Reference(ManagedNarrationVoices.Parse(provider, voice)) };
     }
 
     private void EnsureFormalNarrationAvailable(string provider)
@@ -776,19 +696,8 @@ internal sealed class SeriesService(
         string narratorProvider,
         IEnumerable<string> characterProviders)
     {
-        var allowsEdgeFallback = string.Equals(
-            narratorProvider,
-            CharacterVoiceProviders.ThreeWaVoxCpm2,
-            StringComparison.OrdinalIgnoreCase);
-        if (characterProviders.Any(provider =>
-                !string.Equals(provider, narratorProvider, StringComparison.OrdinalIgnoreCase)
-                && !(allowsEdgeFallback
-                    && string.Equals(provider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
-        {
-            throw new ArgumentException(
-                "系列旁白與角色必須使用相同的語音 provider（3wa 系列可使用 Edge fallback）。",
-                nameof(characterProviders));
-        }
+        if (characterProviders.Any(provider => !string.Equals(provider, narratorProvider, StringComparison.Ordinal)))
+            throw new ArgumentException("旁白與人物必須使用相同的角色管理聲線供應方式。", nameof(characterProviders));
     }
 
     private static void EnsureSupportedSynthesisParameters(

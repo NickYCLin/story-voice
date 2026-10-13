@@ -122,7 +122,7 @@ internal sealed partial class SeriesNarrationService(
             }
 
             EnsureSingleSynthesisProvider(series);
-            await EnsureThreeWaCharacterProfilesAvailableAsync(ownerId, series, cancellationToken);
+            await EnsureManagedCharacterVoicesAvailableAsync(ownerId, series, cancellationToken);
             var sourceBooks = await LoadSeriesBooksAsync(ownerId, memberships, cancellationToken);
             var confirmedPlans = await LoadLatestConfirmedPlansAsync(
                 ownerId,
@@ -647,85 +647,14 @@ internal sealed partial class SeriesNarrationService(
 
     private static void EnsureSingleSynthesisProvider(StorySeries series)
     {
-        // The 3wa VoxCPM2 job dispatch provider also knows how to fall back to plain Edge voices
-        // turn-by-turn (narrator voice cloning isn't wired up yet — see
-        // ThreeWaVoxCpm2NarrationProvider), so a series staged on it may freely mix Edge-voiced
-        // characters alongside 3wa-cloned ones. Any other provider must still be uniform across
-        // the whole cast, since nothing else can route a mixed turn stream.
-        var allowsEdgeFallback = string.Equals(
-            series.NarratorProvider,
-            CharacterVoiceProviders.ThreeWaVoxCpm2,
-            StringComparison.OrdinalIgnoreCase);
-
-        if (series.Characters.Any(character =>
-            !string.Equals(character.VoiceProvider, series.NarratorProvider, StringComparison.OrdinalIgnoreCase)
-            && !(allowsEdgeFallback
-                && string.Equals(character.VoiceProvider, CharacterVoiceProviders.Edge, StringComparison.OrdinalIgnoreCase))))
-        {
-            throw new InvalidOperationException("目前多聲線合成必須使用與旁白相同的語音 provider（3wa 聲線系列除外，角色可混用 Edge 聲線）。");
-        }
+        ManagedNarrationVoices.Parse(series.NarratorProvider, series.NarratorVoice);
+        foreach (var character in series.Characters)
+            ManagedNarrationVoices.Parse(character.VoiceProvider, character.Voice);
     }
 
-    private async Task EnsureThreeWaCharacterProfilesAvailableAsync(
-        Guid ownerId,
-        StorySeries series,
-        CancellationToken cancellationToken)
-    {
-        var customCharacters = series.Characters
-            .Where(character => CharacterVoiceProviders.UsesCloneProfiles(character.VoiceProvider))
-            .ToArray();
-        if (customCharacters.Length == 0)
-        {
-            return;
-        }
-
-        if (customCharacters.Any(character => character.CharacterProfileId is null))
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
-        }
-
-        var characterProfileIds = customCharacters
-            .Select(character => character.CharacterProfileId!.Value)
-            .Distinct()
-            .ToArray();
-        var containsDesignProfile = await dbContext.CharacterVoiceProfiles
-            .AsNoTracking()
-            .AnyAsync(
-                profile => profile.OwnerId == ownerId
-                    && characterProfileIds.Contains(profile.CharacterProfileId)
-                    && profile.Mode == CharacterVoiceProfileMode.Design,
-                cancellationToken);
-        if (containsDesignProfile)
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
-        }
-
-        var readyCloneBaseProfileIds = await dbContext.CharacterVoiceProfiles
-            .AsNoTracking()
-            .Where(profile => profile.OwnerId == ownerId
-                && characterProfileIds.Contains(profile.CharacterProfileId)
-                && profile.Kind == CharacterVoiceProfileKind.Base
-                && profile.Mode == CharacterVoiceProfileMode.Clone
-                && profile.Status == CharacterVoiceProfileStatus.Ready
-                && dbContext.CharacterVoiceProfileOperations.Any(operation =>
-                    operation.OwnerId == ownerId
-                    && operation.CharacterProfileId == profile.CharacterProfileId
-                    && operation.NewProfileId == profile.Id
-                    && operation.State == CharacterVoiceProfileOperationState.Activated
-                    && operation.EvidenceVersion == CharacterVoiceConsentEvidence.CurrentEvidenceVersion
-                    && operation.AttestationVersion == CharacterVoiceConsentEvidence.CurrentAttestationVersion
-                    && operation.FormalNarrationAllowed))
-            .Select(profile => profile.CharacterProfileId)
-            .Distinct()
-            .ToArrayAsync(cancellationToken);
-        if (characterProfileIds.Except(readyCloneBaseProfileIds).Any())
-        {
-            throw new InvalidOperationException(
-                ThreeWaSynthesisCapabilities.CloneVoiceUnavailableMessage);
-        }
-    }
+    private Task EnsureManagedCharacterVoicesAvailableAsync(Guid ownerId, StorySeries series, CancellationToken ct) =>
+        ManagedNarrationVoices.RequireAsync(dbContext, ownerId,
+            series.Characters.Select(c => (c.VoiceProvider, c.Voice)).Append((series.NarratorProvider, series.NarratorVoice)), ct);
 
     private static void ValidateComposition(MultiCharacterNarrationOptions options, StorySeries series)
     {

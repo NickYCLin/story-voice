@@ -10,15 +10,7 @@ import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } fr
 import type { BookDetails, BookSummary } from './types'
 import { suggestCharacterVoices, type CastingProfile, type CastingSuggestion, type CastingVoice } from './voiceCasting'
 
-const CUSTOM_VOICE_PROVIDER = '3wa-voxcpm2'
-const EDGE_VOICE_PROVIDER = 'edge'
-const VOAI_VOICE_PROVIDER = 'voai'
-const BLUE_MAGPIE_PROVIDER = 'bluemagpie'
-const BLUE_MAGPIE_VOICES = [
-  { voice: 'female_voice', label: 'BlueMagpie 內建女聲' },
-  { voice: 'hung_yi_lee', label: 'BlueMagpie 內建男聲' },
-] as const
-type BlueMagpieVoice = typeof BLUE_MAGPIE_VOICES[number]['voice']
+const CUSTOM_VOICE_PROVIDER = 'local-clone'
 type NarrativeVoiceMode = 'IndependentNarrator' | 'PointOfViewInnerMonologue'
 
 type CharacterProfileSummary = CastingProfile & {
@@ -33,6 +25,7 @@ type VoiceOption = CastingVoice & {
   voice: string
   displayName: string
   locale: string
+  characterProfileId: string | null
   formalNarrationAvailable: boolean
   usageScope: 'standard' | 'private-self-hosted'
 }
@@ -143,10 +136,6 @@ export function SeriesCastPanel() {
   const [details, setDetails] = useState<SeriesDetails | null>(null)
   const [state, setState] = useState<LoadState>('loading')
   const [message, setMessage] = useState('')
-  const [blueMagpieVoice, setBlueMagpieVoice] = useState<BlueMagpieVoice>(BLUE_MAGPIE_VOICES[0].voice)
-  const [blueMagpiePreviewUrl, setBlueMagpiePreviewUrl] = useState<string | null>(null)
-  const [blueMagpiePreviewState, setBlueMagpiePreviewState] = useState<'idle' | 'loading'>('idle')
-  const blueMagpiePreviewRequest = useRef<AbortController | null>(null)
   const [localCloneAvailability, setLocalCloneAvailability] = useState<Record<string, LocalClonePreviewAvailability>>({})
   const [localClonePreviewingCharacterId, setLocalClonePreviewingCharacterId] = useState<string | null>(null)
   const [localClonePreviewAudio, setLocalClonePreviewAudio] = useState<LocalClonePreviewAudio | null>(null)
@@ -279,16 +268,6 @@ export function SeriesCastPanel() {
     ))
   }, [details])
 
-  useEffect(() => () => {
-    if (blueMagpiePreviewUrl) URL.revokeObjectURL(blueMagpiePreviewUrl)
-  }, [blueMagpiePreviewUrl])
-
-  useEffect(() => () => {
-    const pending = blueMagpiePreviewRequest.current
-    blueMagpiePreviewRequest.current = null
-    pending?.abort()
-  }, [])
-
   useEffect(() => {
     const generation = localCloneAvailabilityGeneration.current + 1
     localCloneAvailabilityGeneration.current = generation
@@ -415,9 +394,7 @@ export function SeriesCastPanel() {
 
   const manualCharacterVoiceOptions = useMemo(() => {
     if (!details) return []
-    return voiceOptions.filter((option) => option.provider !== CUSTOM_VOICE_PROVIDER
-      && (option.provider === details.narratorProvider
-        || (details.narratorProvider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER)))
+    return voiceOptions.filter((option) => option.provider === details.narratorProvider)
   }, [details, voiceOptions])
 
   const configuredNarratorVoice = useMemo(
@@ -427,9 +404,7 @@ export function SeriesCastPanel() {
 
   const configuredCharacterVoiceOptions = useMemo(() => {
     if (!configuredNarratorVoice) return []
-    return voiceOptions.filter((option) => option.provider === configuredNarratorVoice.provider
-      || (configuredNarratorVoice.provider === CUSTOM_VOICE_PROVIDER
-        && option.provider === EDGE_VOICE_PROVIDER))
+    return voiceOptions.filter((option) => option.provider === configuredNarratorVoice.provider)
   }, [configuredNarratorVoice, voiceOptions])
 
   useEffect(() => {
@@ -453,55 +428,27 @@ export function SeriesCastPanel() {
       })
   }, [bookDetails, details, draftsByChapter])
 
-  function previewVoice(provider: string, voice: string) {
-    if (provider === BLUE_MAGPIE_PROVIDER
-      && BLUE_MAGPIE_VOICES.some((candidate) => candidate.voice === voice)) {
-      setBlueMagpieVoice(voice as BlueMagpieVoice)
-      void previewBlueMagpieVoice(voice as BlueMagpieVoice)
+  const [managedPreview, setManagedPreview] = useState<{ url: string; name: string } | null>(null)
+  const managedPreviewRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => { if (managedPreview) URL.revokeObjectURL(managedPreview.url) }, [managedPreview])
+  useEffect(() => () => { managedPreviewRequest.current?.abort() }, [selectedSeriesId])
+  async function previewVoice(provider: string, voice: string) {
+    managedPreviewRequest.current?.abort()
+    const option = voiceOptions.find(candidate => candidate.provider === provider && candidate.voice === voice)
+    if (!option?.characterProfileId || !voice.startsWith('localclone:')) {
+      setMessage('聲線已失效，請從角色管理重新選擇；不會以瀏覽器或 Edge 聲音代替。')
       return
     }
-    if (provider === VOAI_VOICE_PROVIDER) {
-      setMessage('VoAI 聲線無法由瀏覽器 speechSynthesis 模擬；尚需伺服器試音功能，請以正式配音成品為準。')
-      return
-    }
-    if (!('speechSynthesis' in window)) {
-      setMessage('這個瀏覽器不支援安全的固定示範句 preview。')
-      return
-    }
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(previewSentence)
-    const exactVoice = window.speechSynthesis.getVoices().find((candidate) => candidate.name === voice)
-    if (exactVoice) utterance.voice = exactVoice
-    utterance.lang = exactVoice?.lang ?? 'zh-TW'
-    window.speechSynthesis.speak(utterance)
-    setMessage('正在播放固定示範句；瀏覽器找不到同名 voice 時會使用本機語音，最終以系列目前設定的語音服務成品為準。')
-  }
-
-  async function previewBlueMagpieVoice(requestedVoice: BlueMagpieVoice = blueMagpieVoice) {
-    blueMagpiePreviewRequest.current?.abort()
     const controller = new AbortController()
-    blueMagpiePreviewRequest.current = controller
-    setBlueMagpiePreviewUrl(null)
-    setBlueMagpiePreviewState('loading')
-    setMessage('正在由主機本機生成固定示範句；不會呼叫 VoAI 或傳送小說正文。')
+    managedPreviewRequest.current = controller
+    const id = voice.slice('localclone:'.length).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5')
     try {
-      const audio = await fetchBlob('/api/series/voice-preview', {
-        method: 'POST',
-        csrfToken,
-        body: { provider: BLUE_MAGPIE_PROVIDER, voice: requestedVoice },
-        signal: controller.signal,
-      })
+      const blob = await fetchBlob(`/api/character-profiles/${option.characterProfileId}/voice-profiles/${id}/reference-audio`, { signal: controller.signal })
       if (controller.signal.aborted) return
-      setBlueMagpiePreviewUrl(URL.createObjectURL(audio))
-      setMessage('本機台灣華語試音已完成；這只是固定示範句，尚未啟用整本配音。')
+      setManagedPreview({ url: URL.createObjectURL(blob), name: option.displayName })
+      setMessage('正在播放角色管理的參考錄音，這不是新合成的示範句。')
     } catch (error) {
-      if (controller.signal.aborted) return
-      setMessage(error instanceof Error ? error.message : '本機台灣華語試音失敗。')
-    } finally {
-      if (blueMagpiePreviewRequest.current === controller) {
-        blueMagpiePreviewRequest.current = null
-        setBlueMagpiePreviewState('idle')
-      }
+      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : '角色參考錄音無法播放。')
     }
   }
 
@@ -512,11 +459,11 @@ export function SeriesCastPanel() {
     const narrator = voiceOptions.find((option) => voiceKey(option) === nextKey)
     if (!narrator) return
     if (configuredNarratorVoice?.provider !== narrator.provider) manualVoiceOverrides.current.clear()
-    const compatible = voiceOptions.filter((option) => option.provider === narrator.provider
-      || (narrator.provider === CUSTOM_VOICE_PROVIDER && option.provider === EDGE_VOICE_PROVIDER))
+    const compatible = voiceOptions.filter((option) => option.provider === narrator.provider)
     setConfiguredCharacterVoiceKeys((current) => Object.fromEntries(details.characters.map((character) => {
       const selected = compatible.find((option) => voiceKey(option) === current[character.id])
-      return [character.id, voiceKey(selected ?? compatible[0] ?? narrator)]
+      const linked = compatible.find((option) => option.characterProfileId === character.characterProfileId)
+      return [character.id, selected ? voiceKey(selected) : linked ? voiceKey(linked) : '']
     })))
   }
 
@@ -581,7 +528,7 @@ export function SeriesCastPanel() {
     event.preventDefault()
     if (!seriesName.trim() || !narratorVoiceKey) return
     const selectedVoice = voiceOptions.find((option) => voiceKey(option) === narratorVoiceKey)
-    if (!selectedVoice) return
+    if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
     setFormState('loading')
     try {
       const created = await fetchJson<SeriesDetails>('/api/series/', {
@@ -646,11 +593,11 @@ export function SeriesCastPanel() {
       return
     }
 
-    const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER)
+    const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER && option.characterProfileId === selectedCharacterProfileId)
     const selectedVoice = usingLibraryCharacter
       ? customVoice
       : manualCharacterVoiceOptions.find((option) => voiceKey(option) === characterVoiceKey)
-    if (!selectedVoice) return
+    if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
 
     setFormState('loading')
     try {
@@ -899,38 +846,13 @@ export function SeriesCastPanel() {
 
         <form className="mt-6 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={createSeries}>
           <label className="text-xs text-stone-500">新系列名稱<input className="auth-input mt-2" maxLength={200} onChange={(event) => setSeriesName(event.target.value)} required value={seriesName} /></label>
-          <label className="text-xs text-stone-500">固定旁白聲線<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
+          {voiceOptions.length === 0 && <p role="status" className="text-sm text-amber-800">沒有可用聲線。請先到角色管理完成錄音、授權與 Ready 驗證；不會提供替代聲線。</p>}
+          {managedPreview && <div className="sm:col-span-3"><p>{managedPreview.name} · 角色管理參考錄音</p><audio autoPlay controls src={managedPreview.url} /></div>}
+          <label className="text-xs text-stone-500">固定旁白聲線（角色管理）<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
           <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoiceKey} type="submit">建立系列</button>
         </form>
       </section>
 
-      <section className="mt-6 rounded-3xl border border-sky-200 bg-sky-50 p-5 sm:p-7" aria-label="本機台灣華語試音">
-        <p className="text-xs font-semibold uppercase tracking-[.22em] text-sky-700">Self-hosted preview</p>
-        <h2 className="mt-2 font-serif text-2xl text-stone-900">本機台灣華語試音</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">僅生成伺服器內建的固定示範句，不傳送小說正文、不呼叫 VoAI，也不會建立正式配音工作。</p>
-        <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="min-w-64 text-xs text-stone-500">
-            BlueMagpie 聲線
-            <select
-              className="auth-input mt-2"
-              onChange={(event) => {
-                blueMagpiePreviewRequest.current?.abort()
-                blueMagpiePreviewRequest.current = null
-                setBlueMagpiePreviewState('idle')
-                setBlueMagpiePreviewUrl(null)
-                setBlueMagpieVoice(event.target.value as BlueMagpieVoice)
-              }}
-              value={blueMagpieVoice}
-            >
-              {BLUE_MAGPIE_VOICES.map((option) => <option key={option.voice} value={option.voice}>{option.label}</option>)}
-            </select>
-          </label>
-          <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={blueMagpiePreviewState === 'loading'} onClick={() => void previewBlueMagpieVoice()} type="button">
-            {blueMagpiePreviewState === 'loading' ? '本機生成中…' : '生成固定試音'}
-          </button>
-        </div>
-        {blueMagpiePreviewUrl && <audio autoPlay className="mt-4 w-full max-w-xl" controls src={blueMagpiePreviewUrl}>你的瀏覽器無法播放這段試音。</audio>}
-      </section>
 
       <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="rounded-3xl border border-stone-200 bg-white p-4">
@@ -946,7 +868,7 @@ export function SeriesCastPanel() {
           {details && (
             <>
               <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
-                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">{details.narratorProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button></div>
+                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider !== CUSTOM_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">播放角色參考錄音</button></div>
 
                 <form aria-label="整系列聲線設定" className="mt-6 border-t border-stone-200 pt-5" onSubmit={configureSeriesVoices}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -984,9 +906,6 @@ export function SeriesCastPanel() {
                       {voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}
                     </select>
                   </label>
-                  {configuredNarratorVoice?.provider === BLUE_MAGPIE_PROVIDER && (
-                    <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800">BlueMagpie BM1 目前只有內建女聲與男聲兩種 timbre；整系列切換會把旁白與角色的 rate、pitch、volume 重設為中性，下一次 staged rebuild 才會使用。模型權重授權標示為 other，目前限定私人自架使用，不代表可重新散布或商業使用。</p>
-                  )}
                   {details.characters.length > 0 && (
                     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {details.characters.map((character) => (
@@ -1066,7 +985,7 @@ export function SeriesCastPanel() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
-                            <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">{character.voiceProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button>
+                            <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider !== CUSTOM_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">播放角色參考錄音</button>
                             {localCloneAvailability[character.id]?.available && (
                               <button
                                 className="text-xs font-medium text-sky-700 disabled:cursor-wait disabled:text-stone-400"
@@ -1090,7 +1009,7 @@ export function SeriesCastPanel() {
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
                         {localCloneAvailability[character.id]?.available && (
-                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機私人試音聲線'}。只用於比較音色，不會切換目前的 Edge 正式聲線。</p>
+                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機私人試音聲線'}。只用於比較音色，不會自動更換正式聲線。</p>
                         )}
                         {localClonePreviewAudio?.characterId === character.id && (
                           <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
@@ -1150,13 +1069,13 @@ export function SeriesCastPanel() {
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
                     {details.narratorProvider === CUSTOM_VOICE_PROVIDER ? (
                       <label className="text-xs text-stone-500 sm:col-span-3">
-                        從角色庫選擇（可選，選了就沿用角色庫的 3wa 自訂聲線）
+                        從角色管理選入角色與有效聲線（可選）
                         <select
                           className="auth-input mt-2"
                           onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
                           value={selectedCharacterProfileId}
                         >
-                          <option value="">不使用角色庫，改用 Edge fallback</option>
+                          <option value="">僅設定書中角色名，再於下方選擇角色管理聲線</option>
                           {characterProfiles.map((profile) => {
                             const linkedBy = details.characters.find((character) => character.characterProfileId === profile.id)
                             const unavailable = !profile.isActive || Boolean(linkedBy)
@@ -1169,9 +1088,7 @@ export function SeriesCastPanel() {
                       </label>
                     ) : (
                       <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500 sm:col-span-3">
-                        {details.narratorProvider === VOAI_VOICE_PROVIDER
-                          ? '這個系列使用 VoAI；不可混用 3wa 角色庫自訂聲線，請從下方選擇 VoAI 聲線。'
-                          : '角色庫自訂聲線只支援 3wa 系列；請從下方選擇與旁白相同 provider 的聲線。'}
+                        舊系列必須先重新選擇角色管理中的固定旁白與人物聲線，才可排程。
                       </p>
                     )}
                     <label className="text-xs text-stone-500">
@@ -1276,7 +1193,7 @@ export function SeriesCastPanel() {
                   </ul>
                 </section>
               )}
-              {batch?.status === 'Failed' && details.narratorProvider === BLUE_MAGPIE_PROVIDER && (
+              {batch?.status === 'Failed' && details.narratorProvider === CUSTOM_VOICE_PROVIDER && (
                 <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5" aria-label="恢復配音">
                   <p className="text-sm leading-6 text-stone-700">暫時性錯誤可接續原工作，保留已完成的音訊與片段快取。若正文、劇本或聲線已修改，請建立新批次。</p>
                   <label className="mt-3 flex items-start gap-2 text-sm text-stone-700">

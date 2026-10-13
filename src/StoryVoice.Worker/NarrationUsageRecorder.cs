@@ -27,7 +27,7 @@ internal sealed class NarrationUsageRecorder(IServiceScopeFactory scopeFactory, 
     public async Task BeginSynthesisAsync(string provider, IEnumerable<string> texts)
     {
         // Store a fixed engine identifier, never a configured URL or provider response.
-        _provider = provider is "edge" or "bluemagpie" or "voai" or "3wa-voxcpm2" ? provider : "unknown";
+        _provider = provider is "edge" or "bluemagpie" or "voai" or "3wa-voxcpm2" or "local-clone" ? provider : "unknown";
         _inputCharacters = CountCharacters(texts);
         await WriteAsync((db, ct) => db.NarrationAttemptUsage.Where(item => item.Id == id)
             .ExecuteUpdateAsync(setters => setters

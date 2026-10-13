@@ -48,6 +48,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.ConfigureServices(services => services.PostConfigure<LocalClonePreviewOptions>(options => {
+            options.FormalNarrationEnabled = true;
+            options.InternalToken = new string('t', 32);
+        }));
         builder.UseSetting("BookStorage:RootPath", _storageRoot);
         builder.UseSetting(
             "CharacterVoiceStorage:RootPath",

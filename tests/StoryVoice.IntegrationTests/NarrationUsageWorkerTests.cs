@@ -19,12 +19,10 @@ namespace StoryVoice.IntegrationTests;
 public sealed class NarrationUsageWorkerTests
 {
     [Theory]
-    [InlineData("failure", "Failed", "Failed")]
-    [InlineData("timeout", "Failed", "TimedOut")]
-    [InlineData("cancel", "Cancelled", "Cancelled")]
+    [InlineData("retired", "Failed", "Failed")]
     [InlineData("source_changed", "Failed", "Failed")]
-    [InlineData("usage_unavailable", "Completed", null)]
-    public async Task Attempts_record_failure_cancellation_and_preparation_without_replaying_on_usage_storage_failure(
+    [InlineData("usage_unavailable", "Failed", null)]
+    public async Task Retired_single_voice_jobs_never_call_a_provider_even_if_usage_storage_is_unavailable(
         string scenario, string expectedJobStatus, string? expectedUsageOutcome)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -70,14 +68,6 @@ public sealed class NarrationUsageWorkerTests
                     await db.Database.ExecuteSqlRawAsync("DROP TABLE narration_attempt_usage", ct);
             }
             await worker.StartAsync(ct);
-            if (scenario == "cancel")
-            {
-                await provider.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30), ct);
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-                await db.NarrationJobs.Where(item => item.Id == jobId)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CancellationRequested, true), ct);
-            }
             var deadline = Stopwatch.StartNew();
             while (true)
             {
@@ -88,13 +78,14 @@ public sealed class NarrationUsageWorkerTests
                 {
                     Assert.Equal(expectedJobStatus, job.Status.ToString());
                     Assert.Equal(1, job.Attempts);
+                    if (scenario != "source_changed") Assert.Equal("character_voice_required", job.ErrorCode);
                     break;
                 }
                 Assert.True(deadline.Elapsed < TimeSpan.FromSeconds(40), "Synthetic narration did not reach its expected outcome.");
                 await Task.Delay(50, ct);
             }
             await worker.StopAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct);
-            Assert.Equal(scenario == "source_changed" ? 0 : 1, provider.Calls);
+            Assert.Equal(0, provider.Calls);
             if (expectedUsageOutcome is not null)
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
@@ -104,20 +95,10 @@ public sealed class NarrationUsageWorkerTests
                 Assert.NotNull(usage.FinishedAt);
                 Assert.True(usage.ElapsedMs >= 0);
                 Assert.Null(usage.AudioBytes);
-                if (scenario == "source_changed")
-                {
-                    Assert.Null(usage.InputCharacters);
-                    Assert.Null(usage.Provider);
-                    Assert.Null(usage.SynthesisElapsedMs);
-                    Assert.Null(usage.CompletedChunks);
-                }
-                else
-                {
-                    Assert.True(usage.InputCharacters > 0);
-                    Assert.True(usage.ElapsedMs >= usage.SynthesisElapsedMs);
-                    Assert.Equal(1, usage.CompletedChunks);
-                    Assert.Equal(3, usage.TotalChunks);
-                }
+                Assert.Null(usage.InputCharacters);
+                Assert.Null(usage.Provider);
+                Assert.Null(usage.SynthesisElapsedMs);
+                Assert.Null(usage.CompletedChunks);
             }
         }
         finally

@@ -186,8 +186,7 @@ public static class DependencyInjection
                 }
             })
             .Validate(
-                options => options.Voices.Count > 0
-                    && options.Voices.All(voice =>
+                options => options.Voices.All(voice =>
                         !string.IsNullOrWhiteSpace(voice.Provider)
                         && !string.IsNullOrWhiteSpace(voice.Voice)
                         && !string.IsNullOrWhiteSpace(voice.DisplayName)

@@ -458,6 +458,26 @@ public sealed class MultiCharacterTurnBuilderTests
         }
     }
 
+    [Fact]
+    public void Managed_voices_pin_narrator_and_pov_independently_of_mutable_character_links()
+    {
+        var narrator = BuildReadyProfile(CharacterVoiceProfileKind.Base, null, "narrator");
+        var actor = BuildReadyProfile(CharacterVoiceProfileKind.Base, null, "actor");
+        var narratorVoice = MultiCharacterTurnBuilder.EncodeLocalCloneReference(narrator.Id);
+        var actorVoice = MultiCharacterTurnBuilder.EncodeLocalCloneReference(actor.Id);
+        var cast = BuildCastRevision(narratorVoice, actorVoice,
+            aliceProvider: CharacterVoiceProviders.LocalClone, narratorProvider: CharacterVoiceProviders.LocalClone);
+        var chapter = BuildConfirmedChapter(0, "序章", "最厚的一迭資料叫做『新生入學介紹與如何自保』。我繼續往下看。「好吧。」艾莉絲說。", AliceId);
+        var turns = MultiCharacterTurnBuilder.BuildTurns(cast, [chapter], [narrator, actor],
+            new Dictionary<Guid, Guid> { [AliceId] = Guid.NewGuid() });
+        Assert.Equal(narratorVoice, turns[0].Voice);
+        Assert.Contains(turns, t => t.Voice == actorVoice && t.Text.Contains("新生入學介紹與如何自保"));
+        Assert.Contains(turns, t => t.Voice == actorVoice && t.Text.Contains("好吧"));
+        Assert.All(turns, t => Assert.Contains(t.Voice, new[] { narratorVoice, actorVoice }));
+        Assert.Throws<PermanentNarrationProviderException>(() =>
+            MultiCharacterTurnBuilder.BuildTurns(cast, [chapter], [actor]));
+    }
+
     private static NarrationCastRevision BuildCastRevision(
         string narratorVoice,
         string aliceVoice,

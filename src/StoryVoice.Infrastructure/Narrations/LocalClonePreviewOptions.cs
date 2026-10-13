@@ -10,7 +10,7 @@ public sealed class LocalClonePreviewOptions
     public const int MaximumReferenceAudioBytes = 10 * 1024 * 1024;
     public const int MaximumTranscriptBytes = 32 * 1024;
 
-    public const string FormalProviderVersion = "local-clone-integrity-v2";
+    public const string FormalProviderVersion = "local-clone-managed-voices-v3";
     public bool FormalNarrationEnabled { get; set; }
     public int RetryDelaySeconds { get; set; } = 20;
 

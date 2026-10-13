@@ -8,7 +8,7 @@ import { SeriesCastPanel } from '../../src/SeriesCastPanel'
 const series = ['第一個測試系列', '第二個測試系列'].map((name, index) => ({
   id: `series-${index}`, name, bookCount: 0, characterCount: 0, activeCastRevisionId: null,
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
-  narratorProvider: 'bluemagpie', narratorVoice: 'female_voice', narratorRate: '+0%',
+  narratorProvider: 'local-clone', narratorVoice: 'localclone:11111111111111111111111111111111', narratorRate: '+0%',
   narratorPitch: '+0Hz', narratorVolume: '+0%', defaultSpeakerPauseMs: 180,
   pointOfViewCharacterId: null, narrativeVoiceMode: 'IndependentNarrator', books: [], characters: [],
 }))
@@ -28,7 +28,7 @@ beforeEach(() => {
       return Promise.resolve(Response.json([failed]))
     }
     if (url.endsWith('/voice-options')) return Promise.resolve(Response.json([{
-      provider: 'bluemagpie', voice: 'female_voice', displayName: '測試女聲', locale: 'zh-TW',
+      provider: 'local-clone', voice: 'localclone:11111111111111111111111111111111', displayName: '測試女聲', locale: 'zh-TW',
       formalNarrationAvailable: true, usageScope: 'private-self-hosted',
     }]))
     if (url.endsWith('/books') || url.endsWith('/character-profiles')) return Promise.resolve(Response.json([]))

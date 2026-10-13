@@ -57,9 +57,8 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         }
 
         var references = request.CloneReferences ?? new Dictionary<string, LocalCloneVoiceReference>();
-        var fallbackReferenceKey = ResolveFallbackReferenceKey(request.Turns, references);
         var resolvedTurns = request.Turns
-            .Select(turn => (Turn: turn, ReferenceKey: ResolveReferenceKey(turn, references, fallbackReferenceKey)))
+            .Select(turn => (Turn: turn, ReferenceKey: ResolveReferenceKey(turn, references)))
             .ToArray();
 
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
@@ -171,8 +170,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
 
     private static string ResolveReferenceKey(
         NarrationTurn turn,
-        IReadOnlyDictionary<string, LocalCloneVoiceReference> references,
-        string? fallbackReferenceKey)
+        IReadOnlyDictionary<string, LocalCloneVoiceReference> references)
     {
         if (turn.Voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal))
         {
@@ -193,28 +191,8 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
         }
 
-        // Narrator / narrator-fallback turns carry a catalog voice id. This provider never calls a
-        // third-party TTS, so they are voiced by the point-of-view clone instead.
-        return fallbackReferenceKey
-            ?? throw new PermanentNarrationProviderException(
-                MissingReferenceCode,
-                "自架克隆聲線系列沒有任何可用的角色克隆聲線可作為旁白。");
-    }
-
-    /// <summary>The clone used for narrator-fallback turns: the reference that voices the most
-    /// text in this job, which under point-of-view narration is the POV character.</summary>
-    internal static string? ResolveFallbackReferenceKey(
-        IReadOnlyList<NarrationTurn> turns,
-        IReadOnlyDictionary<string, LocalCloneVoiceReference> references)
-    {
-        return turns
-            .Where(turn => turn.Voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal)
-                && references.ContainsKey(turn.Voice))
-            .GroupBy(turn => turn.Voice, StringComparer.Ordinal)
-            .OrderByDescending(group => group.Sum(turn => turn.Text.Length))
-            .ThenBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => group.Key)
-            .FirstOrDefault();
+        throw new PermanentNarrationProviderException(MissingReferenceCode,
+            "旁白與人物都必須明確選擇角色管理聲線，不會自動替換為其他角色或 Edge。");
     }
 
     private string ResolveCacheDirectory(MultiVoiceNarrationRequest request)

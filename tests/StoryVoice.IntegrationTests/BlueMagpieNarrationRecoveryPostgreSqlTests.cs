@@ -12,7 +12,7 @@ using Testcontainers.PostgreSql;
 
 namespace StoryVoice.IntegrationTests;
 
-public sealed partial class BlueMagpieNarrationAdmissionApiTests
+public sealed partial class ManagedNarrationRecoveryApiTests
 {
     [Fact]
     public async Task PostgreSql_serializes_retries_and_ignores_a_failure_callback_captured_before_recovery()
@@ -31,7 +31,7 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests
             await scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>().Database.MigrateAsync(ct);
         }
         using var owner = await enabledFactory.CreateAuthenticatedClientAsync(ct);
-        var setup = await CreateBlueMagpieSeriesAsync(owner, "這是恢復配音的合成測試故事。", ct);
+        var setup = await CreateManagedSeriesAsync(owner, "這是恢復配音的合成測試故事。", ct);
         var batch = await CreateFailedBatchAsync(enabledFactory, owner, setup.Series.Id, "provider_timeout", ct);
         var original = Assert.Single(await ReadJobsAsync(enabledFactory, batch.Id, ct));
         var before = await ReadPersistenceCountsAsync(enabledFactory.Services, setup.Series.Id, ct);

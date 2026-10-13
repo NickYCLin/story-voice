@@ -23,6 +23,20 @@ public sealed class LocalCloneMultiVoiceNarrationProviderTests : IDisposable
     public void Only_punctuation_and_whitespace_may_be_omitted(string text, bool expected) =>
         Assert.Equal(expected, LocalCloneMultiVoiceNarrationProvider.HasSpeakableText(text));
 
+    [Theory]
+    [InlineData("zh-TW-YunJheNeural")]
+    [InlineData("local-clone-narrator")]
+    public async Task Unmanaged_narrator_never_falls_back_to_an_available_character(string voice)
+    {
+        var client = new FakeClient(_ => Wave());
+        var request = Request("必須明確選擇旁白。");
+        request = request with { Turns = request.Turns.Select(t => t with { Voice = voice }).ToArray() };
+        var error = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() => Provider(client)
+            .SynthesizeAsync(request, Path.Combine(root, "blocked.mp3"), null, TestContext.Current.CancellationToken));
+        Assert.Equal(LocalCloneMultiVoiceNarrationProvider.MissingReferenceCode, error.ErrorCode);
+        Assert.Empty(client.Texts);
+    }
+
     [Fact]
     public void Chunking_preserves_every_utf16_unit_and_surrogate_pair()
     {

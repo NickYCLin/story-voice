@@ -215,10 +215,21 @@ model-attestation, licensing, and operational requirements.
 
 | Boundary | Intended use | Default state |
 |---|---|---|
-| Edge TTS | Built-in narration baseline | Available through the configured server allowlist |
+| Edge TTS | Historical playback only | Retired from new jobs, fallback execution, and worker image |
 | BlueMagpie gateway | Private Taiwan-Mandarin preview and bounded staged canaries | Disabled; internal Docker network only |
-| Local Clone gateway | Owner-scoped preview and authorized synthetic voice execution | Disabled; internal Docker network only |
+| Local Clone gateway | Explicit Character Management voices for narrator and characters | Formal narration requires operator enablement; internal Docker network only |
 | External provider adapters | Explicitly configured cloud or internal TTS providers | Disabled until credentials and rights are supplied outside Git |
+
+New series casts select only the owner's active, Ready base clone profiles with current
+formal-narration consent from Character Management. Each narrator and character choice
+pins `localclone:<voiceProfileId>` separately. Missing, replaced, inactive, or unauthorized
+profiles fail before synthesis; there is no Edge or most-used-character substitution.
+The series voice preview plays the selected reference recording and does not impersonate
+it with the browser's speech engine.
+
+Before rebuilding an older series, explicitly choose its narrator and every character
+voice again. Already completed audio remains playable. This release does not migrate
+voice choices, regenerate books, delete old audio, or change public voice permissions.
 
 See the service READMEs and [`.env.example`](.env.example) before enabling an optional path.
 

@@ -9,21 +9,8 @@ namespace StoryVoice.UnitTests;
 public sealed class SeriesVoiceCastingMetadataTests
 {
     [Fact]
-    public void Default_catalog_only_labels_the_existing_known_male_and_female_voices()
-    {
-        var voices = SeriesVoiceCatalogOptions.CreateDefaultVoices();
-        Assert.All(voices, voice => Assert.True(voice.HasValidCastingMetadata()));
-        Assert.All(voices.Where(voice => voice.Provider == "edge" || voice.Provider == "bluemagpie"),
-            voice => Assert.Contains(voice.Gender, new[] { "male", "female" }));
-        Assert.All(voices.Where(voice => voice.Provider == "voai" || voice.Provider == "3wa-voxcpm2"),
-            voice => Assert.Null(voice.Gender));
-        Assert.All(voices, voice =>
-        {
-            Assert.Null(voice.MinimumAge);
-            Assert.Null(voice.MaximumAge);
-            Assert.Empty(voice.CharacterTags);
-        });
-    }
+    public void Default_catalog_has_no_unmanaged_voices() =>
+        Assert.Empty(SeriesVoiceCatalogOptions.CreateDefaultVoices());
 
     [Theory]
     [InlineData("Gender", "guessed")]

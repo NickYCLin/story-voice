@@ -61,5 +61,5 @@ public interface ISeriesService
         ConfigureSeriesVoicesRequest request,
         CancellationToken cancellationToken);
 
-    IReadOnlyList<SeriesVoiceOptionResponse> ListVoiceOptions();
+    Task<IReadOnlyList<SeriesVoiceOptionResponse>> ListVoiceOptionsAsync(CancellationToken cancellationToken);
 }

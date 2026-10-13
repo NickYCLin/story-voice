@@ -17,7 +17,7 @@ using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
-public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
+public sealed partial class ManagedNarrationRecoveryApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     [Fact]
     public async Task Retry_preserves_job_cast_and_plan_ids_and_remains_owner_scoped()
@@ -26,7 +26,7 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
         using var enabledFactory = CreateEnabledFactory();
         using var owner = await enabledFactory.CreateAuthenticatedClientAsync(ct);
         using var other = await enabledFactory.CreateAuthenticatedClientAsync(ct);
-        var setup = await CreateBlueMagpieSeriesAsync(owner, "這是合成測試故事。", ct);
+        var setup = await CreateManagedSeriesAsync(owner, "這是合成測試故事。", ct);
         var batch = await CreateFailedBatchAsync(enabledFactory, owner, setup.Series.Id, "provider_timeout", ct);
         var path = $"/api/series/{setup.Series.Id}/narration-rebuilds/{batch.Id}/retry";
         var before = await ReadPersistenceCountsAsync(enabledFactory.Services, setup.Series.Id, ct);
@@ -63,7 +63,7 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
     [InlineData("source")]
     [InlineData("cast")]
     [InlineData("gate")]
-    [InlineData("budget")]
+    [InlineData("voice_removed")]
     [InlineData("permanent")]
     [InlineData("rights")]
     [InlineData("plan")]
@@ -72,7 +72,7 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
         var ct = TestContext.Current.CancellationToken;
         using var enabledFactory = CreateEnabledFactory();
         using var owner = await enabledFactory.CreateAuthenticatedClientAsync(ct);
-        var setup = await CreateBlueMagpieSeriesAsync(owner, new string('甲', 130), ct);
+        var setup = await CreateManagedSeriesAsync(owner, new string('甲', 130), ct);
         var batch = await CreateFailedBatchAsync(enabledFactory, owner, setup.Series.Id,
             condition == "permanent" ? "bluemagpie_provider_contract_invalid" : "provider_failed", ct);
         if (condition == "plan")
@@ -92,9 +92,16 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
             }
             await db.SaveChangesAsync(ct);
         }
-        var options = enabledFactory.Services.GetRequiredService<IOptions<BlueMagpieOptions>>().Value;
+        var options = enabledFactory.Services.GetRequiredService<IOptions<LocalClonePreviewOptions>>().Value;
         if (condition == "gate") options.FormalNarrationEnabled = false;
-        if (condition == "budget") options.MaximumChunksPerJob = 1;
+        if (condition == "voice_removed")
+        {
+            await using var scope = enabledFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var profileId = ManagedNarrationVoices.Parse(setup.Series.NarratorProvider, setup.Series.NarratorVoice);
+            db.CharacterVoiceProfiles.Remove(await db.CharacterVoiceProfiles.SingleAsync(p => p.Id == profileId, ct));
+            await db.SaveChangesAsync(ct);
+        }
         var before = await ReadPersistenceCountsAsync(enabledFactory.Services, setup.Series.Id, ct);
         using var response = await owner.PostWithCsrfAsync($"/api/series/{setup.Series.Id}/narration-rebuilds/{batch.Id}/retry",
             new { rightsAttested = condition != "rights" }, ct);
@@ -111,7 +118,7 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
         var ct = TestContext.Current.CancellationToken;
         using var enabledFactory = CreateEnabledFactory();
         using var owner = await enabledFactory.CreateAuthenticatedClientAsync(ct);
-        var setup = await CreateBlueMagpieSeriesAsync(owner, "第一冊的測試故事。", ct);
+        var setup = await CreateManagedSeriesAsync(owner, "第一冊的測試故事。", ct);
         for (var i = 2; i <= 3; i++)
         {
             var book = await ImportTextAsync(owner, $"第{i}冊的測試故事。", ct);
@@ -192,109 +199,6 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
         return batch;
     }
 
-    [Fact]
-    public async Task Oversized_chunk_estimate_rejects_retry_without_purging_failed_batch_or_creating_rows()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var enabledFactory = CreateEnabledFactory();
-        using var owner = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var setup = await CreateBlueMagpieSeriesAsync(
-            owner,
-            new string('甲', 130),
-            cancellationToken);
-
-        using var firstResponse = await owner.PostWithCsrfAsync(
-            $"/api/series/{setup.Series.Id}/narration-rebuilds",
-            new { rightsAttested = true },
-            cancellationToken);
-        var firstBatch = await firstResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
-        Assert.NotNull(firstBatch);
-
-        await using (var failureScope = enabledFactory.Services.CreateAsyncScope())
-        {
-            var db = failureScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-            var stagedJob = await db.NarrationJobs.SingleAsync(
-                job => job.RebuildBatchId == firstBatch!.Id,
-                cancellationToken);
-            var failedAt = DateTimeOffset.UtcNow;
-            stagedJob.Claim("bluemagpie-budget-test", failedAt.AddMinutes(5), failedAt);
-            stagedJob.FailPermanently("synthetic_budget_setup");
-            await db.SaveChangesAsync(cancellationToken);
-
-            var progress = failureScope.ServiceProvider
-                .GetRequiredService<IStagedNarrationBatchProgressService>();
-            await progress.SynchronizeAsync(stagedJob.Id, cancellationToken);
-        }
-
-        var before = await ReadPersistenceCountsAsync(
-            enabledFactory.Services,
-            setup.Series.Id,
-            cancellationToken);
-        enabledFactory.Services.GetRequiredService<IOptions<BlueMagpieOptions>>()
-            .Value.MaximumChunksPerJob = 1;
-
-        using var retryResponse = await owner.PostWithCsrfAsync(
-            $"/api/series/{setup.Series.Id}/narration-rebuilds",
-            new { rightsAttested = true },
-            cancellationToken);
-        var retryBody = await retryResponse.Content.ReadAsStringAsync(cancellationToken);
-
-        Assert.Equal(HttpStatusCode.BadRequest, retryResponse.StatusCode);
-        Assert.Contains("預估分段數", retryBody, StringComparison.Ordinal);
-        Assert.Equal(
-            before,
-            await ReadPersistenceCountsAsync(
-                enabledFactory.Services,
-                setup.Series.Id,
-                cancellationToken));
-
-        await using var verifyScope = enabledFactory.Services.CreateAsyncScope();
-        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
-        Assert.Equal(
-            SeriesCastRebuildBatchStatus.Failed,
-            (await verifyDb.SeriesCastRebuildBatches.SingleAsync(
-                batch => batch.Id == firstBatch!.Id,
-                cancellationToken)).Status);
-    }
-
-    [Fact]
-    public async Task Oversized_conservative_pcm_estimate_rejects_before_creating_cast_batch_or_job()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var enabledFactory = CreateEnabledFactory(builder =>
-        {
-            builder.UseSetting("BlueMagpie:MaximumChunksPerJob", "10000");
-            builder.UseSetting("BlueMagpie:MaximumJobAudioBytes", "67108864");
-        });
-        using var owner = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var setup = await CreateBlueMagpieSeriesAsync(
-            owner,
-            new string('乙', 900),
-            cancellationToken);
-        var before = await ReadPersistenceCountsAsync(
-            enabledFactory.Services,
-            setup.Series.Id,
-            cancellationToken);
-
-        using var response = await owner.PostWithCsrfAsync(
-            $"/api/series/{setup.Series.Id}/narration-rebuilds",
-            new { rightsAttested = true },
-            cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("預估 PCM 音訊量", body, StringComparison.Ordinal);
-        Assert.Equal(
-            before,
-            await ReadPersistenceCountsAsync(
-                enabledFactory.Services,
-                setup.Series.Id,
-                cancellationToken));
-        Assert.Equal(new PersistenceCounts(0, 0, 0, 0), before);
-    }
-
     private WebApplicationFactory<Program> CreateEnabledFactory(
         Action<IWebHostBuilder>? configure = null) =>
         factory.WithWebHostBuilder(builder =>
@@ -305,8 +209,8 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
             configure?.Invoke(builder);
         });
 
-    private static async Task<(StorySeriesDetailsResponse Series, BookDetailsResponse Book)>
-        CreateBlueMagpieSeriesAsync(
+    internal static async Task<(StorySeriesDetailsResponse Series, BookDetailsResponse Book)>
+        CreateManagedSeriesAsync(
             HttpClient owner,
             string text,
             CancellationToken cancellationToken)
@@ -317,8 +221,8 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
             new
             {
                 name = $"BlueMagpie budget {Guid.NewGuid():N}",
-                narratorProvider = "bluemagpie",
-                narratorVoice = BlueMagpieOptions.FemaleVoice,
+                narratorProvider = "local-clone",
+                narratorVoice = await owner.ManagedVoiceAsync(cancellationToken),
                 narratorRate = "+0%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -342,8 +246,8 @@ public sealed partial class BlueMagpieNarrationAdmissionApiTests(ApiFactory fact
             {
                 canonicalName = "測試角色",
                 role = "Main",
-                voiceProvider = "bluemagpie",
-                voice = BlueMagpieOptions.MaleVoice,
+                voiceProvider = "local-clone",
+                voice = await owner.ManagedVoiceAsync(cancellationToken, "actor"),
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",

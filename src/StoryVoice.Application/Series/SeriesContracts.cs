@@ -92,7 +92,8 @@ public sealed record SeriesVoiceOptionResponse(
     string? Gender = null,
     int? MinimumAge = null,
     int? MaximumAge = null,
-    IReadOnlyList<string>? CharacterTags = null);
+    IReadOnlyList<string>? CharacterTags = null,
+    Guid? CharacterProfileId = null);
 
 public sealed record StorySeriesSummaryResponse(
     Guid Id,

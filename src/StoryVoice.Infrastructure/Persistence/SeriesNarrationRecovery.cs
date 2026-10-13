@@ -46,9 +46,10 @@ internal sealed partial class SeriesNarrationService
         await dbContext.Entry(batch).Collection(batch => batch.Members).LoadAsync(cancellationToken);
         var cast = await dbContext.NarrationCastRevisions.Include(cast => cast.Assignments)
             .SingleAsync(cast => cast.Id == batch.DraftCastRevisionId && cast.OwnerId == ownerId && cast.SeriesId == seriesId, cancellationToken);
-        if (cast.NarratorProvider != CharacterVoiceProviders.BlueMagpie
-            || !blueMagpieOptions.Value.Enabled || !blueMagpieOptions.Value.FormalNarrationEnabled)
-            throw new InvalidOperationException("目前只支援已啟用正式配音的 BlueMagpie 批次恢復。");
+        if (!localCloneOptions.Value.FormalNarrationEnabled)
+            throw new InvalidOperationException("自架克隆聲線的正式配音尚未由管理員啟用。");
+        await ManagedNarrationVoices.RequireAsync(dbContext, ownerId,
+            cast.Assignments.Select(a => (a.VoiceProvider, a.Voice)).Append((cast.NarratorProvider, cast.NarratorVoice)), cancellationToken);
         if (batch.Status == SeriesCastRebuildBatchStatus.Building) return ToResponse(batch);
         if (batch.Status != SeriesCastRebuildBatchStatus.Failed || cast.Status != NarrationCastRevisionStatus.Draft)
             throw new InvalidOperationException("只有失敗且尚未啟用的批次可以恢復。");
@@ -86,7 +87,6 @@ internal sealed partial class SeriesNarrationService
         var books = await LoadSeriesBooksAsync(ownerId, memberships, cancellationToken);
         var plans = await LoadLatestConfirmedPlansAsync(ownerId, seriesId, memberships.Select(member => member.BookId).ToArray(), cancellationToken);
         var snapshots = BuildSourceAndPlanSnapshots(memberships, books, plans, series.NarrativeVoiceMode, cancellationToken);
-        EnsureBlueMagpieJobAdmissionBudget(snapshots, blueMagpieOptions.Value);
         var jobIds = jobs.Select(job => job.Id).ToArray();
         var links = await dbContext.NarrationJobSpeechPlans.AsNoTracking()
             .Where(link => link.OwnerId == ownerId && link.SeriesId == seriesId && jobIds.Contains(link.NarrationJobId))
