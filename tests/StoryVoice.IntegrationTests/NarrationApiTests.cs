@@ -302,6 +302,75 @@ public sealed class NarrationApiTests(ApiFactory factory) : IClassFixture<ApiFac
         }
     }
 
+    [Fact]
+    public async Task Private_track_choice_reuses_staged_and_historical_audio_without_publishing_or_deleting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(ct);
+        using var other = await factory.CreateAuthenticatedClientAsync(ct);
+        var book = await ImportTextAsync(owner, ct);
+        var old = await SeedCompletedHistoricalAsync(book.Id, ct);
+        var staged = await SeedNarrationAsync(book.Id, book.Id, NarrationArtifactTestData.CompletedStaged, ct);
+        await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, old, ct);
+        await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, staged, ct);
+        var route = $"/api/books/{book.Id}/narrations/tracks";
+        using var list = await owner.GetAsync(route, ct);
+        var state = await list.Content.ReadFromJsonAsync<NarrationTrackState>(ct);
+        Assert.NotNull(state);
+        Assert.Equal(0, state.Revision);
+        Assert.Equal(2, state.Tracks.Count);
+        Assert.All(state.Tracks, track => Assert.True(track.Available));
+        using var hidden = await other.GetAsync(route, ct);
+        Assert.Equal(HttpStatusCode.NotFound, hidden.StatusCode);
+        using var hiddenAudio = await other.GetAsync($"{route}/{staged.Id}/audio", ct);
+        Assert.Equal(HttpStatusCode.NotFound, hiddenAudio.StatusCode);
+        using var regular = await owner.GetAsync($"/api/narrations/{staged.Id}/audio", ct);
+        Assert.Equal(HttpStatusCode.NotFound, regular.StatusCode);
+        using var rangeRequest = new HttpRequestMessage(HttpMethod.Get, $"{route}/{staged.Id}/audio");
+        rangeRequest.Headers.Range = new RangeHeaderValue(1, 2);
+        using var range = await owner.SendAsync(rangeRequest, ct);
+        Assert.Equal(HttpStatusCode.PartialContent, range.StatusCode);
+        Assert.Equal(new byte[] { 2, 3 }, await range.Content.ReadAsByteArrayAsync(ct));
+        var selection = new SelectNarrationTrackRequest(staged.Id, 0, staged.ConcurrencyStamp);
+        using var choose = await owner.PutWithCsrfAsync(route + "/selection", selection, ct);
+        Assert.Equal(HttpStatusCode.OK, choose.StatusCode);
+        using var retry = await owner.PutWithCsrfAsync(route + "/selection", selection, ct);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        using var stale = await owner.PutWithCsrfAsync(route + "/selection",
+            new SelectNarrationTrackRequest(old.Id, 0, old.ConcurrencyStamp), ct);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var restore = await owner.PutWithCsrfAsync(route + "/selection",
+            new SelectNarrationTrackRequest(old.Id, 1, old.ConcurrencyStamp), ct);
+        Assert.Equal(HttpStatusCode.OK, restore.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        Assert.Equal(2, await db.NarrationTrackSelections.CountAsync(item => item.BookId == book.Id, ct));
+        Assert.Equal(NarrationArtifactVisibility.Staged, (await db.NarrationJobs.SingleAsync(job => job.Id == staged.Id, ct)).Visibility);
+        Assert.Equal(NarrationArtifactVisibility.Historical, (await db.NarrationJobs.SingleAsync(job => job.Id == old.Id, ct)).Visibility);
+        Assert.True(File.Exists(Path.Combine(factory.StorageRoot, "audio", old.AudioRelativePath!)));
+        Assert.True(File.Exists(Path.Combine(factory.StorageRoot, "audio", staged.AudioRelativePath!)));
+    }
+
+    [Fact]
+    public async Task Private_track_selection_rechecks_files_and_rejects_cross_book_artifacts()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(ct);
+        var book = await ImportTextAsync(owner, ct);
+        var otherBook = await ImportTextAsync(owner, ct);
+        var old = await SeedCompletedHistoricalAsync(book.Id, ct);
+        await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, old, ct);
+        using var wrongBook = await owner.PutWithCsrfAsync($"/api/books/{otherBook.Id}/narrations/tracks/selection",
+            new SelectNarrationTrackRequest(old.Id, 0, old.ConcurrencyStamp), ct);
+        Assert.Equal(HttpStatusCode.NotFound, wrongBook.StatusCode);
+        await File.WriteAllBytesAsync(Path.Combine(factory.StorageRoot, "audio", old.AudioRelativePath!), [1], ct);
+        using var changed = await owner.PutWithCsrfAsync($"/api/books/{book.Id}/narrations/tracks/selection",
+            new SelectNarrationTrackRequest(old.Id, 0, old.ConcurrencyStamp), ct);
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        using var audio = await owner.GetAsync($"/api/books/{book.Id}/narrations/tracks/{old.Id}/audio", ct);
+        Assert.Equal(HttpStatusCode.NotFound, audio.StatusCode);
+    }
+
     private async Task<NarrationJob> SeedQueuedPublishedAsync(Guid bookId, CancellationToken cancellationToken) =>
         await SeedNarrationAsync(bookId, bookId, NarrationArtifactTestData.QueuedPublished, cancellationToken);
 

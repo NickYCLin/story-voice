@@ -19,6 +19,30 @@ public static class NarrationEndpoints
             return jobs is null ? Results.NotFound() : Results.Ok(jobs);
         });
 
+        bookGroup.MapGet("/tracks", async (Guid bookId, HttpContext context,
+            INarrationTrackService service, CancellationToken cancellationToken) =>
+        {
+            context.Response.Headers.CacheControl = "private, no-store";
+            var state = await service.ListAsync(bookId, cancellationToken);
+            return state is null ? Results.NotFound() : Results.Ok(state);
+        });
+        bookGroup.MapPut("/tracks/selection", async (Guid bookId, SelectNarrationTrackRequest request,
+            HttpContext context, INarrationTrackService service, CancellationToken cancellationToken) =>
+        {
+            context.Response.Headers.CacheControl = "private, no-store";
+            var result = await service.SelectAsync(bookId, request, cancellationToken);
+            if (result is null) return Results.NotFound();
+            return result.Conflict ? Results.Conflict(result.State) : Results.Ok(result.State);
+        }).AddEndpointFilter<AntiforgeryEndpointFilter>();
+        bookGroup.MapGet("/tracks/{jobId:guid}/audio", async (Guid bookId, Guid jobId, HttpContext context,
+            INarrationTrackService service, CancellationToken cancellationToken) =>
+        {
+            context.Response.Headers.CacheControl = "private, no-store";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            var audio = await service.GetPrivateAudioAsync(bookId, jobId, cancellationToken);
+            return audio is null ? Results.NotFound() : Results.File(audio.AbsolutePath, audio.ContentType, enableRangeProcessing: true);
+        });
+
         bookGroup.MapPost("/", async (
             Guid bookId,
             CreateNarrationRequest request,

@@ -28,9 +28,9 @@ internal sealed partial class SeriesNarrationService(
     IOptions<NarrationAdmissionOptions> admissionOptions,
     IOptions<MultiCharacterNarrationOptions> compositionOptions,
     IOptions<BlueMagpieOptions> blueMagpieOptions,
-    IOptions<NarrationOptions> narrationOptions,
     IOptions<LocalClonePreviewOptions> localCloneOptions,
-    PostgreSqlCastEpochActivationPublisher activationPublisher) : ISeriesNarrationService
+    PostgreSqlCastEpochActivationPublisher activationPublisher,
+    INarrationTrackService trackService) : ISeriesNarrationService
 {
     public async Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
         Guid seriesId,
@@ -141,13 +141,7 @@ internal sealed partial class SeriesNarrationService(
                 EnsureBlueMagpieJobAdmissionBudget(sourceAndPlans, blueMagpieOptions.Value);
             }
 
-            // Budget preflight above must be read-only: an oversized retry cannot purge its old
-            // failed batch (or make any other database mutation). Once admission succeeds, a batch
-            // and its draft cast revision are each usable exactly once
-            // (UX_rebuild_batches_draft_cast / UX_ncast_revs_fingerprint). A failed batch can then
-            // be safely removed before staging the fresh attempt.
-            await PurgeFailedBatchesAsync(ownerId, seriesId, cancellationToken);
-
+            // Failed cohorts and their completed artifacts remain available for private reuse.
             var configuration = compositionOptions.Value;
             ValidateComposition(configuration, series);
             var narratorProviderVersion = configuration.ResolveProviderVersion(series.NarratorProvider);
@@ -478,123 +472,23 @@ internal sealed partial class SeriesNarrationService(
             return null;
         }
 
+        var members = await dbContext.SeriesCastRebuildMembers.AsNoTracking()
+            .Where(member => member.OwnerId == ownerId && member.SeriesId == seriesId && member.BatchId == batchId)
+            .ToListAsync(cancellationToken);
+        foreach (var member in members)
+        {
+            if (member.StagedNarrationJobId is not Guid stagedId
+                || await trackService.GetPrivateAudioAsync(member.BookId, stagedId, cancellationToken) is null)
+                throw new InvalidOperationException("批次音檔尚未完成、已遺失或大小不符，不能啟用。");
+            if (member.PreviousActiveNarrationJobId is Guid previousId
+                && await trackService.GetPrivateAudioAsync(member.BookId, previousId, cancellationToken) is null)
+                throw new InvalidOperationException("原播放版本的音檔無法核對，不能啟用替換。");
+        }
+
         await activationPublisher.ActivateAsync(
             new CastEpochActivationCommand(ownerId, seriesId, batchId, DateTimeOffset.UtcNow),
             cancellationToken);
         return await GetRebuildAsync(seriesId, batchId, cancellationToken);
-    }
-
-    /// <summary>
-    /// Removes batches that already failed for this series, along with the rows that only exist
-    /// to serve them (their staged jobs, plan links, members, and — when nothing else references
-    /// it — their draft cast revision). Never touches a job whose <see cref="NarrationArtifactVisibility"/>
-    /// is <c>Published</c>, and never touches a cast revision that isn't still <c>Draft</c>.
-    /// </summary>
-    private async Task PurgeFailedBatchesAsync(Guid ownerId, Guid seriesId, CancellationToken cancellationToken)
-    {
-        var failedBatches = await dbContext.SeriesCastRebuildBatches
-            .Include(batch => batch.Members)
-            .Where(batch => batch.OwnerId == ownerId
-                && batch.SeriesId == seriesId
-                && batch.Status == SeriesCastRebuildBatchStatus.Failed)
-            .ToArrayAsync(cancellationToken);
-        if (failedBatches.Length == 0)
-        {
-            return;
-        }
-
-        var batchIds = failedBatches.Select(batch => batch.Id).ToArray();
-        // 還在 Running 的 staged job 不可以被硬刪（合成中的資料列被另一個交易憑空
-        // 移除只是「靠巧合安全」）；整個 batch 先跳過，等取消落地後下一輪再清。
-        var runningBatchIds = await dbContext.NarrationJobs
-            .Where(job => job.OwnerId == ownerId
-                && job.SeriesId == seriesId
-                && job.RebuildBatchId != null
-                && batchIds.Contains(job.RebuildBatchId!.Value)
-                && job.Visibility == NarrationArtifactVisibility.Staged
-                && job.Status == NarrationJobStatus.Running)
-            .Select(job => job.RebuildBatchId!.Value)
-            .Distinct()
-            .ToArrayAsync(cancellationToken);
-        failedBatches = failedBatches
-            .Where(batch => !runningBatchIds.Contains(batch.Id))
-            .ToArray();
-        if (failedBatches.Length == 0)
-        {
-            return;
-        }
-
-        batchIds = failedBatches.Select(batch => batch.Id).ToArray();
-        var staleJobs = await dbContext.NarrationJobs
-            .Where(job => job.OwnerId == ownerId
-                && job.SeriesId == seriesId
-                && job.RebuildBatchId != null
-                && batchIds.Contains(job.RebuildBatchId!.Value)
-                && job.Mode == NarrationMode.MultiCharacter
-                && job.Visibility == NarrationArtifactVisibility.Staged)
-            .ToArrayAsync(cancellationToken);
-        var staleJobIds = staleJobs.Select(job => job.Id).ToArray();
-        var purgeableAudioRelativePaths = staleJobs
-            .Where(job => !string.IsNullOrWhiteSpace(job.AudioRelativePath))
-            .Select(job => job.AudioRelativePath!)
-            .ToArray();
-        var stalePlanLinks = await dbContext.NarrationJobSpeechPlans
-            .Where(link => staleJobIds.Contains(link.NarrationJobId))
-            .ToArrayAsync(cancellationToken);
-
-        dbContext.NarrationJobSpeechPlans.RemoveRange(stalePlanLinks);
-        dbContext.NarrationJobs.RemoveRange(staleJobs);
-        dbContext.SeriesCastRebuildBatches.RemoveRange(failedBatches);
-
-        var draftCastRevisionIds = failedBatches.Select(batch => batch.DraftCastRevisionId).Distinct().ToArray();
-        var stillReferencedRevisionIds = await dbContext.SeriesCastRebuildBatches
-            .Where(batch => !batchIds.Contains(batch.Id) && draftCastRevisionIds.Contains(batch.DraftCastRevisionId))
-            .Select(batch => batch.DraftCastRevisionId)
-            .ToArrayAsync(cancellationToken);
-        var purgeableRevisionIds = draftCastRevisionIds.Except(stillReferencedRevisionIds).ToArray();
-        var purgeableDraftRevisions = await dbContext.NarrationCastRevisions
-            .Include(revision => revision.Assignments)
-            .Where(revision => purgeableRevisionIds.Contains(revision.Id)
-                && revision.Status == NarrationCastRevisionStatus.Draft)
-            .ToArrayAsync(cancellationToken);
-        dbContext.NarrationCastRevisions.RemoveRange(purgeableDraftRevisions);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // 資料列成功刪除後才清音檔（順序反過來會在刪列失敗時遺失檔案）。
-        // 沒有這一步的話，失敗批次裡已完成書冊的 MP3 會永久留在磁碟上。
-        DeletePurgedAudioFiles(purgeableAudioRelativePaths);
-    }
-
-    private void DeletePurgedAudioFiles(IReadOnlyList<string> relativePaths)
-    {
-        if (relativePaths.Count == 0)
-        {
-            return;
-        }
-
-        var root = Path.GetFullPath(narrationOptions.Value.AudioRootPath);
-        var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        foreach (var relativePath in relativePaths)
-        {
-            try
-            {
-                var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
-                if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                File.Delete(fullPath);
-            }
-            catch (Exception exception) when (exception is IOException
-                or UnauthorizedAccessException
-                or ArgumentException
-                or NotSupportedException)
-            {
-                // 檔案清理失敗不可以阻擋 purge 本身；殘檔留待下次人工或後續清理。
-            }
-        }
     }
 
     private async Task<Dictionary<Guid, Book>> LoadSeriesBooksAsync(

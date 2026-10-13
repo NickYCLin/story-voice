@@ -14,7 +14,7 @@ public sealed class PlaybackAndUsagePostgreSqlMigrationTests
 {
     private const string Baseline = "20260826090725_AddExternalVoiceUsageLedger";
     private static readonly string[] Upgrades =
-    ["20260902025936_AddNarrationTimeline", "20260908010141_AddListeningProgress", "20260908025724_AddNarrationAttemptUsage"];
+    ["20260902025936_AddNarrationTimeline", "20260908010141_AddListeningProgress", "20260908025724_AddNarrationAttemptUsage", "20261013042545_PreserveNarrationTracks"];
 
     [Fact]
     public async Task Pending_migrations_preserve_existing_rows_enforce_constraints_and_round_trip()
@@ -77,14 +77,27 @@ public sealed class PlaybackAndUsagePostgreSqlMigrationTests
             INSERT INTO narration_timelines ("OwnerId", "NarrationJobId", "TimelineJson", "CreatedAt")
             VALUES ({ownerId}, {jobId}, CAST({"{}"} AS jsonb), {now});
             """, ct);
+        var selection = NarrationTrackSelection.Create(ownerId, jobs[0].BookId, jobId, null, 1);
+        db.NarrationTrackSelections.Add(selection);
+        await db.SaveChangesAsync(ct);
+        var duplicateSelection = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO narration_track_selections ("Id", "OwnerId", "BookId", "NarrationJobId", "Revision", "CreatedAt")
+            VALUES ({Guid.NewGuid()}, {ownerId}, {jobs[0].BookId}, {jobId}, 1, {now});
+            """, ct));
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, duplicateSelection.SqlState);
+        var protectedArtifact = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM narration_jobs WHERE "Id" = {jobId};
+            """, ct));
+        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, protectedArtifact.SqlState);
         await migrator.MigrateAsync(Baseline, ct);
         Assert.Equal(before, await DigestAsync(db, ct));
-        Assert.Equal(3, (await db.Database.GetPendingMigrationsAsync(ct)).Count());
+        Assert.Equal(Upgrades.Length, (await db.Database.GetPendingMigrationsAsync(ct)).Count());
         await migrator.MigrateAsync(Upgrades[^1], ct);
         Assert.Equal(before, await DigestAsync(db, ct));
         // Down explicitly removes data stored only in the new tables; never promise it is retained.
         Assert.Equal(0, await db.ListeningProgress.CountAsync(ct));
         Assert.Equal(0, await db.NarrationTimelines.CountAsync(ct));
+        Assert.Equal(0, await db.NarrationTrackSelections.CountAsync(ct));
     }
 
     private static async Task<string> DigestAsync(StoryVoiceDbContext db, CancellationToken ct)

@@ -1120,15 +1120,18 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
     }
 
     [Fact]
-    public async Task Retrying_after_a_failed_batch_purges_the_stale_batch_and_succeeds_with_an_unchanged_cast()
+    public async Task Retrying_after_a_failed_batch_preserves_history_and_succeeds_with_an_unchanged_cast()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var owner = await factory.CreateAuthenticatedClientAsync(cancellationToken);
         var book = await ImportTextAsync(owner, "synthetic retry rebuild text", cancellationToken);
         var series = await CreateSeriesAsync(owner, cancellationToken);
         await AddBookAsync(owner, series.Id, book.Id, cancellationToken);
+        var secondBook = await ImportTextAsync(owner, "synthetic second retry book", cancellationToken);
+        await AddBookAsync(owner, series.Id, secondBook.Id, cancellationToken, sortOrder: 2);
         await AddCharacterAsync(owner, series.Id, cancellationToken);
         await ConfirmOnlyChapterPlanAsync(owner, series.Id, book, cancellationToken);
+        await ConfirmOnlyChapterPlanAsync(owner, series.Id, secondBook, cancellationToken);
 
         using var firstResponse = await owner.PostWithCsrfAsync(
             $"/api/series/{series.Id}/narration-rebuilds",
@@ -1138,12 +1141,19 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
         var firstBatch = await firstResponse.Content.ReadFromJsonAsync<SeriesNarrationRebuildResponse>(cancellationToken);
         Assert.NotNull(firstBatch);
 
+        string? preservedAudio = null;
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
             var stagedJob = await db.NarrationJobs.SingleAsync(
-                job => job.RebuildBatchId == firstBatch!.Id,
+                job => job.RebuildBatchId == firstBatch!.Id && job.BookId == secondBook.Id,
                 cancellationToken);
+            var completedJob = await db.NarrationJobs.SingleAsync(
+                job => job.RebuildBatchId == firstBatch!.Id && job.BookId == book.Id, cancellationToken);
+            completedJob.Claim("completed-fixture", DateTimeOffset.UtcNow.AddMinutes(5));
+            completedJob.Complete($"{completedJob.OwnerId:N}/{completedJob.Id:N}.mp3", 4);
+            await NarrationArtifactTestData.WriteAudioAsync(factory.StorageRoot, completedJob, cancellationToken);
+            preservedAudio = Path.Combine(factory.StorageRoot, "audio", completedJob.AudioRelativePath!);
             var failedAt = DateTimeOffset.UtcNow;
             stagedJob.Claim("fingerprint-retry-test", failedAt.AddMinutes(5), failedAt);
             stagedJob.FailPermanently("synthetic_test_failure");
@@ -1179,6 +1189,36 @@ public sealed class MultiCharacterNarrationApiTests(ApiFactory factory) : IClass
             .Where(revision => revision.SeriesId == series.Id)
             .CountAsync(cancellationToken);
         Assert.Equal(1, revisionCount);
+        Assert.NotNull(preservedAudio);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, await File.ReadAllBytesAsync(preservedAudio, cancellationToken));
+        Assert.True(await verifyDb.SeriesCastRebuildBatches.AnyAsync(batch => batch.Id == firstBatch.Id, cancellationToken));
+        Assert.True(await verifyDb.NarrationJobs.AnyAsync(job => job.RebuildBatchId == firstBatch.Id, cancellationToken));
+    }
+
+    [Fact]
+    public async Task Activation_rejects_missing_completed_audio_before_changing_any_pointer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var owner = await factory.CreateAuthenticatedClientAsync(ct);
+        var created = await CreateBuildingBatchAsync(owner, "activation fixture", ct);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var job = await db.NarrationJobs.SingleAsync(job => job.RebuildBatchId == created.Batch.Id, ct);
+            job.Claim("fixture", DateTimeOffset.UtcNow.AddMinutes(5));
+            job.Complete($"{job.OwnerId:N}/{job.Id:N}.mp3", 4);
+            await db.SaveChangesAsync(ct);
+            await scope.ServiceProvider.GetRequiredService<IStagedNarrationBatchProgressService>().SynchronizeAsync(job.Id, ct);
+        }
+        using var response = await owner.PostWithCsrfAsync(
+            $"/api/series/{created.Series.Id}/narration-rebuilds/{created.Batch.Id}/activate", new { }, ct);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var proofScope = factory.Services.CreateAsyncScope();
+        var proof = proofScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var series = await proof.StorySeries.SingleAsync(series => series.Id == created.Series.Id, ct);
+        Assert.Null(series.ActiveCastRevisionId);
+        Assert.Equal(SeriesCastRebuildBatchStatus.ReadyToActivate,
+            (await proof.SeriesCastRebuildBatches.SingleAsync(batch => batch.Id == created.Batch.Id, ct)).Status);
     }
 
     private static async Task<(

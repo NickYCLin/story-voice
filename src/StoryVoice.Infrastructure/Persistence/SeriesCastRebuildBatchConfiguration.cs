@@ -63,7 +63,8 @@ internal sealed class SeriesCastRebuildBatchConfiguration : IEntityTypeConfigura
             batch.DraftCastRevisionId
         })
             .HasDatabaseName("UX_rebuild_batches_draft_cast")
-            .IsUnique();
+            .IsUnique()
+            .HasFilter("\"Status\" <> 'Failed'");
 
         builder.HasOne<StorySeries>()
             .WithMany()

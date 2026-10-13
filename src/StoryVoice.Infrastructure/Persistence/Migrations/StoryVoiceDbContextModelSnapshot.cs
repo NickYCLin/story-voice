@@ -1797,6 +1797,43 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                     b.ToTable("narration_timelines", (string)null);
                 });
 
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTrackSelection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BookId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("NarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreviousNarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "NarrationJobId");
+
+                    b.HasIndex("OwnerId", "BookId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("narration_track_selections", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_track_selection_revision", "\"Revision\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("StoryVoice.Domain.Narrations.SeriesCastRebuildBatch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1841,7 +1878,8 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "SeriesId", "DraftCastRevisionId")
                         .IsUnique()
-                        .HasDatabaseName("UX_rebuild_batches_draft_cast");
+                        .HasDatabaseName("UX_rebuild_batches_draft_cast")
+                        .HasFilter("\"Status\" <> 'Failed'");
 
                     b.ToTable("series_cast_rebuild_batches", null, t =>
                         {
@@ -2720,6 +2758,16 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_narration_timelines_job");
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTrackSelection", b =>
+                {
+                    b.HasOne("StoryVoice.Domain.Narrations.NarrationJob", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "NarrationJobId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("StoryVoice.Domain.Narrations.SeriesCastRebuildBatch", b =>

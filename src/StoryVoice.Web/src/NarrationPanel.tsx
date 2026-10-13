@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
 import { AudioPlayer, type NarrationTimeline } from './components/AudioPlayer'
+import { PrivateNarrationTracks } from './components/PrivateNarrationTracks'
 import { NarrationUsagePanel } from './components/NarrationUsagePanel'
 import { useListeningProgress } from './useListeningProgress'
 import { localize, useLocale } from './i18n'
@@ -214,6 +215,8 @@ export function NarrationPanel({ book, csrfToken }: Props) {
           <Link className="secondary-button mt-3 inline-flex" to="/series">前往多角色系列配音</Link>
         </div>
       )}
+
+      <PrivateNarrationTracks key={book.id} bookId={book.id} csrfToken={csrfToken} />
 
       <div aria-live="polite" className="mt-3 min-h-5 text-xs text-stone-500">{message}</div>
 

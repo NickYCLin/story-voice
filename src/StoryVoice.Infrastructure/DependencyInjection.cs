@@ -256,6 +256,7 @@ public static class DependencyInjection
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
+        services.AddScoped<INarrationTrackService, NarrationTrackService>();
         services.AddScoped<ISeriesNarrationService, SeriesNarrationService>();
         services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();

@@ -24,11 +24,11 @@ SHA-256：`0990cc2b6bf85365345484056bbee39694dd4721f28be2688a091749e7f33e06`。
 整段失敗可逐句重試，但任何有意義句子失敗都使工作失敗，不會發布部分音訊。
 成功檔案旁會保存 `.integrity.json`，包含來源／cast／plan 識別、文字雜湊與
 UTF-16 單位數、chunk 狀態及音訊 bytes／SHA-256；不包含原文或逐字稿。
-這份收據证明程式沒有忽略必須合成的片段，不能證明模型逐字正確發音。
+這份收據證明程式沒有忽略必須合成的片段，不能證明模型逐字正確發音。
 API 的公開音訊 route 不會公開此收據。
 
 新 cache namespace 與所有不可變工作欄位、provider 版本、參考錄音及逐字稿雜湊綁定。
-只重用 SHA-256 sidecar 相符的 chunk，不信任旧 cache。失敗時保留 cache 與失敗收據；
+只重用 SHA-256 sidecar 相符的 chunk，不信任舊 cache。失敗時保留 cache 與失敗收據；
 成功後移除 cache。朗讀時間軸介面保持相容，但此 provider 尚未回傳逐 turn timing。
 
 ## 本人錄音授權 v2
@@ -71,3 +71,28 @@ usage owner FK 與數量限制，並執行 Down 與再次 Up。
 Down 會刪除新增表中的紀錄，測試明確確認此邊界；不可把它描述為無損回退。
 正式回退優先使用與新增 schema 相容的舊映像，禁止未審核的自動 Down。
 這些測試未讀取、匯出或還原正式資料庫，不能替代正式維護窗口與備份核對。
+
+## 私人音軌重用與保留
+
+`GET /api/books/{bookId}/narrations/tracks` 列出同 owner、同一本未封存書的所有工作，
+包括待啟用與歷史版本，並檢查完成狀態、實體路徑、檔案存在和 bytes。
+這不是逐字或音訊內容的完整驗證，也不把不同來源版本視為同一正文。
+`GET /tracks/{jobId}/audio` 是同一書籍路徑下的私人 range 播放入口；
+原本公開狀態的音訊 route 不會因此開放 staged／historical 音訊。
+
+`PUT /tracks/selection` 提供 `jobId`、`expectedRevision` 與
+`expectedArtifactVersion`。成功選擇追加紀錄，唯一索引阻止競爭寫入；
+相同請求重送不追加，過期選擇回應 409。重新選回舊音軌亦追加新版本。
+它只重用既有檔案，不複製或重新合成，也不改動工作、cast 或整個系列的 active pointer。
+書籍頁的「私人音軌版本」提供檢視、試聽與明確儲存操作。
+
+建立新批次不再隱式刪除失敗批次、工作或完成音檔。新 migration
+`20261013042545_PreserveNarrationTracks` 允許同 cast 保留已失敗的批次，
+仍限制最多一個非失敗批次；前代 epoch 只從 Activated 批次解析。
+完整系列啟用仍經原有 serializable transaction 與圖形約束；API 進入該流程前，
+會再檢查新音檔與原音檔存在且 bytes 相符，不會因 ReadyToActivate 就略過檢查。
+私人選擇紀錄的 FK 阻止刪除其引用工作。
+
+本 migration 的 Down 會刪除私人選擇紀錄；若存在同 cast 的保留重建歷史，
+Down 會明確拒絕，避免為了回復舊唯一索引而刪除歷史。正式回退不得靠丟棄
+歷史資料解決，需保留此 schema 並使用相容版本。
