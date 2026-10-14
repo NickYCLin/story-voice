@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Characters;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Infrastructure.Persistence;
@@ -177,45 +178,116 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     }
 
     [Theory]
-    [InlineData("text/plain")]
-    [InlineData(null)]
-    public async Task Preview_rejects_untyped_or_non_audio_artifacts_without_downloading_them(
-        string? contentType)
+    [InlineData("success")]
+    [InlineData("disabled")]
+    [InlineData("missing")]
+    [InlineData("tampered")]
+    [InlineData("unauthorized")]
+    [InlineData("inactive")]
+    [InlineData("invalid_pcm")]
+    [InlineData("gateway")]
+    public async Task Managed_preview_uses_only_local_gateway_and_never_mutates_originals(string scenario)
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var fake = new FakeThreeWaSynthesisClient([1, 2, 3], contentType);
-        using var previewFactory = CreatePreviewFactory(fake);
-        using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
-        var profileId = await SeedReadyCloneVoiceProfileAsync(previewFactory, characterProfileId, cancellationToken);
-
+        var ct = TestContext.Current.CancellationToken;
+        var external = new FakeThreeWaSynthesisClient([], "audio/wav");
+        var local = new ManagedPreviewGateway(scenario == "gateway");
+        var root = Path.Combine(Path.GetTempPath(), "managed-preview-" + Guid.NewGuid());
+        Directory.CreateDirectory(Path.Combine(root, "seeded"));
+        var reference = CreatePcmWav(sampleRate: scenario == "invalid_pcm" ? 24_000 : 48_000);
+        var path = Path.Combine(root, "seeded/reference.wav");
+        if (scenario != "missing") await File.WriteAllBytesAsync(path, reference, ct);
+        using var app = CreatePreviewFactory(external).WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("LocalClonePreview:Enabled", (scenario != "disabled").ToString());
+            builder.UseSetting("LocalClonePreview:InternalToken", new string('t', 32));
+            builder.UseSetting("CharacterVoiceStorage:RootPath", root);
+            // Legacy static previews retain their separate allowlist. Managed voice
+            // previews must use the selected DB profile, never these placeholder assets.
+            var prefix = $"LocalClonePreview:AllowedProfiles:{Guid.NewGuid():D}";
+            builder.UseSetting($"{prefix}:Label", "legacy fixture");
+            builder.UseSetting($"{prefix}:ReferenceAudioRelativePath", "legacy.wav");
+            builder.UseSetting($"{prefix}:TranscriptRelativePath", "legacy.txt");
+            builder.UseSetting($"{prefix}:ExpectedReferenceAudioSha256", new string('a', 64));
+            builder.UseSetting($"{prefix}:ExpectedTranscriptSha256", new string('b', 64));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILocalCloneGatewayClient>();
+                services.AddSingleton<ILocalCloneGatewayClient>(local);
+            });
+        });
+        using var owner = await app.CreateAuthenticatedClientAsync(ct);
+        var character = await CreateCharacterProfileAsync(owner, ct);
+        var digest = Convert.ToHexString(SHA256.HashData(reference));
+        var profile = await SeedReadyCloneVoiceProfileAsync(app, character, ct,
+            scenario == "tampered" ? new string('a', 64) : digest);
+        if (scenario == "unauthorized")
+        {
+            await using var scope = app.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            db.CharacterVoiceProfileOperations.RemoveRange(await db.CharacterVoiceProfileOperations
+                .Where(operation => operation.NewProfileId == profile).ToListAsync(ct));
+            await db.SaveChangesAsync(ct);
+        }
+        if (scenario == "inactive")
+        {
+            await using var scope = app.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            (await db.CharacterProfiles.SingleAsync(value => value.Id == character, ct)).Deactivate(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(ct);
+        }
+        var profilesPath = $"/api/character-profiles/{character}/voice-profiles";
+        var before = await owner.GetStringAsync(profilesPath, ct);
+        await using var checkScope = app.Services.CreateAsyncScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+        var jobs = await checkDb.NarrationJobs.CountAsync(ct);
         using var response = await owner.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
-            new { text = "你好" },
-            cancellationToken);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(1, fake.ResultCount);
-        Assert.Equal(0, fake.DownloadCount);
+            $"{profilesPath}/{profile}/preview", new { text = "  你好，台灣。  " }, ct);
+        Assert.Equal(scenario == "success" ? HttpStatusCode.OK
+            : scenario == "unauthorized" ? HttpStatusCode.BadRequest
+            : HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(scenario is "success" or "gateway" ? 1 : 0, local.Calls);
+        Assert.Equal(0, external.SubmitCount);
+        Assert.Equal(0, external.StatusCount);
+        Assert.Equal(0, external.ResultCount);
+        Assert.Equal(0, external.DownloadCount);
+        Assert.Equal(before, await owner.GetStringAsync(profilesPath, ct));
+        Assert.Equal(jobs, await checkDb.NarrationJobs.CountAsync(ct));
+        if (scenario != "missing") Assert.Equal(reference, await File.ReadAllBytesAsync(path, ct));
+        if (local.LastRequest is { } request)
+        {
+            Assert.Equal(reference, request.ReferenceAudio);
+            Assert.Equal("你好,台灣。", request.ReferenceTranscript);
+            Assert.Equal("你好，台灣。", request.Text);
+        }
+        if (scenario == "success")
+        {
+            Assert.Equal("audio/wav", response.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+            Assert.Equal(CreatePcmWav(1, 24_000), await response.Content.ReadAsByteArrayAsync(ct));
+        }
+        else if (scenario != "unauthorized")
+        {
+            Assert.Contains(scenario switch
+            {
+                "disabled" => "local_clone_preview_disabled",
+                "inactive" => "local_clone_preview_not_configured",
+                "gateway" => "local_clone_preview_gateway_unavailable",
+                _ => "local_clone_preview_asset_invalid"
+            }, await response.Content.ReadAsStringAsync(ct));
+        }
     }
 
-    [Fact]
-    public async Task Preview_rejects_audio_larger_than_the_configured_limit()
+    private sealed class ManagedPreviewGateway(bool fail) : ILocalCloneGatewayClient
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var fake = new FakeThreeWaSynthesisClient(new byte[(64 * 1024) + 1], "audio/wav");
-        using var previewFactory = CreatePreviewFactory(fake, maximumAudioResponseBytes: 64 * 1024);
-        using var owner = await previewFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
-        var profileId = await SeedReadyCloneVoiceProfileAsync(previewFactory, characterProfileId, cancellationToken);
-
-        using var response = await owner.PostWithCsrfAsync(
-            $"/api/character-profiles/{characterProfileId}/voice-profiles/{profileId}/preview",
-            new { text = "你好" },
-            cancellationToken);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(1, fake.DownloadCount);
+        public int Calls { get; private set; }
+        public LocalCloneGatewayRequest? LastRequest { get; private set; }
+        public Task<LocalCloneGatewayAudio> SynthesizeAsync(LocalCloneGatewayRequest request, CancellationToken ct)
+        {
+            Calls++;
+            LastRequest = request;
+            if (fail) throw new LocalClonePreviewUnavailableException(LocalClonePreviewFailureKind.GatewayUnavailable);
+            return Task.FromResult(new LocalCloneGatewayAudio(CreatePcmWav(1, 24_000), "audio/wav"));
+        }
     }
 
     [Fact]
@@ -1150,7 +1222,8 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     private static async Task<Guid> SeedReadyCloneVoiceProfileAsync(
         WebApplicationFactory<Program> appFactory,
         Guid characterProfileId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? referenceHash = null)
     {
         await using var scope = appFactory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
@@ -1167,7 +1240,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             null,
             CharacterVoiceConsentTypes.SelfRecorded,
             "seeded/reference.wav",
-            new string('a', 64),
+            referenceHash ?? new string('a', 64),
             8,
             ownerId,
             now);
@@ -1183,7 +1256,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             CreateConsentEvidence("你好，台灣。", includeFormalNarration: true),
             "你好，台灣。",
             "seeded/reference.wav",
-            new string('a', 64),
+            referenceHash ?? new string('a', 64),
             10,
             ownerId,
             "seeded-key",

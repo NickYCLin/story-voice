@@ -219,8 +219,12 @@ manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文�
 - **摘要卡片**：基礎聲線狀態、情境聲線數量（已就緒／5）、樣本語料時數（所有克隆
   聲線參考音檔的 ffprobe 時長加總，API 容器已補上 ffmpeg）、最近進行中的任務。
 - **試講**：針對任一已就緒（`Ready`）的 Clone 聲線，輸入一小段文字（上限 200 字）即時合成
-  播放；重用既有的 3wa 合成 client 同步跑一次 submit/poll/result/artifact，不進
-  Worker 的 job 佇列、不落地存檔，純粹是 UI 預覽用途。
+  播放；使用該聲線的受管原始錄音與已確認逐字稿，經既有內部
+  `local-clone-gateway:8082` 交給 `facespeak-voice-clone:8093` 的 CosyVoice 合成。
+  保留擁有者與私人試音授權檢查，驗證錄音雜湊與 PCM 格式；本機停用、素材不符
+  或 gateway 失敗時明確回錯，不重試、不 fallback 至 3wa、Edge 或其他外部供應商。
+  不進 Worker 的 job 佇列、不覆寫參考錄音或正式音檔。部署仍需先核對既有
+  主機與內部網路；不因這項修正新增公網 port 或憑證。
 - **任務紀錄**：以這個角色所有 `CharacterVoiceProfile`（含歷史 Pending／Failed 紀錄）
   依最後更新時間列出的簡易表格；沒有另外做一套持久化的非同步任務追蹤系統，也
   沒有 3wa 端回傳的即時進度百分比（3wa 文件雖提到 status 回應可能帶 `progress`

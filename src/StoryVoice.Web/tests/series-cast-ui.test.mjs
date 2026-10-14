@@ -139,7 +139,8 @@ test('3wa Design 依驗證過的 provider contract 固定 fail closed，existing
   assert.match(voiceProfilesPanel, /voice_prompt/)
   assert.match(voiceProfilesPanel, /現有資料仍會保留但不可試音或正式配音/)
   assert.match(characterLibraryPage, /profile\.status === 'Ready' && profile\.mode === 'Clone'/)
-  assert.match(characterLibraryPage, /文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2/)
+  assert.match(characterLibraryPage, /由自己的 AI 主機即時合成/)
+  assert.match(characterLibraryPage, /不會轉送外部合成服務/)
 })
 
 test('Clone 上傳要求逐字稿、receipt v2 與明確 attestation，existing Base Design 走安全取代 API', () => {

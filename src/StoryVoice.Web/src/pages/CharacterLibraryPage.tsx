@@ -945,8 +945,8 @@ export function CharacterLibraryPage() {
                     </section>
 
                     <section className="mt-6 border-t border-stone-200 pt-5">
-                      <h3 className="font-serif text-lg text-stone-900">正式角色聲線試講</h3>
-                      <p className="mt-2 text-sm text-stone-500">選一組已完成的錄音克隆聲線，輸入任意文字試講，聲音會即時合成播放（不會存檔）。文字設計聲線因 3wa 尚未將 voice_prompt 傳給 VoxCPM2，目前不可試音。</p>
+                      <h3 className="font-serif text-lg text-stone-900">角色聲線本機試講</h3>
+                      <p className="mt-2 text-sm text-stone-500">選一組已完成且已授權的錄音克隆聲線，由自己的 AI 主機即時合成。試講不會覆寫參考錄音或正式音檔；本機不可用時會顯示錯誤，不會轉送外部合成服務。</p>
                       {readyProfiles.length === 0 && <p className="mt-3 text-sm text-stone-500">這個角色還沒有已完成的聲線，先到「聲線管理」建立一組。</p>}
                       {readyProfiles.length > 0 && (
                         <div className="mt-3 space-y-3">
@@ -968,7 +968,7 @@ export function CharacterLibraryPage() {
                             onClick={() => void playPreview()}
                             type="button"
                           >
-                            {previewBusy ? '合成中…' : '▶ 播放試講'}
+                            {previewBusy ? '合成中…' : '▶ 播放試講（本機）'}
                           </button>
                           {previewUrl && (
                             <audio aria-label="角色試講" autoPlay className="w-full" controls onError={() => { setPreviewUrl(null); setMessage('試講音訊無法播放，請重新產生。') }} src={previewUrl} />
