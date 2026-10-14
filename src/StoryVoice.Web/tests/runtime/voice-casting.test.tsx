@@ -60,3 +60,13 @@ it('可用聲線不足時容許共用，不為了分散而選用不相符的性�
   expect(noMatch['character-a'].voiceKey).toBe(current['character-a'])
   expect(noMatch['character-a'].reason).toContain('沒有明確')
 })
+
+it('本機角色聲線不因相同性別或台味標籤自動改配另一位角色', () => {
+  const localNarrator = { ...narrator, provider: 'local-clone', voice: 'localclone:current' }
+  const localCurrent = Object.fromEntries(characters.map(character => [character.id, 'local-clone\nlocalclone:current']))
+  const matching = { ...female('localclone:other-character'), provider: 'local-clone', characterTags: ['台味'] }
+  const described = profiles.map(profile => ({ ...profile, speakingStyle: '台味' }))
+  const suggestions = suggestCharacterVoices(characters, described, [matching], localNarrator, localCurrent)
+  expect(Object.values(suggestions).every(item => item.voiceKey === 'local-clone\nlocalclone:current')).toBe(true)
+  expect(Object.values(suggestions).every(item => item.reason.includes('人工選擇'))).toBe(true)
+})

@@ -203,6 +203,8 @@ export function SeriesCastPanel() {
     manualVoiceOverrides.current.clear()
     setCastingSuggestions({})
     setFormState('idle')
+    setSavingCharacterProfileId(null)
+    setMessage('')
     setRetryingBatch(false)
     setRetryRightsAttested(false)
     setActivateDialogOpen(false)
@@ -219,7 +221,7 @@ export function SeriesCastPanel() {
       setConfiguredCharacterVoiceKeys(Object.fromEntries(
         detail.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
       ))
-      setAliasCharacterId((current) => current || detail.characters[0]?.id || '')
+      setAliasCharacterId((current) => detail.characters.some(character => character.id === current) ? current : detail.characters[0]?.id ?? '')
       setBookId('')
       setVolumeLabel('')
       setBatch(null)
@@ -428,10 +430,13 @@ export function SeriesCastPanel() {
       })
   }, [bookDetails, details, draftsByChapter])
 
-  const [managedPreview, setManagedPreview] = useState<{ url: string; name: string } | null>(null)
+  const [managedPreview, setManagedPreview] = useState<{ seriesId: string; url: string; name: string } | null>(null)
   const managedPreviewRequest = useRef<AbortController | null>(null)
   useEffect(() => () => { if (managedPreview) URL.revokeObjectURL(managedPreview.url) }, [managedPreview])
-  useEffect(() => () => { managedPreviewRequest.current?.abort() }, [selectedSeriesId])
+  useEffect(() => {
+    setManagedPreview(null)
+    return () => { managedPreviewRequest.current?.abort() }
+  }, [selectedSeriesId])
   async function previewVoice(provider: string, voice: string) {
     managedPreviewRequest.current?.abort()
     const option = voiceOptions.find(candidate => candidate.provider === provider && candidate.voice === voice)
@@ -445,8 +450,8 @@ export function SeriesCastPanel() {
     try {
       const blob = await fetchBlob(`/api/character-profiles/${option.characterProfileId}/voice-profiles/${id}/reference-audio`, { signal: controller.signal })
       if (controller.signal.aborted) return
-      setManagedPreview({ url: URL.createObjectURL(blob), name: option.displayName })
-      setMessage('正在播放角色管理的參考錄音，這不是新合成的示範句。')
+      setManagedPreview({ seriesId: selectedSeriesId, url: URL.createObjectURL(blob), name: option.displayName })
+      setMessage('已載入角色管理的參考錄音，可播放核對；這不是新合成的示範句。')
     } catch (error) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : '角色參考錄音無法播放。')
     }
@@ -529,6 +534,7 @@ export function SeriesCastPanel() {
     if (!seriesName.trim() || !narratorVoiceKey) return
     const selectedVoice = voiceOptions.find((option) => voiceKey(option) === narratorVoiceKey)
     if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const created = await fetchJson<SeriesDetails>('/api/series/', {
@@ -545,20 +551,22 @@ export function SeriesCastPanel() {
         },
       })
       setSeries((current) => [{ id: created.id, name: created.name, bookCount: 0, characterCount: 0, activeCastRevisionId: null, createdAt: '', updatedAt: '' }, ...current])
+      if (detailsGenerationRef.current !== generation) return
       setSelectedSeriesId(created.id)
       setDetails(created)
       setSeriesName('')
       setMessage('已建立系列；接著加入每一冊與固定角色聲線。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '建立系列失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '建立系列失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function addBook(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !bookId) return
+    if (!details || details.id !== selectedSeriesId || !bookId) return
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/books`, {
@@ -566,14 +574,15 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { bookId, volumeLabel: volumeLabel.trim() || '未命名冊次', sortOrder: details.books.length + 1 },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBookId('')
       setVolumeLabel('')
       setMessage('已加入系列。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '加入系列失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '加入系列失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
@@ -586,7 +595,7 @@ export function SeriesCastPanel() {
       (character) => character.characterProfileId === selectedCharacterProfileId,
     ) ?? false
     const resolvedName = usingLibraryCharacter ? libraryCharacter?.canonicalName ?? '' : characterName.trim()
-    if (!details || !resolvedName) return
+    if (!details || details.id !== selectedSeriesId || !resolvedName) return
     if (!usingLibraryCharacter && !characterVoiceKey) return
     if (usingLibraryCharacter && (!libraryCharacter?.isActive || libraryCharacterAlreadyLinked)) {
       setMessage('這個角色庫角色已停用或已被本系列使用，請重新選擇。')
@@ -599,6 +608,7 @@ export function SeriesCastPanel() {
       : manualCharacterVoiceOptions.find((option) => voiceKey(option) === characterVoiceKey)
     if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters`, {
@@ -616,15 +626,16 @@ export function SeriesCastPanel() {
           characterProfileId: usingLibraryCharacter ? selectedCharacterProfileId : null,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setCharacterName('')
       setSelectedCharacterProfileId('')
       setAliasCharacterId((current) => current || updated.characters.at(-1)?.id || '')
       setMessage(usingLibraryCharacter ? '已從角色庫選入這個角色，聲線沿用角色庫設定。' : '角色與固定聲線已加入這個系列。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '新增角色失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '新增角色失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
@@ -674,7 +685,7 @@ export function SeriesCastPanel() {
 
   async function saveCharacterProfileLink(event: FormEvent<HTMLFormElement>, character: SeriesCharacter) {
     event.preventDefault()
-    if (!details || formState === 'loading' || savingCharacterProfileId !== null) return
+    if (!details || details.id !== selectedSeriesId || formState === 'loading' || savingCharacterProfileId !== null) return
 
     const characterProfileId = characterProfileSelections[character.id] ?? ''
     const selectedProfile = characterProfiles.find((profile) => profile.id === characterProfileId)
@@ -693,6 +704,7 @@ export function SeriesCastPanel() {
       return
     }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     setSavingCharacterProfileId(character.id)
     try {
@@ -701,6 +713,7 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { characterProfileId: characterProfileId || null },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       if (!characterProfileId && expandedCharacterId === character.id) {
@@ -710,19 +723,22 @@ export function SeriesCastPanel() {
         ? `已將 ${character.canonicalName} 連結到角色庫「${selectedProfile.canonicalName}」；目前固定聲線與已啟用音訊不變。`
         : `已取消 ${character.canonicalName} 的角色庫連結；目前固定聲線與已啟用音訊不變。`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '儲存角色庫連結失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '儲存角色庫連結失敗。')
     } finally {
-      setSavingCharacterProfileId(null)
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) {
+        setSavingCharacterProfileId(null)
+        setFormState('idle')
+      }
     }
   }
 
   async function setPointOfViewCharacter(characterId: string) {
-    if (!details) return
+    if (!details || details.id !== selectedSeriesId) return
     if (!characterId && details.narrativeVoiceMode === 'PointOfViewInnerMonologue') {
       setMessage('視角角色內心敘事模式必須保留視角角色；請先切回獨立旁白再取消。')
       return
     }
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/point-of-view-character`, {
@@ -730,25 +746,27 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { characterId: characterId || null },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       setMessage(characterId
         ? '已設定視角角色；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
         : '已取消視角角色設定；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function configureNarrativeVoice(mode: NarrativeVoiceMode) {
-    if (!details || mode === details.narrativeVoiceMode) return
+    if (!details || details.id !== selectedSeriesId || mode === details.narrativeVoiceMode) return
     if (mode === 'PointOfViewInnerMonologue' && !details.pointOfViewCharacterId) {
       setMessage('請先選擇視角角色，才能啟用視角角色內心敘事。')
       return
     }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/narrative-voice`, {
@@ -759,21 +777,23 @@ export function SeriesCastPanel() {
           pointOfViewCharacterId: details.pointOfViewCharacterId,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       setMessage(mode === 'PointOfViewInnerMonologue'
         ? '已改用視角角色的聲線朗讀正文內心敘事；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
         : '已改回獨立旁白朗讀正文；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '設定正文敘事聲線失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '設定正文敘事聲線失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function addAlias(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !aliasCharacterId || !alias.trim()) return
+    if (!details || details.id !== selectedSeriesId || !alias.trim() || !details.characters.some(character => character.id === aliasCharacterId)) return
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters/${aliasCharacterId}/aliases`, {
@@ -781,13 +801,14 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { alias: alias.trim() },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setAlias('')
       setMessage('別名已加入；重複或跨角色衝突會由系列規則拒絕。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '加入別名失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '加入別名失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
@@ -837,6 +858,8 @@ export function SeriesCastPanel() {
     return <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10"><div className="library-state border-rose-300 text-rose-700">{message || '系列配音控制台暫時無法使用。'}</div></main>
   }
 
+  const renderGeneration = detailsGenerationRef.current
+
   return (
     <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
       <section className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
@@ -847,7 +870,7 @@ export function SeriesCastPanel() {
         <form className="mt-6 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={createSeries}>
           <label className="text-xs text-stone-500">新系列名稱<input className="auth-input mt-2" maxLength={200} onChange={(event) => setSeriesName(event.target.value)} required value={seriesName} /></label>
           {voiceOptions.length === 0 && <p role="status" className="text-sm text-amber-800">沒有可用聲線。請先到角色管理完成錄音、授權與 Ready 驗證；不會提供替代聲線。</p>}
-          {managedPreview && <div className="sm:col-span-3"><p>{managedPreview.name} · 角色管理參考錄音</p><audio autoPlay controls src={managedPreview.url} /></div>}
+          {managedPreview?.seriesId === selectedSeriesId && <div className="sm:col-span-3"><p>{managedPreview.name} · 角色管理參考錄音</p><audio autoPlay controls src={managedPreview.url} /></div>}
           <label className="text-xs text-stone-500">固定旁白聲線（角色管理）<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
           <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoiceKey} type="submit">建立系列</button>
         </form>
@@ -1140,6 +1163,7 @@ export function SeriesCastPanel() {
 
               {reviewEntries.length > 0 && (
                 <SpeechPlanReview
+                  key={details.id}
                   characterVoiceOptions={manualCharacterVoiceOptions}
                   characters={details.characters}
                   csrfToken={csrfToken}
@@ -1161,11 +1185,18 @@ export function SeriesCastPanel() {
                         characterProfileId: null,
                       },
                     })
+                    if (detailsGenerationRef.current !== renderGeneration) return null
                     setDetails(updated)
                     return updated.characters.find((character) => character.canonicalName === request.canonicalName) ?? null
                   }}
                   onDraftUpdated={(draft) => setDraftsByChapter((current) => ({ ...current, [draft.chapterId]: draft }))}
-                  onRebuildCreated={(created) => { setBatch({ ...created, members: [] }); void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`).then(setBatch).catch(() => undefined) }}
+                  onRebuildCreated={(created) => {
+                    if (detailsGenerationRef.current !== renderGeneration) return
+                    setBatch({ ...created, members: [] })
+                    void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`)
+                      .then(loaded => { if (detailsGenerationRef.current === renderGeneration) setBatch(loaded) })
+                      .catch(() => undefined)
+                  }}
                   seriesId={details.id}
                 />
               )}

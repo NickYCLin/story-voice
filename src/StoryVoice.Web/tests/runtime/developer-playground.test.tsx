@@ -91,3 +91,21 @@ it('切換專案路由時中止合成，晚到的音訊不會顯示在另一個�
   expect(container.querySelector('audio')).toBeNull()
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })
+
+it.each(['disabled-service', 'revoked-project', 'expired-voice'])('授權不可用時阻擋外部試聽：%s', async (condition) => {
+  const unavailable = {
+    ...overview,
+    serviceEnabled: condition !== 'disabled-service',
+    projects: overview.projects.map(project => ({
+      ...project,
+      status: condition === 'revoked-project' ? 'revoked' : project.status,
+      voices: project.voices.map(voice => ({ ...voice, status: condition === 'expired-voice' ? 'expired' : voice.status })),
+    })),
+  }
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json(unavailable))
+  await openPlayground()
+  const button = screen.getByRole('button', { name: '產生語音' })
+  expect(button.hasAttribute('disabled')).toBe(true)
+  await userEvent.click(button)
+  expect(requests).toHaveLength(0)
+})

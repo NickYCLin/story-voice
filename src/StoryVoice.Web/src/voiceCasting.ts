@@ -62,7 +62,7 @@ export function suggestCharacterVoices(
       usage.set(existing, (usage.get(existing) ?? 0) + 1)
     }
     if (manualOverrides.has(character.id)) { preserve('保留你手動選擇的聲線。'); continue }
-    if (narrator.provider === '3wa-voxcpm2') { preserve('克隆聲線需人工選擇已就緒的角色聲線。'); continue }
+    if (narrator.provider === '3wa-voxcpm2' || narrator.provider === 'local-clone') { preserve('克隆聲線需人工選擇已就緒的角色聲線。'); continue }
     const profile = profiles.find(item => item.id === character.characterProfileId && item.isActive)
     if (!profile) { preserve('尚未連結啟用中的角色庫資料，保留目前聲線。'); continue }
     const targetGender = gender(profile.gender)
