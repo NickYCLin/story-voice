@@ -186,9 +186,16 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     [InlineData("inactive")]
     [InlineData("invalid_pcm")]
     [InlineData("gateway")]
+    [InlineData("failed")]
+    [InlineData("other_owner")]
+    [InlineData("wrong_character")]
+    [InlineData("pending")]
+    [InlineData("awaiting_confirmation")]
+    [InlineData("reactivated")]
     public async Task Managed_preview_uses_only_local_gateway_and_never_mutates_originals(string scenario)
     {
         var ct = TestContext.Current.CancellationToken;
+        var previewSucceeds = scenario is "success" or "reactivated";
         var external = new FakeThreeWaSynthesisClient([], "audio/wav");
         var local = new ManagedPreviewGateway(scenario == "gateway");
         var root = Path.Combine(Path.GetTempPath(), "managed-preview-" + Guid.NewGuid());
@@ -219,7 +226,13 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         var character = await CreateCharacterProfileAsync(owner, ct);
         var digest = Convert.ToHexString(SHA256.HashData(reference));
         var profile = await SeedReadyCloneVoiceProfileAsync(app, character, ct,
-            scenario == "tampered" ? new string('a', 64) : digest);
+            scenario == "tampered" ? new string('a', 64) : digest,
+            scenario switch
+            {
+                "pending" => CharacterVoiceProfileStatus.Pending,
+                "awaiting_confirmation" => CharacterVoiceProfileStatus.AwaitingTranscriptConfirmation,
+                _ => CharacterVoiceProfileStatus.Ready
+            });
         if (scenario == "unauthorized")
         {
             await using var scope = app.Services.CreateAsyncScope();
@@ -235,17 +248,36 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             (await db.CharacterProfiles.SingleAsync(value => value.Id == character, ct)).Deactivate(DateTimeOffset.UtcNow);
             await db.SaveChangesAsync(ct);
         }
+        if (scenario == "failed")
+        {
+            await using var scope = app.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            (await db.CharacterVoiceProfiles.SingleAsync(value => value.Id == profile, ct)).MarkFailed(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(ct);
+        }
         var profilesPath = $"/api/character-profiles/{character}/voice-profiles";
         var before = await owner.GetStringAsync(profilesPath, ct);
+        if (scenario == "reactivated")
+        {
+            using var deactivate = await owner.PostWithCsrfAsync(
+                $"/api/character-profiles/{character}/deactivate", new { }, ct);
+            Assert.Equal(HttpStatusCode.OK, deactivate.StatusCode);
+            using var activate = await owner.PostWithCsrfAsync(
+                $"/api/character-profiles/{character}/activate", new { }, ct);
+            Assert.Equal(HttpStatusCode.OK, activate.StatusCode);
+        }
         await using var checkScope = app.Services.CreateAsyncScope();
         var checkDb = checkScope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
         var jobs = await checkDb.NarrationJobs.CountAsync(ct);
-        using var response = await owner.PostWithCsrfAsync(
-            $"{profilesPath}/{profile}/preview", new { text = "  你好，台灣。  " }, ct);
-        Assert.Equal(scenario == "success" ? HttpStatusCode.OK
-            : scenario == "unauthorized" ? HttpStatusCode.BadRequest
+        using var otherOwner = await app.CreateAuthenticatedClientAsync(ct);
+        var previewCharacter = scenario == "wrong_character" ? await CreateCharacterProfileAsync(owner, ct) : character;
+        using var response = await (scenario == "other_owner" ? otherOwner : owner).PostWithCsrfAsync(
+            $"/api/character-profiles/{previewCharacter}/voice-profiles/{profile}/preview", new { text = "  你好，台灣。  " }, ct);
+        Assert.Equal(previewSucceeds ? HttpStatusCode.OK
+            : scenario is "unauthorized" or "failed" or "pending" or "awaiting_confirmation" ? HttpStatusCode.BadRequest
+            : scenario is "other_owner" or "wrong_character" ? HttpStatusCode.NotFound
             : HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Equal(scenario is "success" or "gateway" ? 1 : 0, local.Calls);
+        Assert.Equal(previewSucceeds || scenario == "gateway" ? 1 : 0, local.Calls);
         Assert.Equal(0, external.SubmitCount);
         Assert.Equal(0, external.StatusCount);
         Assert.Equal(0, external.ResultCount);
@@ -260,13 +292,13 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             Assert.Equal("你好,台灣。", request.ReferenceTranscript);
             Assert.Equal("你好，台灣。", request.Text);
         }
-        if (scenario == "success")
+        if (previewSucceeds)
         {
             Assert.Equal("audio/wav", response.Content.Headers.ContentType?.MediaType);
             Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
             Assert.Equal(CreatePcmWav(1, 24_000), await response.Content.ReadAsByteArrayAsync(ct));
         }
-        else if (scenario != "unauthorized")
+        else if (scenario is not ("unauthorized" or "failed" or "pending" or "awaiting_confirmation" or "other_owner" or "wrong_character"))
         {
             Assert.Contains(scenario switch
             {
@@ -275,6 +307,63 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
                 "gateway" => "local_clone_preview_gateway_unavailable",
                 _ => "local_clone_preview_asset_invalid"
             }, await response.Content.ReadAsStringAsync(ct));
+        }
+    }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("missing_file")]
+    [InlineData("missing_directory")]
+    [InlineData("tampered")]
+    [InlineData("other_owner")]
+    public async Task Reference_playback_preserves_assets_and_handles_unavailable_recordings(string scenario)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var external = new FakeThreeWaSynthesisClient([], "audio/wav");
+        var root = Path.Combine(Path.GetTempPath(), "reference-lifecycle-" + Guid.NewGuid());
+        var directory = Path.Combine(root, "seeded");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var reference = CreatePcmWav(sampleRate: 48_000);
+            var path = Path.Combine(directory, "reference.wav");
+            if (scenario != "missing_file" && scenario != "missing_directory")
+            {
+                await File.WriteAllBytesAsync(path, reference, cancellationToken);
+            }
+            if (scenario == "missing_directory") Directory.Delete(directory);
+            using var app = CreatePreviewFactory(external).WithWebHostBuilder(builder =>
+                builder.UseSetting("CharacterVoiceStorage:RootPath", root));
+            using var owner = await app.CreateAuthenticatedClientAsync(cancellationToken);
+            using var otherOwner = await app.CreateAuthenticatedClientAsync(cancellationToken);
+            var character = await CreateCharacterProfileAsync(owner, cancellationToken);
+            var profile = await SeedReadyCloneVoiceProfileAsync(app, character, cancellationToken,
+                scenario == "tampered" ? new string('a', 64) : Convert.ToHexString(SHA256.HashData(reference)));
+            var profilesPath = $"/api/character-profiles/{character}/voice-profiles";
+            var before = await owner.GetStringAsync(profilesPath, cancellationToken);
+            using var response = await (scenario == "other_owner" ? otherOwner : owner).GetAsync(
+                $"{profilesPath}/{profile}/reference-audio", cancellationToken);
+            Assert.Equal(scenario switch
+            {
+                "success" => HttpStatusCode.OK,
+                "tampered" => HttpStatusCode.BadRequest,
+                _ => HttpStatusCode.NotFound
+            }, response.StatusCode);
+            if (scenario == "success")
+            {
+                Assert.Equal(reference, await response.Content.ReadAsByteArrayAsync(cancellationToken));
+                Assert.True(response.Headers.CacheControl?.NoStore);
+            }
+            Assert.Equal(before, await owner.GetStringAsync(profilesPath, cancellationToken));
+            if (File.Exists(path)) Assert.Equal(reference, await File.ReadAllBytesAsync(path, cancellationToken));
+            Assert.Equal(0, external.SubmitCount);
+            Assert.Equal(0, external.StatusCount);
+            Assert.Equal(0, external.ResultCount);
+            Assert.Equal(0, external.DownloadCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 
@@ -1226,7 +1315,8 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         WebApplicationFactory<Program> appFactory,
         Guid characterProfileId,
         CancellationToken cancellationToken,
-        string? referenceHash = null)
+        string? referenceHash = null,
+        CharacterVoiceProfileStatus status = CharacterVoiceProfileStatus.Ready)
     {
         await using var scope = appFactory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
@@ -1247,8 +1337,14 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             8,
             ownerId,
             now);
-        profile.AttachDraftTranscript("seeded-profile-task", "你好，台灣。", now);
-        profile.ConfirmTranscript("你好，台灣。", now);
+        if (status != CharacterVoiceProfileStatus.Pending)
+        {
+            profile.AttachDraftTranscript("seeded-profile-task", "你好，台灣。", now);
+        }
+        if (status == CharacterVoiceProfileStatus.Ready)
+        {
+            profile.ConfirmTranscript("你好，台灣。", now);
+        }
         var operation = CharacterVoiceProfileOperation.StageCreate(
             Guid.NewGuid(),
             ownerId,
