@@ -110,3 +110,34 @@ it('離開角色後完成的試講不會播放，也不會建立無法回收的 
   await act(async () => completePreview!(new Response('synthetic-audio', { headers: { 'Content-Type': 'audio/wav' } })))
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })
+
+it.each([503, 504])('試講回 %s 後顯示錯誤並恢復按鈕，不自動重送或建立音訊', async status => {
+  const user = userEvent.setup()
+  readyProfile = true
+  await openLibrary()
+  await user.click(screen.getByRole('button', { name: '試講', exact: true }))
+  await user.click(screen.getByRole('button', { name: /播放試講/ }))
+  const message = status === 503 ? '本機試音暫時無法使用。' : '試講失敗（504）'
+  await act(async () => completePreview!(status === 503
+    ? Response.json({ detail: message, code: 'local_clone_preview_gateway_unavailable' }, { status })
+    : new Response('<html>Gateway Timeout</html>', { status })))
+
+  expect(screen.getByText(message)).toBeTruthy()
+  expect(screen.getByRole('button', { name: /播放試講/ }).hasAttribute('disabled')).toBe(false)
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/preview'))).toHaveLength(1)
+})
+
+it('切換角色後晚到的試講失敗不會顯示在新角色', async () => {
+  const user = userEvent.setup()
+  readyProfile = true
+  await openLibrary()
+  await user.click(screen.getByRole('button', { name: '試講', exact: true }))
+  await user.click(screen.getByRole('button', { name: /播放試講/ }))
+  await user.click(screen.getByRole('button', { name: /小晴/ }))
+  await act(async () => completePreview!(Response.json(
+    { detail: '舊角色的試講失敗' }, { status: 503 })))
+
+  expect(screen.queryByText('舊角色的試講失敗')).toBeNull()
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+})

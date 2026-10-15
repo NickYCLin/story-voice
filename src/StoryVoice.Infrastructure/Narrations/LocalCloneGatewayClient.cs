@@ -49,12 +49,16 @@ public sealed class LocalCloneGatewayClient(
         };
         httpRequest.Headers.TryAddWithoutValidation(TokenHeader, options.Value.InternalToken);
 
+        using var requestLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestLifetime.CancelAfter(httpClient.Timeout);
+        var requestToken = requestLifetime.Token;
+
         try
         {
             using var response = await httpClient.SendAsync(
                 httpRequest,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                requestToken);
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning(
@@ -74,11 +78,11 @@ public sealed class LocalCloneGatewayClient(
                 throw ContractInvalid(LocalCloneGatewayContractStage.DeclaredLength);
             }
 
-            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var responseStream = await response.Content.ReadAsStreamAsync(requestToken);
             var content = await ReadBoundedAsync(
                 responseStream,
                 options.Value.MaximumResponseBytes,
-                cancellationToken);
+                requestToken);
             if (content.LongLength != declaredLength)
             {
                 throw ContractInvalid(LocalCloneGatewayContractStage.BodyLength);

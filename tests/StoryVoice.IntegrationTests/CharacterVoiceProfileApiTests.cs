@@ -255,6 +255,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         if (scenario != "missing") Assert.Equal(reference, await File.ReadAllBytesAsync(path, ct));
         if (local.LastRequest is { } request)
         {
+            Assert.False(local.LastCancellationToken.CanBeCanceled);
             Assert.Equal(reference, request.ReferenceAudio);
             Assert.Equal("你好,台灣。", request.ReferenceTranscript);
             Assert.Equal("你好，台灣。", request.Text);
@@ -281,10 +282,12 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
     {
         public int Calls { get; private set; }
         public LocalCloneGatewayRequest? LastRequest { get; private set; }
+        public CancellationToken LastCancellationToken { get; private set; }
         public Task<LocalCloneGatewayAudio> SynthesizeAsync(LocalCloneGatewayRequest request, CancellationToken ct)
         {
             Calls++;
             LastRequest = request;
+            LastCancellationToken = ct;
             if (fail) throw new LocalClonePreviewUnavailableException(LocalClonePreviewFailureKind.GatewayUnavailable);
             return Task.FromResult(new LocalCloneGatewayAudio(CreatePcmWav(1, 24_000), "audio/wav"));
         }
