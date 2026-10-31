@@ -1,12 +1,59 @@
 # StoryVoice 開發進度
 
-最後更新：2026-09-08（帳號續播、配音恢復／監測、共用請求限制與播放器等待狀態）
+最後更新：2026-10-31（分支整合、ASR 人工確認回退與待辦重新盤點）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-10-31 現況與下一步
+
+本輪以遠端主線及舊克隆配音分支逐項比對；下列現況優先於後面的歷史交付紀錄。
+本輪未檢查或變更正式主機，因此歷史上的部署、feature flag、憑證效期與 GPU 結果
+均不能視為今日仍有效的正式環境證據。
+
+- 舊分支的 local-clone provider、逐句回退與長錄音截短，主線已有後續實作；整合保留
+  主線的受管聲線、素材雜湊、不可變版本與完整性收據。不恢復「非中文字略過」、
+  部分合成成功即發布或自動改用 Edge／其他角色的舊行為。
+- ASR 失敗但遠端任務未失敗時，已補回使用上傳預期逐字稿的待確認流程；已有草稿
+  不覆寫、重複刷新不自動確認。仍須本人校正並明確確認；任務本身失敗仍標記失敗。
+- 倍速、帳號續播、章節／句子／角色時間軸、角色 AI 補完、規則式聲線建議、單句試聽、
+  音量標準化、Edge／VoAI 有界平行、用量耗時與 BlueMagpie 失敗批次恢復均已有實作，
+  不應再次列為從零開發的待辦。local-clone 尚未回傳逐 turn timing，不能套用其他引擎
+  的時間軸完成狀態。
+- 新建系列的旁白與人物都必須明確選擇同 owner、啟用、Ready 且具正式配音同意的
+  角色庫基礎克隆聲線；不是內建固定聲線目錄，也不自動猜測或替換旁白。
+
+接續工作依優先順序區分如下：
+
+| 優先 | 工作 | 驗收／決策邊界 |
+|---|---|---|
+| P0 | 前端開發相依安全更新 | 本輪 `npm audit` 回報 2 high、2 moderate，涉及 Vite、Vitest／mocker 與 undici；需另批更新 lockfile 並重跑前端測試、兩種 base path 建置與 audit，不因既有 CI 曾成功便略過 |
+| P1 | 部署版本核對與正式配音驗收 | 維護窗口、備份、API／Worker 版本、模型與授權、長篇完整性、失敗恢復、實際聽感及資源壓力均須獨立驗證；不得直接啟用正式 flag |
+| P1 | local-clone 逐 turn 時間軸 | provider 現在沒有回傳逐 turn timing；需要實測時長及整合覆蓋後，才能宣稱新系列配音有章節／句子同步 |
+| P1 | Safari／行動裝置與背景播放 | 真實裝置、鎖屏、長時間播放、弱網路、成品 MP3 時長及正式帳號同步，不能以 jsdom 或 Playwright WebKit 代替 |
+| P2 | 公開聲線與營運 | 核准 entries／demo、creator 發布／撤銷、正式金鑰 create／rotate／revoke smoke、私有書庫 Git 外 backfill；涉及資料異動須另行授權 |
+| P2 | BlueMagpie 長篇與多副本 | GPU／LLM 共存、模型授權與 production image 稽核；共用 idempotency／single-flight／公平排程仍缺，Redis 限流不等於完整多副本支援 |
+| 後續 | 商業化與完整導演 | 訂閱／付款／帳單、可靠計費與硬額度、金額估算、通用 OpenAI-compatible Provider、whisper／scene context／音效／BGM／混音 |
+
+### 本輪驗證範圍
+
+- Release 建置通過；701 項單元測試、311 項整合測試通過（含隔離 PostgreSQL），
+  其中角色聲線 API 49 項涵蓋 ASR 回退、人工確認意圖與既有安全邊界。
+- 前端 162 項靜態契約、102 項互動測試、lint、根路徑與 `/StoryVoice/` 建置通過。
+- EF migration 模型一致性檢查通過，NuGet 全部專案目前未回報已知漏洞。
+  前端完整 audit 仍有上述開發相依漏洞；`npm audit --omit=dev` 為 0，不能把前者寫成通過。
+- 使用獨立 Compose project 與新資料 volumes 建置及啟動 PostgreSQL／Redis／API／Web，
+  readiness、Web 與 session route 回 200，私人角色 API 匿名回 401，關閉的公開 catalog 回 404。
+  Chrome 實際確認首頁、未登入工作區的登入畫面與公開聲線未啟用空狀態。
+- 預設 Docker build network 曾發生 Alpine DNS 錯誤，後續以臨時的 build network host
+  override 完成建置；沒有修改 repository 的容器網路或主機 DNS 設定。
+- 未啟動 Worker／GPU 或外部合成，不使用正式帳號、正文、錄音與金鑰；上述結果不代表
+  已部署正式站、完成真實 ASR／GPU 合成，或通過完整書籍及實機播放驗收。
+
+## 歷史交付紀錄
 
 ## 2026-09-08 播放器等待音訊
 
@@ -199,11 +246,12 @@
 manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文字設計」已在 API、
 試音、系列 admission 與 Worker 全部 fail closed；既有描述資料保留但不可視為可用聲線。
 可用流程只剩「上傳錄音克隆」（需要選擇同意類型：本人親自錄製／已取得明確同意／
-已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒）。角色建好
+已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒；ASR 失敗但
+遠端任務未失敗時，可改以預期逐字稿等待人工確認，不會自動成為 Ready）。角色建好
 之後，在「多角色系列配音」加入角色時可以直接從角色庫選入，同一個角色（與其聲線）
-能跨多個系列重複使用，不用每個
-系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
-聲線的舊流程。合成時依對白情緒查找對應情境聲線，找不到就退回基礎聲線；一般
+能跨多個系列重複使用，不用每個系列各自重建一次。新系列配音的旁白及角色都必須
+明確選擇角色管理中符合條件的基礎克隆聲線，不提供固定 Edge 聲線備援。合成時依
+對白情緒查找對應情境聲線，找不到就退回基礎聲線；一般
 對白仍可使用旁白 fallback，但 `InnerMonologue` 缺少 POV 角色聲線時會 fail closed，
 不會悄悄改用另一位旁白。
 
@@ -213,8 +261,8 @@ manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文�
 直接刪除，要先從系列移除。
 
 角色管理頁面另外還有：
-- **啟用／停用狀態**：`CharacterProfile.IsActive`，停用只是介面上標記淡出，不影響
-  已經連結的系列配音（停用不會把角色從系列裡移除，也不會讓現有朗讀失敗）。
+- **啟用／停用狀態**：`CharacterProfile.IsActive`，停用不會移除系列角色或刪除既有音檔，
+  但受管聲線的新設定與配音 admission 必須通過角色啟用檢查，不可視為純介面標記。
 - **角色 ID 顯示與複製**、建立時間／最後更新時間。
 - **摘要卡片**：基礎聲線狀態、情境聲線數量（已就緒／5）、樣本語料時數（所有克隆
   聲線參考音檔的 ffprobe 時長加總，API 容器已補上 ffmpeg）、最近進行中的任務。
@@ -246,10 +294,8 @@ JSON/音訊回應大小。
 現存 legacy Clone task 的 ASR 轉錄失敗，不能視為可用聲線。
 
 已知限制（刻意排除的範圍，不是漏做）：
-- **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆
-  流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以混用 Edge 固定聲線與具備
-  合法授權、已完成的 3wa Clone 聲線；旁白本身永遠只能是 Edge 聲線。任何缺少 Ready
-  Clone Base 或仍含 Design profile 的 3wa 角色會在設定、staging 與 Worker 三層被拒絕。
+- **旁白需明確選聲**：可選符合條件的角色庫克隆聲線，不會另建一份旁白錄音，
+  也不會自動改用台詞最多的角色。缺少可用受管聲線時拒絕新設定／配音。
 - 角色基本資料的 AI 補完已接本機 Ollama；實際模型品質與延遲仍需另行驗收。
 - 已新增 BlueMagpie BM1 作為第二個固定聲線引擎；只有內建女聲 `female_voice` 與男聲
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart

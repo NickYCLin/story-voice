@@ -13,12 +13,13 @@ SHA-256：`0990cc2b6bf85365345484056bbee39694dd4721f28be2688a091749e7f33e06`。
 沿用已存在的內部 gateway token。worker 只讀掛載角色錄音 volume。
 本次變更不建立 token、不執行合成、不切換任何正式音軌。
 
-新的不可變 provider 版本為 `local-clone-integrity-v2`，組合版本為
+目前不可變 provider 版本為 `local-clone-managed-voices-v3`，組合版本為
 `local-clone-complete-turns-v2`。舊 cast 的版本不可直接改寫或冒用新版本。
 每個使用中的角色必須具有同一 owner 的 Ready Clone、已確認逐字稿，以及現有正式
 朗讀同意紀錄。參考錄音以實際 bytes 驗證 SHA-256，並防止路徑或符號連結逸出儲存根目錄。
-旁白沿用既有策略：選取 manifest 中文字量最多的角色作為 fallback。
-這是組合策略，不是自動判定故事主角；部署前必須核對角色配置。
+旁白與人物都必須明確選擇角色管理中的可用基礎克隆聲線（`localclone:<profile-id>`）；
+角色必須屬於同 owner、啟用且授權有效。不再選取台詞最多的角色作為旁白 fallback，
+也不允許以 Edge 或其他外部聲線自動替代。
 
 英文、數字與符號不能因為不是 CJK 就略過；僅 Unicode 標點與空白可明確略過。
 整段失敗可逐句重試，但任何有意義句子失敗都使工作失敗，不會發布部分音訊。
