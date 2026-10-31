@@ -1,6 +1,6 @@
 # StoryVoice 開發進度
 
-最後更新：2026-10-31（分支整合、ASR 人工確認回退與待辦重新盤點）
+最後更新：2026-10-31（分支整合、ASR 人工確認回退、前端開發相依安全更新）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
@@ -25,12 +25,17 @@
   的時間軸完成狀態。
 - 新建系列的旁白與人物都必須明確選擇同 owner、啟用、Ready 且具正式配音同意的
   角色庫基礎克隆聲線；不是內建固定聲線目錄，也不自動猜測或替換旁白。
+- 前端開發相依的 2 high、2 moderate 漏洞已修正：Vite 更新為 8.2.4，Vitest 與
+  mocker 更新為 5.0.5，jsdom 間接使用的 undici 更新為 7.30.1。未新增 override、
+  調低 audit 門檻或升級其他直接相依；相關工具的必要間接相依一併更新 lockfile。
+  乾淨 `npm ci` 後完整 `npm audit` 為 0，162 項靜態契約、102 項互動測試、lint、
+  根路徑及 `/StoryVoice/` 建置均通過；另以現有 Dockerfile 完成 Node 22 Alpine 的
+  Web 映像建置。這只驗證 repository 與本機建置，不代表正式站更新。
 
 接續工作依優先順序區分如下：
 
 | 優先 | 工作 | 驗收／決策邊界 |
 |---|---|---|
-| P0 | 前端開發相依安全更新 | 本輪 `npm audit` 回報 2 high、2 moderate，涉及 Vite、Vitest／mocker 與 undici；需另批更新 lockfile 並重跑前端測試、兩種 base path 建置與 audit，不因既有 CI 曾成功便略過 |
 | P1 | 部署版本核對與正式配音驗收 | 維護窗口、備份、API／Worker 版本、模型與授權、長篇完整性、失敗恢復、實際聽感及資源壓力均須獨立驗證；不得直接啟用正式 flag |
 | P1 | local-clone 逐 turn 時間軸 | provider 現在沒有回傳逐 turn timing；需要實測時長及整合覆蓋後，才能宣稱新系列配音有章節／句子同步 |
 | P1 | Safari／行動裝置與背景播放 | 真實裝置、鎖屏、長時間播放、弱網路、成品 MP3 時長及正式帳號同步，不能以 jsdom 或 Playwright WebKit 代替 |
@@ -44,7 +49,7 @@
   其中角色聲線 API 49 項涵蓋 ASR 回退、人工確認意圖與既有安全邊界。
 - 前端 162 項靜態契約、102 項互動測試、lint、根路徑與 `/StoryVoice/` 建置通過。
 - EF migration 模型一致性檢查通過，NuGet 全部專案目前未回報已知漏洞。
-  前端完整 audit 仍有上述開發相依漏洞；`npm audit --omit=dev` 為 0，不能把前者寫成通過。
+  整合盤點時前端完整 audit 曾有 4 項開發相依漏洞；同日後續安全更新後，完整 audit 為 0。
 - 使用獨立 Compose project 與新資料 volumes 建置及啟動 PostgreSQL／Redis／API／Web，
   readiness、Web 與 session route 回 200，私人角色 API 匿名回 401，關閉的公開 catalog 回 404。
   Chrome 實際確認首頁、未登入工作區的登入畫面與公開聲線未啟用空狀態。
