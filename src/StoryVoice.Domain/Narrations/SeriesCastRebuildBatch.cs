@@ -241,6 +241,21 @@ public sealed class SeriesCastRebuildBatch
         _updatedAt = now;
     }
 
+    public void ResumeFailed(IReadOnlySet<Guid> completedJobIds, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(completedJobIds);
+        if (_status != SeriesCastRebuildBatchStatus.Failed
+            || _members.Any(member => member.StagedNarrationJobId is null)
+            || completedJobIds.Any(id => _members.All(member => member.StagedNarrationJobId != id)))
+            throw new InvalidOperationException("只有成員工作完整的失敗批次可以恢復。");
+        EnsureTransitionTime(now);
+        foreach (var member in _members)
+            member.Resume(completedJobIds.Contains(member.StagedNarrationJobId!.Value));
+        _status = _members.All(member => member.Status == SeriesCastRebuildMemberStatus.Ready)
+            ? SeriesCastRebuildBatchStatus.ReadyToActivate : SeriesCastRebuildBatchStatus.Building;
+        _updatedAt = now;
+    }
+
     /// <summary>
     /// Reconciles a persisted terminal member snapshot after a worker retry or concurrent completion.
     /// It deliberately accepts members that are already terminal so a lost final batch transition

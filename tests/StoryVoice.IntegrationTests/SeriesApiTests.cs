@@ -7,11 +7,27 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryVoice.Application.Books;
 using StoryVoice.Application.Series;
+using StoryVoice.Infrastructure.Persistence;
 
 namespace StoryVoice.IntegrationTests;
 
 public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
+    [Fact]
+    public async Task Legacy_operator_catalog_cannot_introduce_unmanaged_voices()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var configured = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.PostConfigure<SeriesVoiceCatalogOptions>(options => options.Voices =
+            [
+                new SeriesVoiceCatalogEntry { Provider = "edge", Voice = "synthetic-voice", DisplayName = "測試聲線", Locale = "zh-TW",
+                    Gender = "female", MinimumAge = 18, MaximumAge = 40, CharacterTags = ["calm", "健談"] },
+            ])));
+        using var owner = await configured.CreateAuthenticatedClientAsync(ct);
+        var response = await owner.GetFromJsonAsync<SeriesVoiceOptionResponse[]>("/api/series/voice-options", ct);
+        Assert.Empty(response!);
+    }
+
     [Fact]
     public async Task Series_endpoints_require_authentication_and_mutations_require_csrf()
     {
@@ -31,55 +47,12 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
     }
 
     [Fact]
-    public async Task Voice_catalog_requires_formal_admission_before_listing_private_bluemagpie_voices()
+    public async Task Enabling_legacy_provider_does_not_add_unmanaged_voices()
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var response = await client.GetAsync("/api/series/voice-options", cancellationToken);
-        var voices = await response.Content.ReadFromJsonAsync<SeriesVoiceOptionResponse[]>(
-            cancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(voices);
-        Assert.Contains(voices, voice =>
-            voice.Provider == "voai"
-            && voice.Voice == "v1:Neo:佑希:預設"
-            && voice.DisplayName == "VoAI 佑希（Neo／預設）"
-            && voice.Locale == "zh-TW");
-        Assert.Contains(voices, voice =>
-            string.Equals(voice.Provider, "3wa-voxcpm2", StringComparison.OrdinalIgnoreCase)
-            && voice.FormalNarrationAvailable);
-        Assert.DoesNotContain(voices, voice =>
-            string.Equals(voice.Provider, "bluemagpie", StringComparison.OrdinalIgnoreCase));
-
+        var ct = TestContext.Current.CancellationToken;
         using var enabledFactory = CreateFormalBlueMagpieFactory();
-        using var enabledClient = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var enabledVoices = await enabledClient.GetFromJsonAsync<SeriesVoiceOptionResponse[]>(
-            "/api/series/voice-options",
-            cancellationToken);
-        Assert.NotNull(enabledVoices);
-        var blueMagpieVoices = enabledVoices
-            .Where(voice => voice.Provider == "bluemagpie")
-            .OrderBy(voice => voice.Voice)
-            .ToArray();
-        Assert.Collection(
-            blueMagpieVoices,
-            voice =>
-            {
-                Assert.Equal("female_voice", voice.Voice);
-                Assert.Equal("BlueMagpie 內建女聲（私人自架）", voice.DisplayName);
-                Assert.Equal("zh-TW", voice.Locale);
-                Assert.True(voice.FormalNarrationAvailable);
-                Assert.Equal("private-self-hosted", voice.UsageScope);
-            },
-            voice =>
-            {
-                Assert.Equal("hung_yi_lee", voice.Voice);
-                Assert.Equal("BlueMagpie 內建男聲（私人自架）", voice.DisplayName);
-                Assert.Equal("zh-TW", voice.Locale);
-                Assert.True(voice.FormalNarrationAvailable);
-                Assert.Equal("private-self-hosted", voice.UsageScope);
-            });
+        using var client = await enabledFactory.CreateAuthenticatedClientAsync(ct);
+        Assert.Empty((await client.GetFromJsonAsync<SeriesVoiceOptionResponse[]>("/api/series/voice-options", ct))!);
     }
 
     [Fact]
@@ -114,147 +87,20 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             problem.RootElement.GetProperty("code").GetString());
     }
 
-    [Fact]
-    public async Task Formal_bluemagpie_series_configuration_is_flag_gated_owner_scoped_atomic_and_neutral()
+    [Theory]
+    [InlineData("edge", "zh-TW-YunJheNeural")]
+    [InlineData("bluemagpie", "female_voice")]
+    [InlineData("voai", "v1:Neo:佑希:預設")]
+    public async Task Legacy_voice_switch_is_rejected_atomically(string provider, string voice)
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var disabledClient = await factory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var disabledCreateResponse = await disabledClient.PostWithCsrfAsync(
-            "/api/series",
-            new
-            {
-                name = $"未開放本機配音 {Guid.NewGuid():N}",
-                narratorProvider = "bluemagpie",
-                narratorVoice = "female_voice",
-                narratorRate = "+0%",
-                narratorPitch = "+0Hz",
-                narratorVolume = "+0%",
-                defaultSpeakerPauseMs = 180
-            },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, disabledCreateResponse.StatusCode);
-
-        using var enabledFactory = CreateFormalBlueMagpieFactory();
-        using var ownerClient = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        using var otherOwnerClient = await enabledFactory.CreateAuthenticatedClientAsync(cancellationToken);
-        var series = await CreateSeriesAsync(ownerClient, $"原子聲線切換 {Guid.NewGuid():N}", cancellationToken);
-        using var addCharacterResponse = await ownerClient.PostWithCsrfAsync(
-            $"/api/series/{series.Id}/characters",
-            new
-            {
-                canonicalName = "褚冥漾",
-                role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-YunJheNeural",
-                rate = "-8%",
-                pitch = "+2Hz",
-                volume = "-3%",
-                notes = (string?)null
-            },
-            cancellationToken);
-        var withCharacter = await addCharacterResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, addCharacterResponse.StatusCode);
-        var character = Assert.Single(Assert.IsType<StorySeriesDetailsResponse>(withCharacter).Characters);
-
-        var validSwitch = new
-        {
-            narratorProvider = "bluemagpie",
-            narratorVoice = "female_voice",
-            characters = new[]
-            {
-                new { characterId = character.Id, voiceProvider = "bluemagpie", voice = "hung_yi_lee" }
-            }
-        };
-        using var missingCsrfResponse = await ownerClient.PutAsJsonAsync(
-            $"/api/series/{series.Id}/voices",
-            validSwitch,
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, missingCsrfResponse.StatusCode);
-
-        using var incompleteResponse = await ownerClient.PutWithCsrfAsync(
-            $"/api/series/{series.Id}/voices",
-            new
-            {
-                narratorProvider = "bluemagpie",
-                narratorVoice = "female_voice",
-                characters = Array.Empty<object>()
-            },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, incompleteResponse.StatusCode);
-
-        using var mixedProviderResponse = await ownerClient.PutWithCsrfAsync(
-            $"/api/series/{series.Id}/voices",
-            new
-            {
-                narratorProvider = "bluemagpie",
-                narratorVoice = "female_voice",
-                characters = new[]
-                {
-                    new { characterId = character.Id, voiceProvider = "edge", voice = "zh-TW-HsiaoChenNeural" }
-                }
-            },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, mixedProviderResponse.StatusCode);
-
-        using var foreignOwnerResponse = await otherOwnerClient.PutWithCsrfAsync(
-            $"/api/series/{series.Id}/voices",
-            validSwitch,
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.NotFound, foreignOwnerResponse.StatusCode);
-
-        using var switchResponse = await ownerClient.PutWithCsrfAsync(
-            $"/api/series/{series.Id}/voices",
-            validSwitch,
-            cancellationToken);
-        var switched = await switchResponse.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.OK, switchResponse.StatusCode);
-        Assert.NotNull(switched);
-        Assert.Equal("bluemagpie", switched.NarratorProvider);
-        Assert.Equal("female_voice", switched.NarratorVoice);
-        Assert.Equal("+0%", switched.NarratorRate);
-        Assert.Equal("+0Hz", switched.NarratorPitch);
-        Assert.Equal("+0%", switched.NarratorVolume);
-        var switchedCharacter = Assert.Single(switched.Characters);
-        Assert.Equal("bluemagpie", switchedCharacter.VoiceProvider);
-        Assert.Equal("hung_yi_lee", switchedCharacter.Voice);
-        Assert.Equal("+0%", switchedCharacter.Rate);
-        Assert.Equal("+0Hz", switchedCharacter.Pitch);
-        Assert.Equal("+0%", switchedCharacter.Volume);
-        Assert.Null(switched.ActiveCastRevisionId);
-
-        using var mixedAddResponse = await ownerClient.PostWithCsrfAsync(
-            $"/api/series/{series.Id}/characters",
-            new
-            {
-                canonicalName = "冰炎",
-                role = "Supporting",
-                voiceProvider = "edge",
-                voice = "zh-TW-YunJheNeural",
-                rate = "+0%",
-                pitch = "+0Hz",
-                volume = "+0%",
-                notes = (string?)null
-            },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, mixedAddResponse.StatusCode);
-
-        using var unsupportedParametersResponse = await ownerClient.PutWithCsrfAsync(
-            $"/api/series/{series.Id}/characters/{character.Id}",
-            new
-            {
-                canonicalName = character.CanonicalName,
-                role = character.Role,
-                voiceProvider = "bluemagpie",
-                voice = "female_voice",
-                rate = "+5%",
-                pitch = "+0Hz",
-                volume = "+0%",
-                notes = (string?)null
-            },
-            cancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, unsupportedParametersResponse.StatusCode);
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(ct);
+        var series = await CreateSeriesAsync(client, "不可使用內建聲線", ct);
+        using var rejected = await client.PutWithCsrfAsync($"/api/series/{series.Id}/voices",
+            new { narratorProvider = provider, narratorVoice = voice, characters = Array.Empty<object>() }, ct);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        var after = await client.GetFromJsonAsync<StorySeriesDetailsResponse>($"/api/series/{series.Id}", ct);
+        Assert.Equal(series.NarratorVoice, after!.NarratorVoice);
     }
 
     [Fact]
@@ -311,18 +157,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             cancellationToken);
         Assert.Equal(HttpStatusCode.OK, voiceResponse.StatusCode);
         Assert.NotNull(voices);
-        var expectedVoices = new[]
-        {
-            "zh-TW-HsiaoChenNeural",
-            "zh-TW-YunJheNeural",
-            "zh-TW-HsiaoYuNeural",
-            "zh-CN-YunxiNeural",
-            "zh-CN-YunjianNeural",
-            "zh-CN-XiaoxiaoNeural",
-            "zh-CN-XiaoyiNeural"
-        };
-        Assert.All(expectedVoices, expectedVoice =>
-            Assert.Contains(voices, voice => voice.Voice == expectedVoice));
+        Assert.Equal(created.NarratorVoice, Assert.Single(voices).Voice);
 
         using var ownerBListResponse = await ownerBClient.GetAsync("/api/series", cancellationToken);
         var ownerBList = await ownerBListResponse.Content.ReadFromJsonAsync<StorySeriesSummaryResponse[]>(
@@ -337,7 +172,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
 
         using var duplicateResponse = await ownerAClient.PostWithCsrfAsync(
             "/api/series",
-            CreateSeriesBody("公開測試系列"),
+            CreateSeriesBody("公開測試系列", created.NarratorVoice),
             cancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, duplicateResponse.StatusCode);
     }
@@ -368,8 +203,8 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             {
                 canonicalName = "艾莉絲",
                 role = "Supporting",
-                voiceProvider = "edge",
-                voice = "zh-TW-HsiaoChenNeural",
+                voiceProvider = "local-clone",
+                voice = await client.ManagedVoiceAsync(cancellationToken, "actor"),
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -420,8 +255,8 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             {
                 canonicalName = "艾莉絲隊長",
                 role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-HsiaoYuNeural",
+                voiceProvider = "local-clone",
+                voice = await client.ManagedVoiceAsync(cancellationToken, "actor-new"),
                 rate = "-5%",
                 pitch = "+2Hz",
                 volume = "-3%",
@@ -438,7 +273,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
         var updatedCharacter = Assert.Single(updated.Characters);
         Assert.Equal("艾莉絲隊長", updatedCharacter.CanonicalName);
         Assert.Equal("Main", updatedCharacter.Role);
-        Assert.Equal("zh-TW-HsiaoYuNeural", updatedCharacter.Voice);
+        Assert.Equal(await client.ManagedVoiceAsync(cancellationToken, "actor-new"), updatedCharacter.Voice);
         Assert.Equal("隊長", Assert.Single(updatedCharacter.Aliases).Value);
 
         using var getResponse = await client.GetAsync($"/api/series/{series.Id}", cancellationToken);
@@ -463,8 +298,8 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             {
                 canonicalName = "褚冥漾",
                 role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-YunJheNeural",
+                voiceProvider = "local-clone",
+                voice = await ownerAClient.ManagedVoiceAsync(cancellationToken, "default"),
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -530,8 +365,8 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
             {
                 canonicalName = "越權角色",
                 role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-YunJheNeural",
+                voiceProvider = "local-clone",
+                voice = await ownerAClient.ManagedVoiceAsync(cancellationToken, "default"),
                 rate = "+0%",
                 pitch = "+0Hz",
                 volume = "+0%",
@@ -541,11 +376,11 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(HttpStatusCode.NotFound, ownerBMutatesForeignSeriesResponse.StatusCode);
     }
 
-    private static object CreateSeriesBody(string name) => new
+    private static object CreateSeriesBody(string name, string voice = "localclone:11111111111111111111111111111111") => new
     {
         name,
-        narratorProvider = "edge",
-        narratorVoice = "zh-TW-YunJheNeural",
+        narratorProvider = "local-clone",
+        narratorVoice = voice,
         narratorRate = "-5%",
         narratorPitch = "+0Hz",
         narratorVolume = "+0%",
@@ -581,7 +416,7 @@ public sealed class SeriesApiTests(ApiFactory factory) : IClassFixture<ApiFactor
     {
         using var response = await client.PostWithCsrfAsync(
             "/api/series",
-            CreateSeriesBody(name),
+            CreateSeriesBody(name, await client.ManagedVoiceAsync(cancellationToken)),
             cancellationToken);
         var created = await response.Content.ReadFromJsonAsync<StorySeriesDetailsResponse>(
             cancellationToken);

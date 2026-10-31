@@ -22,6 +22,36 @@ public sealed class CastEpochActivationPublisherPostgreSqlTests
     private const string CurrentMigration = "20260811052803_AddAtomicCastEpochActivation";
 
     [Fact]
+    public async Task Retained_failed_cohort_does_not_break_next_epoch_and_blocks_lossy_schema_downgrade()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var postgres = await StartPostgresAsync(ct);
+        var graph = await CreateReadyGraphAsync(postgres.GetConnectionString(), "retained-failure",
+            useLegacyPredecessors: false, migration: "20261013042545_PreserveNarrationTracks", ct);
+        await using (var db = CreateContext(graph.ConnectionString))
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO series_cast_rebuild_batches
+                    ("Id", "OwnerId", "SeriesId", "BaseActiveCastRevisionId", "DraftCastRevisionId", "CohortMembershipRevision", "CreatedAt", "UpdatedAt", "Status")
+                SELECT {Guid.NewGuid()}, "OwnerId", "SeriesId", "BaseActiveCastRevisionId", "DraftCastRevisionId", "CohortMembershipRevision", "CreatedAt", "UpdatedAt", 'Failed'
+                FROM series_cast_rebuild_batches WHERE "Id" = {graph.BatchId};
+                """, ct);
+            var blocked = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>()
+                .MigrateAsync("20260908025724_AddNarrationAttemptUsage", ct));
+            Assert.Contains("retained rebuild history", blocked.MessageText);
+            Assert.Equal(2, await db.SeriesCastRebuildBatches.CountAsync(ct));
+            Assert.Contains("20261013042545_PreserveNarrationTracks", await db.Database.GetAppliedMigrationsAsync(ct));
+        }
+        await ActivateAsync(graph, ct);
+        var second = await AddReadyBatchAsync(graph, graph.RevisionId, graph.JobIds, 2, "retained-second", ct);
+        var result = await ActivateAsync(graph.ConnectionString, graph.OwnerId, graph.SeriesId,
+            second.BatchId, graph.ActivatedAt.AddMinutes(1), ct);
+        Assert.Equal(2, result.EpochNumber);
+        await using var proof = CreateContext(graph.ConnectionString);
+        Assert.Equal(1, await proof.SeriesCastRebuildBatches.CountAsync(batch => batch.Status == SeriesCastRebuildBatchStatus.Failed, ct));
+    }
+
+    [Fact]
     public async Task Latest_migration_upgrades_ready_graph_and_first_activation_reloads_complete_epoch()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

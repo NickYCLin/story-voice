@@ -1,0 +1,87 @@
+rule_files:
+  - /etc/storyvoice/alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: collector outage waits two minutes and suppresses missing-worker noise
+    interval: 1m
+    input_series:
+      - series: up{job="storyvoice-collector"}
+        values: 1 0+0x14
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: StoryVoiceCollectorUnavailable
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: StoryVoiceCollectorUnavailable
+        exp_alerts:
+          - exp_labels: {severity: warning, service: metrics-collector}
+            exp_annotations: {summary: 監測收集端持續無法讀取}
+      - eval_time: 12m
+        alertname: StoryVoiceWorkerMetricsMissing
+        exp_alerts: []
+  - name: a reachable empty collector reports missing workers after ten minutes
+    interval: 1m
+    input_series:
+      - series: up{job="storyvoice-collector"}
+        values: 1+0x12
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: StoryVoiceWorkerMetricsMissing
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: StoryVoiceWorkerMetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, service: storyvoice-worker, job: storyvoice-worker}
+            exp_annotations: {summary: 收集端可用但沒有 Worker 指標}
+  - name: idle workers and cancellations do not become synthesis failures
+    interval: 1m
+    input_series:
+      - series: up{job="storyvoice-collector"}
+        values: 1+0x20
+      - series: storyvoice_bluemagpie_active_attempts{job="storyvoice-worker",instance="test-one"}
+        values: 0+0x20
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-one",outcome="cancelled"}
+        values: 0+10x20
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: StoryVoiceWorkerMetricsMissing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: StoryVoiceBlueMagpieRepeatedFailures
+        exp_alerts: []
+  - name: sustained repeated failures trigger after the pending period
+    interval: 1m
+    input_series:
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-one",outcome="failed"}
+        values: 0+1x20
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-one",outcome="success"}
+        values: 0+0x20
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: StoryVoiceBlueMagpieRepeatedFailures
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: StoryVoiceBlueMagpieRepeatedFailures
+        exp_alerts:
+          - exp_labels: {severity: warning, service: storyvoice-worker}
+            exp_annotations: {summary: BlueMagpie 在短時間內多次合成失敗}
+  - name: counter resets do not turn two failures into a large increase
+    interval: 1m
+    input_series:
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-one",outcome="failed"}
+        values: 0 1 2 0+0x17
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: StoryVoiceBlueMagpieRepeatedFailures
+        exp_alerts: []
+  - name: failure ratios aggregate attempts across workers
+    interval: 1m
+    input_series:
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-one",outcome="failed"}
+        values: 0+1x20
+      - series: storyvoice_bluemagpie_attempts_total{job="storyvoice-worker",instance="test-two",outcome="success"}
+        values: 0+9x20
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: StoryVoiceBlueMagpieRepeatedFailures
+        exp_alerts: []

@@ -26,5 +26,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/StoryVoice.Api/StoryVoice.Api.csproj" />
     <ProjectReference Include="../../src/StoryVoice.Infrastructure/StoryVoice.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/StoryVoice.Worker/StoryVoice.Worker.csproj" />
   </ItemGroup>
 </Project>

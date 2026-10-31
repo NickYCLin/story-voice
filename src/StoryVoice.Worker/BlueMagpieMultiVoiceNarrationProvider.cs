@@ -1,4 +1,5 @@
 using System.Text;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
@@ -19,7 +20,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
     IBlueMagpieChunkCache chunkCache,
     IFfmpegAudioComposer composer,
     IOptions<BlueMagpieOptions> options,
-    ILogger<BlueMagpieMultiVoiceNarrationProvider> logger) : IVersionedMultiVoiceNarrationProvider
+    ILogger<BlueMagpieMultiVoiceNarrationProvider> logger,
+    BlueMagpieNarrationMetrics metrics) : IVersionedMultiVoiceNarrationProvider
 {
     public const string PinnedProviderVersion = BlueMagpieOptions.PinnedProviderVersion;
     internal const int MaximumTextScalarsPerChunk = BlueMagpieOptions.MaximumTextScalarsPerChunk;
@@ -33,7 +35,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
 
     public string ProviderVersion => PinnedProviderVersion;
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -43,7 +45,14 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         var completed = false;
         var cacheHits = 0;
         var cacheMisses = 0;
+        var totalChunks = 0;
+        long resolvedAudioBytes = 0;
+        double? audioSeconds = null;
+        var outcome = "failed";
+        var stopwatch = Stopwatch.StartNew();
+        var lastProgressLog = TimeSpan.Zero;
         Guid? cacheJobId = null;
+        metrics.StartAttempt();
         try
         {
             var configured = ValidateRuntime();
@@ -58,7 +67,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 throw PermanentFailure("BlueMagpie narration exceeds the safe chunk budget.");
             }
 
-            var totalChunks = checked((int)estimatedChunkCount);
+            totalChunks = checked((int)estimatedChunkCount);
 
             if (string.IsNullOrWhiteSpace(outputPath))
             {
@@ -77,7 +86,6 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
 
             var audioSegments = new List<FfmpegAudioSegment>(totalChunks);
             var completedChunks = 0;
-            long resolvedAudioBytes = 0;
             await using var cacheScope = await chunkCache.OpenScopeAsync(
                 cacheContext,
                 cancellationToken);
@@ -89,6 +97,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                     cancellationToken.ThrowIfCancellationRequested();
                     var effectivePauseBeforeMs = chunkIndex == 0 ? turn.PauseBeforeMs : 0;
                     var text = turn.Chunks[chunkIndex];
+                    var chunkStarted = Stopwatch.GetTimestamp();
                     var entry = await cacheScope.GetOrCreateAsync(
                         new BlueMagpieChunkCacheRequest(
                             completedChunks,
@@ -102,14 +111,27 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                             BlueMagpieOptions.PinnedModelRevision),
                         async synthesisCancellationToken =>
                         {
-                            var result = await client.SynthesizeAsync(
-                                text,
-                                turn.Voice,
-                                synthesisCancellationToken);
-                            ValidateSynthesisResult(result, turn.Voice);
-                            return result.Content;
+                            var providerStarted = Stopwatch.GetTimestamp();
+                            var providerOutcome = "failed";
+                            try
+                            {
+                                var result = await client.SynthesizeAsync(text, turn.Voice, synthesisCancellationToken);
+                                ValidateSynthesisResult(result, turn.Voice);
+                                providerOutcome = "success";
+                                return result.Content;
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                providerOutcome = "cancelled";
+                                throw;
+                            }
+                            finally
+                            {
+                                metrics.RecordProviderCall(Stopwatch.GetElapsedTime(providerStarted), providerOutcome);
+                            }
                         },
                         cancellationToken);
+                    metrics.ResolveChunk(Stopwatch.GetElapsedTime(chunkStarted), entry.CacheHit, entry.AudioBytes);
                     if (entry.CacheHit)
                     {
                         cacheHits++;
@@ -130,8 +152,16 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                         entry.InputWavPath,
                         turn.Volume,
                         effectivePauseBeforeMs,
-                        DeleteInputAfterNormalization: false));
+                        DeleteInputAfterNormalization: false,
+                        TurnIndex: turnIndex));
                     completedChunks++;
+                    if (stopwatch.Elapsed - lastProgressLog >= TimeSpan.FromSeconds(60))
+                    {
+                        logger.LogInformation(
+                            "BlueMagpie synthesis progress for job {JobId}: {ResolvedChunks}/{TotalChunks} chunks, {CacheHits} cache hits, {ElapsedSeconds} s",
+                            cacheJobId, completedChunks, totalChunks, cacheHits, stopwatch.Elapsed.TotalSeconds);
+                        lastProgressLog = stopwatch.Elapsed;
+                    }
                     if (progressCallback is not null)
                     {
                         await progressCallback(
@@ -141,7 +171,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 }
             }
 
-            await composer.ComposeAsync(
+            var result = await composer.ComposeAsync(
                 audioSegments,
                 fullOutputPath,
                 OutputSampleRate,
@@ -151,27 +181,35 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 throw new InvalidOperationException("BlueMagpie audio composition produced no MP3 output.");
             }
 
+            audioSeconds = BlueMagpieNarrationMetrics.MeasureAudioSeconds(result, preparedTurns.Count);
+            outcome = "success";
             completed = true;
+            return result;
         }
         catch (OperationCanceledException)
         {
+            outcome = "cancelled";
             throw;
         }
         catch (PermanentNarrationProviderException)
         {
+            outcome = "rejected";
             throw;
         }
         catch (BlueMagpieChunkCacheCapacityException exception)
         {
+            outcome = "cache_capacity";
             throw new InvalidOperationException("bluemagpie_cache_capacity_exhausted", exception);
         }
         catch (SeriesVoicePreviewUnavailableException exception)
             when (exception.FailureKind == SeriesVoicePreviewFailureKind.ContractViolation)
         {
+            outcome = "rejected";
             throw PermanentFailure("BlueMagpie gateway violated the pinned audio contract.", exception);
         }
         catch (SeriesVoicePreviewUnavailableException exception)
         {
+            outcome = "provider_unavailable";
             // The current client deliberately collapses gateway 503, Redis contention, connect
             // failures and timeouts to this availability exception. These are retryable and must
             // never be upgraded to a permanent job failure.
@@ -179,6 +217,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
         }
         catch (Exception exception)
         {
+            outcome = "failed";
             throw new InvalidOperationException(
                 "bluemagpie_provider_failed",
                 exception);
@@ -190,15 +229,15 @@ public sealed class BlueMagpieMultiVoiceNarrationProvider(
                 TryDeleteFile(ownedOutputPath);
             }
 
-            if (cacheJobId is not null && cacheHits + cacheMisses > 0)
-            {
-                logger.LogInformation(
-                    "BlueMagpie cache activity for job {JobId}: {CacheHits} hits and {CacheMisses} misses",
-                    cacheJobId,
-                    cacheHits,
-                    cacheMisses);
-            }
+            stopwatch.Stop();
+            metrics.FinishAttempt(stopwatch.Elapsed, outcome, audioSeconds, cacheHits > 0);
+            logger.LogInformation(
+                "BlueMagpie synthesis finished for job {JobId}: {Outcome}, {ElapsedSeconds} s, {ResolvedChunks}/{TotalChunks} chunks, {CacheHits} hits, {CacheMisses} misses, {ResolvedAudioBytes} bytes, {AudioSeconds} audio seconds, RTF {RealTimeFactor}",
+                cacheJobId, outcome, stopwatch.Elapsed.TotalSeconds, cacheHits + cacheMisses, totalChunks,
+                cacheHits, cacheMisses, resolvedAudioBytes, audioSeconds,
+                outcome == "success" && audioSeconds is > 0 ? stopwatch.Elapsed.TotalSeconds / audioSeconds.Value : (double?)null);
         }
+
     }
 
     internal static IReadOnlyList<string> SplitText(string text)

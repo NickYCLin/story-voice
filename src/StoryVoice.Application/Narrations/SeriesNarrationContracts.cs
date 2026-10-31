@@ -29,6 +29,12 @@ public interface IStagedNarrationBatchProgressService
 
 public interface ISeriesNarrationService
 {
+    Task<IReadOnlyList<SeriesNarrationRebuildResponse>?> ListRebuildsAsync(
+        Guid seriesId, CancellationToken cancellationToken);
+
+    Task<SeriesNarrationRebuildResponse?> RetryRebuildAsync(
+        Guid seriesId, Guid batchId, CreateSeriesNarrationRebuildRequest request, CancellationToken cancellationToken);
+
     Task<SeriesNarrationRebuildResponse?> CreateRebuildAsync(
         Guid seriesId,
         CreateSeriesNarrationRebuildRequest request,

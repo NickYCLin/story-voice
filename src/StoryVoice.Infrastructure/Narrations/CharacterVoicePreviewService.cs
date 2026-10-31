@@ -1,8 +1,9 @@
-using System.Net.Http.Headers;
+using System.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Persistence;
 
@@ -11,12 +12,11 @@ namespace StoryVoice.Infrastructure.Narrations;
 internal sealed class CharacterVoicePreviewService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
-    IThreeWaSynthesisClient synthesisClient,
-    IOptions<ThreeWaAiHubOptions> options) : ICharacterVoicePreviewService
+    ILocalCloneGatewayClient gatewayClient,
+    IOptions<LocalClonePreviewOptions> options,
+    IOptions<CharacterVoiceStorageOptions> storageOptions) : ICharacterVoicePreviewService
 {
     private const int MaximumPreviewTextLength = 200;
-    private const int PollIntervalMs = 1_500;
-    private const int MaxPollAttempts = 40;
 
     public async Task<VoiceProfilePreviewAudio?> PreviewAsync(
         Guid characterProfileId,
@@ -37,7 +37,7 @@ internal sealed class CharacterVoicePreviewService(
         }
 
         var ownerId = EnsureCurrentOwnerId();
-        var profile = await dbContext.CharacterVoiceProfiles.SingleOrDefaultAsync(
+        var profile = await dbContext.CharacterVoiceProfiles.AsNoTracking().SingleOrDefaultAsync(
             candidate => candidate.OwnerId == ownerId
                 && candidate.CharacterProfileId == characterProfileId
                 && candidate.Id == profileId,
@@ -79,86 +79,54 @@ internal sealed class CharacterVoicePreviewService(
             }
         }
 
-        var mode = profile.Mode == CharacterVoiceProfileMode.Clone ? "ultimate_clone" : "design";
-        var handle = await synthesisClient.SubmitAsync(
-            new ThreeWaSynthesisRequest(text, mode, profile.VoiceProfileTaskId, profile.VoicePromptText),
-            cancellationToken);
-
-        string status;
-        var attempt = 0;
-        while (true)
+        if (!options.Value.Enabled)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            status = await synthesisClient.GetTaskStatusAsync(handle.StatusUrl, cancellationToken);
-            if (IsTerminalStatus(status))
+            throw new LocalClonePreviewUnavailableException(LocalClonePreviewFailureKind.Disabled);
+        }
+
+        if (!await dbContext.CharacterProfiles.AsNoTracking().AnyAsync(
+                character => character.Id == characterProfileId && character.OwnerId == ownerId
+                    && character.IsActive, cancellationToken))
+        {
+            throw new LocalClonePreviewUnavailableException(LocalClonePreviewFailureKind.NotConfigured);
+        }
+
+        byte[] reference;
+        string transcript;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(profile.ReferenceAudioRelativePath)
+                || string.IsNullOrWhiteSpace(profile.ReferenceAudioSha256)
+                || profile.TranscriptConfirmedAt is null
+                || string.IsNullOrWhiteSpace(profile.Transcript))
             {
-                break;
+                throw new InvalidDataException("The managed reference is incomplete.");
             }
 
-            attempt++;
-            if (attempt > MaxPollAttempts)
+            var path = CharacterVoiceReferenceFiles.Resolve(
+                storageOptions.Value.RootPath, profile.ReferenceAudioRelativePath);
+            reference = await PrivateAssetFileValidator.ReadBoundedAsync(
+                path, LocalClonePreviewOptions.MaximumReferenceAudioBytes, cancellationToken);
+            PrivateAssetFileValidator.VerifySha256(reference, profile.ReferenceAudioSha256);
+            LocalClonePcmWaveValidator.ValidateReference(reference);
+            transcript = CharacterVoiceTranscriptCanonicalizer.Normalize(profile.Transcript);
+            if (System.Text.Encoding.UTF8.GetByteCount(transcript) > LocalClonePreviewOptions.MaximumTranscriptBytes)
             {
-                throw new InvalidOperationException("試講合成逾時未完成，請稍後再試。");
+                throw new InvalidDataException("The managed transcript is too large.");
             }
-
-            await Task.Delay(PollIntervalMs, cancellationToken);
         }
-
-        if (!IsSuccessStatus(status))
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or IOException
+            or UnauthorizedAccessException or NotSupportedException or SecurityException)
         {
-            throw new InvalidOperationException("試講合成失敗。");
+            throw new LocalClonePreviewUnavailableException(LocalClonePreviewFailureKind.AssetInvalid, exception);
         }
 
-        var artifacts = await synthesisClient.GetResultArtifactsAsync(handle.ResultUrl, cancellationToken);
-        var selectedArtifact = artifacts
-            .Select(artifact => new
-            {
-                Artifact = artifact,
-                ContentType = NormalizeAudioContentType(artifact.MimeType),
-            })
-            .FirstOrDefault(candidate => candidate.ContentType is not null)
-            ?? throw new InvalidOperationException("試講合成沒有回傳可用的音訊。");
-        if (string.IsNullOrWhiteSpace(handle.ArtifactUrlTemplate))
-        {
-            throw new InvalidOperationException("試講合成沒有回傳可下載的音訊位置。");
-        }
-
-        using var buffer = new BoundedMemoryStream(options.Value.MaximumAudioResponseBytes);
-        await synthesisClient.DownloadArtifactAsync(
-            handle.ArtifactUrlTemplate,
-            selectedArtifact.Artifact.Id,
-            buffer,
-            cancellationToken);
-
-        if (buffer.Length == 0)
-        {
-            throw new InvalidOperationException("試講合成沒有產生可用音訊。");
-        }
-
-        return new VoiceProfilePreviewAudio(buffer.ToArray(), selectedArtifact.ContentType!);
-    }
-
-    private static bool IsTerminalStatus(string status) =>
-        IsSuccessStatus(status) || status is "failed" or "error" or "cancelled" or "canceled";
-
-    private static bool IsSuccessStatus(string status) =>
-        status is "succeeded" or "success" or "completed";
-
-    private static string? NormalizeAudioContentType(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        if (!MediaTypeHeaderValue.TryParse(value, out var contentType)
-            || string.IsNullOrWhiteSpace(contentType.MediaType)
-            || !contentType.MediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return contentType.ToString();
+        cancellationToken.ThrowIfCancellationRequested();
+        // One submission to the pinned private gateway; never retry or fall back to
+        // an external provider. A disconnected browser must not cancel in-flight GPU work.
+        var audio = await gatewayClient.SynthesizeAsync(
+            new LocalCloneGatewayRequest(text, transcript, reference), CancellationToken.None);
+        return new VoiceProfilePreviewAudio(audio.Content, audio.ContentType);
     }
 
     private Guid EnsureCurrentOwnerId()
@@ -171,57 +139,4 @@ internal sealed class CharacterVoicePreviewService(
         return currentUser.UserId;
     }
 
-    private sealed class BoundedMemoryStream(int maximumBytes) : MemoryStream
-    {
-        public override void SetLength(long value)
-        {
-            if (value > maximumBytes)
-            {
-                throw TooLarge();
-            }
-
-            base.SetLength(value);
-        }
-
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            EnsureFits(count);
-            base.Write(buffer, offset, count);
-        }
-
-        public override void Write(ReadOnlySpan<byte> buffer)
-        {
-            EnsureFits(buffer.Length);
-            base.Write(buffer);
-        }
-
-        public override Task WriteAsync(
-            byte[] buffer,
-            int offset,
-            int count,
-            CancellationToken cancellationToken)
-        {
-            EnsureFits(count);
-            return base.WriteAsync(buffer, offset, count, cancellationToken);
-        }
-
-        public override ValueTask WriteAsync(
-            ReadOnlyMemory<byte> buffer,
-            CancellationToken cancellationToken = default)
-        {
-            EnsureFits(buffer.Length);
-            return base.WriteAsync(buffer, cancellationToken);
-        }
-
-        private void EnsureFits(int bytesToWrite)
-        {
-            if (maximumBytes < 1 || Position > maximumBytes - bytesToWrite)
-            {
-                throw TooLarge();
-            }
-        }
-
-        private static InvalidOperationException TooLarge() =>
-            new("試講音訊超過允許大小。");
-    }
 }

@@ -1,0 +1,5 @@
+# Local/CI ingestion tests only. Normal metrics deployments do not publish OTLP on the host.
+services:
+  metrics-collector:
+    ports:
+      - "127.0.0.1:15318:4318"

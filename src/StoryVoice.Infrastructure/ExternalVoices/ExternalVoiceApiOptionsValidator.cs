@@ -18,6 +18,13 @@ internal sealed class ExternalVoiceApiOptionsValidator(
         ValidateLimits(options, failures);
         ValidateConsumers(options, failures);
 
+        if (options.SharedPreAuthenticationRateLimitEnabled
+            && (options.SharedPreAuthenticationHashKey is not { Length: 64 }
+                || !options.SharedPreAuthenticationHashKey.All(Uri.IsHexDigit)))
+        {
+            failures.Add("Shared pre-authentication limits require a 32-byte hexadecimal hashing key.");
+        }
+
         if (options.Enabled)
         {
             var local = localCloneOptions.Value;

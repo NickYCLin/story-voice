@@ -9,7 +9,6 @@ public sealed class MultiCharacterNarrationOptionsTests
     [InlineData("3WA-VOXCPM2", "3wa-voxcpm2-api-v1", "3wa-voxcpm2-turn-concat-v2", "mixed-audio-to-mp3-concat-v1")]
     [InlineData("voai", "voai-voice-api-v1", "voai-speech-turn-concat-v1", "wav-32khz-to-mp3-concat-v1")]
     [InlineData("bluemagpie", "bm1-d2d7ef3e81456915eb7a3cfe2446a9f19417c21b", "bluemagpie-pcm16-concat-v1", "wav-48khz-mono-to-mp3-concat-v1")]
-    [InlineData("local-clone", "local-clone-cosyvoice3-0.5b-v1", "local-clone-turn-concat-v1", "wav-24khz-mono-to-mp3-concat-v1")]
     public void Provider_metadata_is_resolved_per_synthesis_provider(
         string provider,
         string expectedProviderVersion,

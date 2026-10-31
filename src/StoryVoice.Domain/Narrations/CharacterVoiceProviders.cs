@@ -8,6 +8,11 @@ namespace StoryVoice.Domain.Narrations;
 /// </summary>
 public static class CharacterVoiceProviders
 {
+    public const string LocalClone = "local-clone";
+    public static bool UsesCloneProfiles(string provider) =>
+        string.Equals(provider, LocalClone, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(provider, ThreeWaVoxCpm2, StringComparison.OrdinalIgnoreCase);
+
     public const string Edge = "edge";
 
     public const string VoAi = "voai";
@@ -21,16 +26,4 @@ public static class CharacterVoiceProviders
     /// synthesis can also fall back to plain Edge voices turn-by-turn — see
     /// <c>ThreeWaVoxCpm2NarrationProvider</c> in the Worker project.</summary>
     public const string ThreeWaVoxCpm2 = "3wa-voxcpm2";
-
-    /// <summary>The privately self-hosted CosyVoice3 clone provider reached through the
-    /// StoryVoice local-clone gateway. Like <see cref="ThreeWaVoxCpm2"/>, characters resolve to
-    /// their linked Ready Clone <c>CharacterVoiceProfile</c> at synthesis time; the reference
-    /// recording never leaves the host.</summary>
-    public const string LocalClone = "local-clone";
-
-    /// <summary>Providers whose characters are voiced from a linked clone profile rather than a
-    /// fixed catalog voice id.</summary>
-    public static bool UsesCloneProfiles(string? provider) =>
-        string.Equals(provider, ThreeWaVoxCpm2, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(provider, LocalClone, StringComparison.OrdinalIgnoreCase);
 }

@@ -3,18 +3,20 @@ namespace StoryVoice.Worker;
 public sealed record VoAiAudioSegment(
     string InputWavPath,
     string Volume,
-    int PauseBeforeMs);
+    int PauseBeforeMs,
+    int TurnIndex = 0);
 
 /// <summary>A provider-neutral WAV segment consumed by the shared ffmpeg composition seam.</summary>
 public sealed record FfmpegAudioSegment(
     string InputWavPath,
     string Volume,
     int PauseBeforeMs,
-    bool DeleteInputAfterNormalization = true);
+    bool DeleteInputAfterNormalization = true,
+    int TurnIndex = 0);
 
 public interface IVoAiAudioComposer
 {
-    Task ComposeAsync(
+    Task<MultiVoiceSynthesisResult> ComposeAsync(
         IReadOnlyList<VoAiAudioSegment> segments,
         string outputPath,
         CancellationToken cancellationToken);
@@ -22,7 +24,7 @@ public interface IVoAiAudioComposer
 
 public interface IFfmpegAudioComposer
 {
-    Task ComposeAsync(
+    Task<MultiVoiceSynthesisResult> ComposeAsync(
         IReadOnlyList<FfmpegAudioSegment> segments,
         string outputPath,
         int outputSampleRate,

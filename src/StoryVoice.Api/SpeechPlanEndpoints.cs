@@ -62,6 +62,56 @@ public static class SpeechPlanEndpoints
         .AddEndpointFilter<AntiforgeryEndpointFilter>()
         .WithName("RejectSpeechPlanSegment");
 
+        group.MapPut("/speech-plan-drafts/{draftId:guid}/segments/{segmentId:guid}/reassign", async (
+            Guid seriesId,
+            Guid draftId,
+            Guid segmentId,
+            ReassignSpeechSegmentRequest request,
+            ISpeechPlanService service,
+            CancellationToken cancellationToken) =>
+        {
+            var draft = await service.ReassignSegmentAsync(seriesId, draftId, segmentId, request, cancellationToken);
+            return draft is null ? Results.NotFound() : Results.Ok(draft);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("ReassignSpeechPlanSegment");
+
+        group.MapPost("/speech-plan-drafts/{draftId:guid}/segments/confirm-suggested", async (
+            Guid seriesId,
+            Guid draftId,
+            ConfirmSuggestedSpeechSegmentsRequest request,
+            ISpeechPlanService service,
+            CancellationToken cancellationToken) =>
+        {
+            var draft = await service.ConfirmSuggestedSegmentsAsync(seriesId, draftId, request, cancellationToken);
+            return draft is null ? Results.NotFound() : Results.Ok(draft);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("ConfirmSuggestedSpeechPlanSegments");
+
+        group.MapPost("/speech-plan-drafts/{draftId:guid}/segments/{segmentId:guid}/preview", async (
+            Guid seriesId,
+            Guid draftId,
+            Guid segmentId,
+            HttpContext httpContext,
+            ISpeechSegmentPreviewService service,
+            CancellationToken cancellationToken) =>
+        {
+            var preview = await service.PreviewSegmentAsync(seriesId, draftId, segmentId, cancellationToken);
+            if (preview is null)
+            {
+                return Results.NotFound();
+            }
+
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers.Pragma = "no-cache";
+            httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            httpContext.Response.ContentLength = preview.Content.LongLength;
+            return Results.File(preview.Content, preview.ContentType);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("PreviewSpeechPlanSegment");
+
         group.MapPost("/speech-plan-drafts/{draftId:guid}/confirm", async (
             Guid seriesId,
             Guid draftId,

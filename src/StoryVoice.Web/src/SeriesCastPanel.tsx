@@ -5,33 +5,27 @@ import { fetchBlob, fetchJson } from './api'
 import { useAuthedOutletContext } from './authOutletContext'
 import { CharacterVoiceProfilesPanel } from './CharacterVoiceProfilesPanel'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { NarrationUsagePanel } from './components/NarrationUsagePanel'
 import { SpeechPlanReview, type SeriesCharacterChoice, type SpeechPlanDraft } from './SpeechPlanReview'
 import type { BookDetails, BookSummary } from './types'
+import { suggestCharacterVoices, type CastingProfile, type CastingSuggestion, type CastingVoice } from './voiceCasting'
 
-const CUSTOM_VOICE_PROVIDERS = ['3wa-voxcpm2', 'local-clone']
-const isCustomVoiceProvider = (provider: string | null | undefined) => Boolean(provider && CUSTOM_VOICE_PROVIDERS.includes(provider))
-const EDGE_VOICE_PROVIDER = 'edge'
-const VOAI_VOICE_PROVIDER = 'voai'
-const BLUE_MAGPIE_PROVIDER = 'bluemagpie'
-const BLUE_MAGPIE_VOICES = [
-  { voice: 'female_voice', label: 'BlueMagpie 內建女聲' },
-  { voice: 'hung_yi_lee', label: 'BlueMagpie 內建男聲' },
-] as const
-type BlueMagpieVoice = typeof BLUE_MAGPIE_VOICES[number]['voice']
+const CUSTOM_VOICE_PROVIDER = 'local-clone'
 type NarrativeVoiceMode = 'IndependentNarrator' | 'PointOfViewInnerMonologue'
 
-type CharacterProfileSummary = {
+type CharacterProfileSummary = CastingProfile & {
   id: string
   canonicalName: string
   hasAvatar: boolean
   isActive: boolean
 }
 
-type VoiceOption = {
+type VoiceOption = CastingVoice & {
   provider: string
   voice: string
   displayName: string
   locale: string
+  characterProfileId: string | null
   formalNarrationAvailable: boolean
   usageScope: 'standard' | 'private-self-hosted'
 }
@@ -58,12 +52,10 @@ type SeriesBook = {
 
 type SeriesCharacter = SeriesCharacterChoice & {
   role: 'Main' | 'Supporting' | 'Minor'
-  voiceProvider: string
   rate: string
   pitch: string
   volume: string
   notes: string | null
-  characterProfileId: string | null
   aliases: Array<{ id: string; value: string }>
 }
 
@@ -97,8 +89,13 @@ type SeriesDetails = {
 
 type RebuildBatch = {
   id: string
-  status: 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
+  status: 'Draft' | 'Building' | 'ReadyToActivate' | 'Activated' | 'Failed'
   members: Array<{ id: string; bookId: string; status: string; stagedNarrationJobId: string | null }>
+}
+
+const rebuildStatusLabels: Record<string, string> = {
+  Draft: '待排程', Pending: '待排程', Building: '配音中', Ready: '已完成',
+  ReadyToActivate: '待啟用', Activated: '已啟用', Failed: '配音失敗',
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -139,10 +136,6 @@ export function SeriesCastPanel() {
   const [details, setDetails] = useState<SeriesDetails | null>(null)
   const [state, setState] = useState<LoadState>('loading')
   const [message, setMessage] = useState('')
-  const [blueMagpieVoice, setBlueMagpieVoice] = useState<BlueMagpieVoice>(BLUE_MAGPIE_VOICES[0].voice)
-  const [blueMagpiePreviewUrl, setBlueMagpiePreviewUrl] = useState<string | null>(null)
-  const [blueMagpiePreviewState, setBlueMagpiePreviewState] = useState<'idle' | 'loading'>('idle')
-  const blueMagpiePreviewRequest = useRef<AbortController | null>(null)
   const [localCloneAvailability, setLocalCloneAvailability] = useState<Record<string, LocalClonePreviewAvailability>>({})
   const [localClonePreviewingCharacterId, setLocalClonePreviewingCharacterId] = useState<string | null>(null)
   const [localClonePreviewAudio, setLocalClonePreviewAudio] = useState<LocalClonePreviewAudio | null>(null)
@@ -155,6 +148,8 @@ export function SeriesCastPanel() {
   const [narratorVoiceKey, setNarratorVoiceKey] = useState('')
   const [configuredNarratorVoiceKey, setConfiguredNarratorVoiceKey] = useState('')
   const [configuredCharacterVoiceKeys, setConfiguredCharacterVoiceKeys] = useState<Record<string, string>>({})
+  const [castingSuggestions, setCastingSuggestions] = useState<Record<string, CastingSuggestion>>({})
+  const manualVoiceOverrides = useRef(new Set<string>())
   const [bookId, setBookId] = useState('')
   const [volumeLabel, setVolumeLabel] = useState('')
   const [characterName, setCharacterName] = useState('')
@@ -168,6 +163,8 @@ export function SeriesCastPanel() {
   const [bookDetails, setBookDetails] = useState<Record<string, BookDetails>>({})
   const [draftsByChapter, setDraftsByChapter] = useState<Record<string, SpeechPlanDraft>>({})
   const [batch, setBatch] = useState<RebuildBatch | null>(null)
+  const [retryRightsAttested, setRetryRightsAttested] = useState(false)
+  const [retryingBatch, setRetryingBatch] = useState(false)
   const [activateDialogOpen, setActivateDialogOpen] = useState(false)
   const [expandedCharacterId, setExpandedCharacterId] = useState<string | null>(null)
   const [characterProfileSelections, setCharacterProfileSelections] = useState<Record<string, string>>({})
@@ -203,6 +200,15 @@ export function SeriesCastPanel() {
     // 側欄高亮 B、實際 details 是 A，之後所有表單都寫到錯的系列。
     const generation = detailsGenerationRef.current + 1
     detailsGenerationRef.current = generation
+    manualVoiceOverrides.current.clear()
+    setCastingSuggestions({})
+    setFormState('idle')
+    setSavingCharacterProfileId(null)
+    setMessage('')
+    setRetryingBatch(false)
+    setRetryRightsAttested(false)
+    setActivateDialogOpen(false)
+    setBatch(null)
     if (!seriesId) {
       setDetails(null)
       return
@@ -215,10 +221,17 @@ export function SeriesCastPanel() {
       setConfiguredCharacterVoiceKeys(Object.fromEntries(
         detail.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
       ))
-      setAliasCharacterId((current) => current || detail.characters[0]?.id || '')
+      setAliasCharacterId((current) => detail.characters.some(character => character.id === current) ? current : detail.characters[0]?.id ?? '')
       setBookId('')
       setVolumeLabel('')
       setBatch(null)
+      void fetchJson<RebuildBatch[]>(`/api/series/${seriesId}/narration-rebuilds`)
+        .then((batches) => {
+          if (detailsGenerationRef.current === generation) setBatch((current) => current ?? batches[0] ?? null)
+        })
+        .catch(() => {
+          if (detailsGenerationRef.current === generation) setMessage('無法讀取最近配音批次，請重新整理後再查看。')
+        })
       setExpandedCharacterId(null)
       setCharacterProfileSelections(Object.fromEntries(
         detail.characters.map((character) => [character.id, character.characterProfileId ?? '']),
@@ -246,6 +259,8 @@ export function SeriesCastPanel() {
       return
     }
 
+    manualVoiceOverrides.current.clear()
+    setCastingSuggestions({})
     setConfiguredNarratorVoiceKey(`${details.narratorProvider}\n${details.narratorVoice}`)
     setConfiguredCharacterVoiceKeys(Object.fromEntries(
       details.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
@@ -254,16 +269,6 @@ export function SeriesCastPanel() {
       details.characters.map((character) => [character.id, character.characterProfileId ?? '']),
     ))
   }, [details])
-
-  useEffect(() => () => {
-    if (blueMagpiePreviewUrl) URL.revokeObjectURL(blueMagpiePreviewUrl)
-  }, [blueMagpiePreviewUrl])
-
-  useEffect(() => () => {
-    const pending = blueMagpiePreviewRequest.current
-    blueMagpiePreviewRequest.current = null
-    pending?.abort()
-  }, [])
 
   useEffect(() => {
     const generation = localCloneAvailabilityGeneration.current + 1
@@ -359,17 +364,20 @@ export function SeriesCastPanel() {
   }, [details])
 
   useEffect(() => {
-    if (!details || !batch || batch.status !== 'Building') return
+    if (!details || details.id !== selectedSeriesId || !batch || batch.status !== 'Building') return
     // 批次可能在輪詢期間被清除（例如另一個分頁重建時清掉 Failed 批次，GET 變 404）；
     // 連續失敗三次就停止追蹤，不要無限空轉。
     let consecutiveFailures = 0
+    const controller = new AbortController()
     const timer = window.setInterval(() => {
-      fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}`)
+      fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}`, { signal: controller.signal })
         .then((updated) => {
+          if (controller.signal.aborted) return
           consecutiveFailures = 0
           setBatch(updated)
         })
         .catch(() => {
+          if (controller.signal.aborted) return
           consecutiveFailures += 1
           if (consecutiveFailures >= 3) {
             window.clearInterval(timer)
@@ -378,8 +386,8 @@ export function SeriesCastPanel() {
           }
         })
     }, 2_000)
-    return () => window.clearInterval(timer)
-  }, [batch, details])
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [batch, details, selectedSeriesId])
 
   const eligibleBooks = useMemo(() => {
     const memberIds = new Set(details?.books.map((member) => member.bookId) ?? [])
@@ -388,9 +396,7 @@ export function SeriesCastPanel() {
 
   const manualCharacterVoiceOptions = useMemo(() => {
     if (!details) return []
-    return voiceOptions.filter((option) => !isCustomVoiceProvider(option.provider)
-      && (option.provider === details.narratorProvider
-        || (isCustomVoiceProvider(details.narratorProvider) && option.provider === EDGE_VOICE_PROVIDER)))
+    return voiceOptions.filter((option) => option.provider === details.narratorProvider)
   }, [details, voiceOptions])
 
   const configuredNarratorVoice = useMemo(
@@ -400,9 +406,7 @@ export function SeriesCastPanel() {
 
   const configuredCharacterVoiceOptions = useMemo(() => {
     if (!configuredNarratorVoice) return []
-    return voiceOptions.filter((option) => option.provider === configuredNarratorVoice.provider
-      || (isCustomVoiceProvider(configuredNarratorVoice.provider)
-        && option.provider === EDGE_VOICE_PROVIDER))
+    return voiceOptions.filter((option) => option.provider === configuredNarratorVoice.provider)
   }, [configuredNarratorVoice, voiceOptions])
 
   useEffect(() => {
@@ -410,7 +414,7 @@ export function SeriesCastPanel() {
     setCharacterVoiceKey((current) => manualCharacterVoiceOptions.some((option) => voiceKey(option) === current)
       ? current
       : manualCharacterVoiceOptions[0] ? voiceKey(manualCharacterVoiceOptions[0]) : '')
-    if (!isCustomVoiceProvider(details.narratorProvider)) {
+    if (details.narratorProvider !== CUSTOM_VOICE_PROVIDER) {
       setSelectedCharacterProfileId('')
     }
   }, [details, manualCharacterVoiceOptions])
@@ -426,74 +430,52 @@ export function SeriesCastPanel() {
       })
   }, [bookDetails, details, draftsByChapter])
 
-  function previewVoice(provider: string, voice: string) {
-    if (provider === BLUE_MAGPIE_PROVIDER
-      && BLUE_MAGPIE_VOICES.some((candidate) => candidate.voice === voice)) {
-      setBlueMagpieVoice(voice as BlueMagpieVoice)
-      void previewBlueMagpieVoice(voice as BlueMagpieVoice)
+  const [managedPreview, setManagedPreview] = useState<{ seriesId: string; url: string; name: string } | null>(null)
+  const managedPreviewRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => { if (managedPreview) URL.revokeObjectURL(managedPreview.url) }, [managedPreview])
+  useEffect(() => {
+    setManagedPreview(null)
+    return () => { managedPreviewRequest.current?.abort() }
+  }, [selectedSeriesId])
+  async function previewVoice(provider: string, voice: string) {
+    managedPreviewRequest.current?.abort()
+    const option = voiceOptions.find(candidate => candidate.provider === provider && candidate.voice === voice)
+    if (!option?.characterProfileId || !voice.startsWith('localclone:')) {
+      setMessage('聲線已失效，請從角色管理重新選擇；不會以瀏覽器或 Edge 聲音代替。')
       return
     }
-    if (provider === VOAI_VOICE_PROVIDER) {
-      setMessage('VoAI 聲線無法由瀏覽器 speechSynthesis 模擬；尚需伺服器試音功能，請以正式配音成品為準。')
-      return
-    }
-    if (!('speechSynthesis' in window)) {
-      setMessage('這個瀏覽器不支援安全的固定示範句 preview。')
-      return
-    }
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(previewSentence)
-    const exactVoice = window.speechSynthesis.getVoices().find((candidate) => candidate.name === voice)
-    if (exactVoice) utterance.voice = exactVoice
-    utterance.lang = exactVoice?.lang ?? 'zh-TW'
-    window.speechSynthesis.speak(utterance)
-    setMessage('正在播放固定示範句；瀏覽器找不到同名 voice 時會使用本機語音，最終以系列目前設定的語音服務成品為準。')
-  }
-
-  async function previewBlueMagpieVoice(requestedVoice: BlueMagpieVoice = blueMagpieVoice) {
-    blueMagpiePreviewRequest.current?.abort()
     const controller = new AbortController()
-    blueMagpiePreviewRequest.current = controller
-    setBlueMagpiePreviewUrl(null)
-    setBlueMagpiePreviewState('loading')
-    setMessage('正在由主機本機生成固定示範句；不會呼叫 VoAI 或傳送小說正文。')
+    managedPreviewRequest.current = controller
+    const id = voice.slice('localclone:'.length).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5')
     try {
-      const audio = await fetchBlob('/api/series/voice-preview', {
-        method: 'POST',
-        csrfToken,
-        body: { provider: BLUE_MAGPIE_PROVIDER, voice: requestedVoice },
-        signal: controller.signal,
-      })
+      const blob = await fetchBlob(`/api/character-profiles/${option.characterProfileId}/voice-profiles/${id}/reference-audio`, { signal: controller.signal })
       if (controller.signal.aborted) return
-      setBlueMagpiePreviewUrl(URL.createObjectURL(audio))
-      setMessage('本機台灣華語試音已完成；這只是固定示範句，尚未啟用整本配音。')
+      setManagedPreview({ seriesId: selectedSeriesId, url: URL.createObjectURL(blob), name: option.displayName })
+      setMessage('已載入角色管理的參考錄音，可播放核對；這不是新合成的示範句。')
     } catch (error) {
-      if (controller.signal.aborted) return
-      setMessage(error instanceof Error ? error.message : '本機台灣華語試音失敗。')
-    } finally {
-      if (blueMagpiePreviewRequest.current === controller) {
-        blueMagpiePreviewRequest.current = null
-        setBlueMagpiePreviewState('idle')
-      }
+      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : '角色參考錄音無法播放。')
     }
   }
 
   function selectConfiguredNarrator(nextKey: string) {
     setConfiguredNarratorVoiceKey(nextKey)
+    setCastingSuggestions({})
     if (!details) return
     const narrator = voiceOptions.find((option) => voiceKey(option) === nextKey)
     if (!narrator) return
-    const compatible = voiceOptions.filter((option) => option.provider === narrator.provider
-      || (isCustomVoiceProvider(narrator.provider) && option.provider === EDGE_VOICE_PROVIDER))
+    if (configuredNarratorVoice?.provider !== narrator.provider) manualVoiceOverrides.current.clear()
+    const compatible = voiceOptions.filter((option) => option.provider === narrator.provider)
     setConfiguredCharacterVoiceKeys((current) => Object.fromEntries(details.characters.map((character) => {
       const selected = compatible.find((option) => voiceKey(option) === current[character.id])
-      return [character.id, voiceKey(selected ?? compatible[0] ?? narrator)]
+      const linked = compatible.find((option) => option.characterProfileId === character.characterProfileId)
+      return [character.id, selected ? voiceKey(selected) : linked ? voiceKey(linked) : '']
     })))
   }
 
   async function configureSeriesVoices(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !configuredNarratorVoice) return
+    if (!details || details.id !== selectedSeriesId || !configuredNarratorVoice) return
+    const generation = detailsGenerationRef.current
     const characters = details.characters.map((character) => {
       const selected = configuredCharacterVoiceOptions.find(
         (option) => voiceKey(option) === configuredCharacterVoiceKeys[character.id],
@@ -520,25 +502,39 @@ export function SeriesCastPanel() {
           characters,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
+      manualVoiceOverrides.current.clear()
+      setCastingSuggestions({})
       setBatch(null)
       setConfiguredNarratorVoiceKey(`${updated.narratorProvider}\n${updated.narratorVoice}`)
       setConfiguredCharacterVoiceKeys(Object.fromEntries(
         updated.characters.map((character) => [character.id, `${character.voiceProvider}\n${character.voice}`]),
       ))
-      setMessage('已原子切換整個系列聲線；舊成品仍保持啟用，請重新建立 staged 配音後再人工切換。')
+      setMessage('已儲存整個系列的聲線設定。建立新配音並完成後，再切換成新版本。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '系列聲線切換失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '系列聲線切換失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
+  }
+
+  function suggestCast() {
+    if (!details || details.id !== selectedSeriesId || !configuredNarratorVoice || formState === 'loading') return
+    const suggestions = suggestCharacterVoices(details.characters, characterProfiles, voiceOptions,
+      configuredNarratorVoice, configuredCharacterVoiceKeys, manualVoiceOverrides.current)
+    const changed = Object.entries(suggestions).filter(([id, suggestion]) => suggestion.voiceKey !== configuredCharacterVoiceKeys[id]).length
+    setCastingSuggestions(suggestions)
+    setConfiguredCharacterVoiceKeys(Object.fromEntries(Object.entries(suggestions).map(([id, suggestion]) => [id, suggestion.voiceKey])))
+    setMessage(changed > 0 ? `已填入 ${changed} 位角色的聲線建議，檢查後按「儲存整系列聲線」才會套用。` : '沒有需要調整的聲線；各角色下方可查看保留原因。')
   }
 
   async function createSeries(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!seriesName.trim() || !narratorVoiceKey) return
     const selectedVoice = voiceOptions.find((option) => voiceKey(option) === narratorVoiceKey)
-    if (!selectedVoice) return
+    if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const created = await fetchJson<SeriesDetails>('/api/series/', {
@@ -555,20 +551,22 @@ export function SeriesCastPanel() {
         },
       })
       setSeries((current) => [{ id: created.id, name: created.name, bookCount: 0, characterCount: 0, activeCastRevisionId: null, createdAt: '', updatedAt: '' }, ...current])
+      if (detailsGenerationRef.current !== generation) return
       setSelectedSeriesId(created.id)
       setDetails(created)
       setSeriesName('')
       setMessage('已建立系列；接著加入每一冊與固定角色聲線。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '建立系列失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '建立系列失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function addBook(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !bookId) return
+    if (!details || details.id !== selectedSeriesId || !bookId) return
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/books`, {
@@ -576,39 +574,41 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { bookId, volumeLabel: volumeLabel.trim() || '未命名冊次', sortOrder: details.books.length + 1 },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBookId('')
       setVolumeLabel('')
       setMessage('已加入系列。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '加入系列失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '加入系列失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function addCharacter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const usingLibraryCharacter = isCustomVoiceProvider(details?.narratorProvider)
+    const usingLibraryCharacter = details?.narratorProvider === CUSTOM_VOICE_PROVIDER
       && Boolean(selectedCharacterProfileId)
     const libraryCharacter = characterProfiles.find((profile) => profile.id === selectedCharacterProfileId)
     const libraryCharacterAlreadyLinked = details?.characters.some(
       (character) => character.characterProfileId === selectedCharacterProfileId,
     ) ?? false
     const resolvedName = usingLibraryCharacter ? libraryCharacter?.canonicalName ?? '' : characterName.trim()
-    if (!details || !resolvedName) return
+    if (!details || details.id !== selectedSeriesId || !resolvedName) return
     if (!usingLibraryCharacter && !characterVoiceKey) return
     if (usingLibraryCharacter && (!libraryCharacter?.isActive || libraryCharacterAlreadyLinked)) {
       setMessage('這個角色庫角色已停用或已被本系列使用，請重新選擇。')
       return
     }
 
-    const customVoice = voiceOptions.find((option) => option.provider === details.narratorProvider)
+    const customVoice = voiceOptions.find((option) => option.provider === CUSTOM_VOICE_PROVIDER && option.characterProfileId === selectedCharacterProfileId)
     const selectedVoice = usingLibraryCharacter
       ? customVoice
       : manualCharacterVoiceOptions.find((option) => voiceKey(option) === characterVoiceKey)
-    if (!selectedVoice) return
+    if (!selectedVoice) { setMessage('請先在角色管理建立 Ready 且授權有效的聲線，再明確選擇。'); return }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters`, {
@@ -626,15 +626,16 @@ export function SeriesCastPanel() {
           characterProfileId: usingLibraryCharacter ? selectedCharacterProfileId : null,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setCharacterName('')
       setSelectedCharacterProfileId('')
       setAliasCharacterId((current) => current || updated.characters.at(-1)?.id || '')
       setMessage(usingLibraryCharacter ? '已從角色庫選入這個角色，聲線沿用角色庫設定。' : '角色與固定聲線已加入這個系列。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '新增角色失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '新增角色失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
@@ -684,7 +685,7 @@ export function SeriesCastPanel() {
 
   async function saveCharacterProfileLink(event: FormEvent<HTMLFormElement>, character: SeriesCharacter) {
     event.preventDefault()
-    if (!details || formState === 'loading' || savingCharacterProfileId !== null) return
+    if (!details || details.id !== selectedSeriesId || formState === 'loading' || savingCharacterProfileId !== null) return
 
     const characterProfileId = characterProfileSelections[character.id] ?? ''
     const selectedProfile = characterProfiles.find((profile) => profile.id === characterProfileId)
@@ -703,6 +704,7 @@ export function SeriesCastPanel() {
       return
     }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     setSavingCharacterProfileId(character.id)
     try {
@@ -711,6 +713,7 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { characterProfileId: characterProfileId || null },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       if (!characterProfileId && expandedCharacterId === character.id) {
@@ -720,19 +723,22 @@ export function SeriesCastPanel() {
         ? `已將 ${character.canonicalName} 連結到角色庫「${selectedProfile.canonicalName}」；目前固定聲線與已啟用音訊不變。`
         : `已取消 ${character.canonicalName} 的角色庫連結；目前固定聲線與已啟用音訊不變。`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '儲存角色庫連結失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '儲存角色庫連結失敗。')
     } finally {
-      setSavingCharacterProfileId(null)
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) {
+        setSavingCharacterProfileId(null)
+        setFormState('idle')
+      }
     }
   }
 
   async function setPointOfViewCharacter(characterId: string) {
-    if (!details) return
+    if (!details || details.id !== selectedSeriesId) return
     if (!characterId && details.narrativeVoiceMode === 'PointOfViewInnerMonologue') {
       setMessage('視角角色內心敘事模式必須保留視角角色；請先切回獨立旁白再取消。')
       return
     }
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/point-of-view-character`, {
@@ -740,25 +746,27 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { characterId: characterId || null },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       setMessage(characterId
         ? '已設定視角角色；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
         : '已取消視角角色設定；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '設定視角角色失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function configureNarrativeVoice(mode: NarrativeVoiceMode) {
-    if (!details || mode === details.narrativeVoiceMode) return
+    if (!details || details.id !== selectedSeriesId || mode === details.narrativeVoiceMode) return
     if (mode === 'PointOfViewInnerMonologue' && !details.pointOfViewCharacterId) {
       setMessage('請先選擇視角角色，才能啟用視角角色內心敘事。')
       return
     }
 
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/narrative-voice`, {
@@ -769,21 +777,23 @@ export function SeriesCastPanel() {
           pointOfViewCharacterId: details.pointOfViewCharacterId,
         },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setBatch(null)
       setMessage(mode === 'PointOfViewInnerMonologue'
         ? '已改用視角角色的聲線朗讀正文內心敘事；逐章說話者草稿需要重新建立，目前已啟用音訊不變。'
         : '已改回獨立旁白朗讀正文；逐章說話者草稿需要重新建立，目前已啟用音訊不變。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '設定正文敘事聲線失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '設定正文敘事聲線失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function addAlias(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!details || !aliasCharacterId || !alias.trim()) return
+    if (!details || details.id !== selectedSeriesId || !alias.trim() || !details.characters.some(character => character.id === aliasCharacterId)) return
+    const generation = detailsGenerationRef.current
     setFormState('loading')
     try {
       const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters/${aliasCharacterId}/aliases`, {
@@ -791,18 +801,20 @@ export function SeriesCastPanel() {
         csrfToken,
         body: { alias: alias.trim() },
       })
+      if (detailsGenerationRef.current !== generation) return
       setDetails(updated)
       setAlias('')
       setMessage('別名已加入；重複或跨角色衝突會由系列規則拒絕。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '加入別名失敗。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '加入別名失敗。')
     } finally {
-      setFormState('idle')
+      if (detailsGenerationRef.current === generation) setFormState('idle')
     }
   }
 
   async function activateBatch() {
-    if (!details || !batch) return
+    if (!details || details.id !== selectedSeriesId || !batch) return
+    const generation = detailsGenerationRef.current
     setActivateDialogOpen(false)
     try {
       const activated = await fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}/activate`, {
@@ -810,11 +822,31 @@ export function SeriesCastPanel() {
         csrfToken,
         body: {},
       })
+      if (detailsGenerationRef.current !== generation) return
       setBatch(activated)
-      setMessage('已原子啟用完整 series cast epoch；舊音訊保留為歷史版本。')
+      setMessage('已啟用整個系列的新配音，舊音訊保留為歷史版本。')
       void loadDetails(details.id)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '尚未符合啟用條件。')
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '尚未符合啟用條件。')
+    }
+  }
+
+  async function retryBatch() {
+    if (!details || details.id !== selectedSeriesId || !batch || !retryRightsAttested || retryingBatch) return
+    const generation = detailsGenerationRef.current
+    setRetryingBatch(true)
+    try {
+      const resumed = await fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${batch.id}/retry`, {
+        method: 'POST', csrfToken, body: { rightsAttested: true },
+      })
+      if (detailsGenerationRef.current !== generation) return
+      setBatch(resumed)
+      setRetryRightsAttested(false)
+      setMessage('已接續原配音工作，會重用仍有效的已完成片段。全部完成後仍需由你啟用。')
+    } catch (error) {
+      if (detailsGenerationRef.current === generation) setMessage(error instanceof Error ? error.message : '無法恢復配音工作。')
+    } finally {
+      if (detailsGenerationRef.current === generation) setRetryingBatch(false)
     }
   }
 
@@ -826,6 +858,8 @@ export function SeriesCastPanel() {
     return <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10"><div className="library-state border-rose-300 text-rose-700">{message || '系列配音控制台暫時無法使用。'}</div></main>
   }
 
+  const renderGeneration = detailsGenerationRef.current
+
   return (
     <main className="relative z-10 mx-auto max-w-7xl px-6 py-12 lg:px-10">
       <section className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
@@ -835,38 +869,13 @@ export function SeriesCastPanel() {
 
         <form className="mt-6 grid grid-cols-1 gap-3 border-t border-stone-200 pt-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" onSubmit={createSeries}>
           <label className="text-xs text-stone-500">新系列名稱<input className="auth-input mt-2" maxLength={200} onChange={(event) => setSeriesName(event.target.value)} required value={seriesName} /></label>
-          <label className="text-xs text-stone-500">固定旁白聲線<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
+          {voiceOptions.length === 0 && <p role="status" className="text-sm text-amber-800">沒有可用聲線。請先到角色管理完成錄音、授權與 Ready 驗證；不會提供替代聲線。</p>}
+          {managedPreview?.seriesId === selectedSeriesId && <div className="sm:col-span-3"><p>{managedPreview.name} · 角色管理參考錄音</p><audio autoPlay controls src={managedPreview.url} /></div>}
+          <label className="text-xs text-stone-500">固定旁白聲線（角色管理）<select className="auth-input mt-2" onChange={(event) => setNarratorVoiceKey(event.target.value)} value={narratorVoiceKey}><option value="">選擇聲線</option>{voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}</select></label>
           <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={formState === 'loading' || !seriesName.trim() || !narratorVoiceKey} type="submit">建立系列</button>
         </form>
       </section>
 
-      <section className="mt-6 rounded-3xl border border-sky-200 bg-sky-50 p-5 sm:p-7" aria-label="本機台灣華語試音">
-        <p className="text-xs font-semibold uppercase tracking-[.22em] text-sky-700">Self-hosted preview</p>
-        <h2 className="mt-2 font-serif text-2xl text-stone-900">本機台灣華語試音</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">僅生成伺服器內建的固定示範句，不傳送小說正文、不呼叫 VoAI，也不會建立正式配音工作。</p>
-        <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="min-w-64 text-xs text-stone-500">
-            BlueMagpie 聲線
-            <select
-              className="auth-input mt-2"
-              onChange={(event) => {
-                blueMagpiePreviewRequest.current?.abort()
-                blueMagpiePreviewRequest.current = null
-                setBlueMagpiePreviewState('idle')
-                setBlueMagpiePreviewUrl(null)
-                setBlueMagpieVoice(event.target.value as BlueMagpieVoice)
-              }}
-              value={blueMagpieVoice}
-            >
-              {BLUE_MAGPIE_VOICES.map((option) => <option key={option.voice} value={option.voice}>{option.label}</option>)}
-            </select>
-          </label>
-          <button className="secondary-button disabled:cursor-wait disabled:opacity-60" disabled={blueMagpiePreviewState === 'loading'} onClick={() => void previewBlueMagpieVoice()} type="button">
-            {blueMagpiePreviewState === 'loading' ? '本機生成中…' : '生成固定試音'}
-          </button>
-        </div>
-        {blueMagpiePreviewUrl && <audio autoPlay className="mt-4 w-full max-w-xl" controls src={blueMagpiePreviewUrl}>你的瀏覽器無法播放這段試音。</audio>}
-      </section>
 
       <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="rounded-3xl border border-stone-200 bg-white p-4">
@@ -882,13 +891,13 @@ export function SeriesCastPanel() {
           {details && (
             <>
               <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-7">
-                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">{details.narratorProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button></div>
+                <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs text-stone-500">系列</p><h2 className="mt-1 font-serif text-3xl text-stone-900">{details.name}</h2><p className="mt-2 text-sm text-stone-500">旁白：{voiceLabel(details.narratorProvider, details.narratorVoice, voiceOptions)} · 對白間隔 {details.defaultSpeakerPauseMs}ms</p></div><button className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60" disabled={details.narratorProvider !== CUSTOM_VOICE_PROVIDER} onClick={() => previewVoice(details.narratorProvider, details.narratorVoice)} type="button">播放角色參考錄音</button></div>
 
-                <form className="mt-6 border-t border-stone-200 pt-5" onSubmit={configureSeriesVoices}>
+                <form aria-label="整系列聲線設定" className="mt-6 border-t border-stone-200 pt-5" onSubmit={configureSeriesVoices}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 className="font-serif text-xl text-stone-900">整系列聲線設定</h3>
-                      <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-500">旁白與所有角色會一次驗證、一次切換，避免留下無法合成的 mixed-provider 設定。這是下一次 staged rebuild 的聲線設定；儲存後不會立刻替換既有已啟用音訊。</p>
+                      <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-500">儲存後會一起更新旁白和角色的聲線設定，下一批配音才會使用。目前啟用的音訊會保留，完成新配音後再由你切換。</p>
                     </div>
                     <button
                       className="secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
@@ -898,30 +907,55 @@ export function SeriesCastPanel() {
                       儲存整系列聲線
                     </button>
                   </div>
+                  {details.characters.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
+                      <div className="flex flex-wrap gap-3">
+                        <button className="secondary-button" disabled={formState === 'loading' || !configuredNarratorVoice || configuredNarratorVoice.provider === CUSTOM_VOICE_PROVIDER || details.id !== selectedSeriesId} onClick={suggestCast} type="button">依角色資料建議聲線</button>
+                        <button className="secondary-button" disabled={formState === 'loading' || details.id !== selectedSeriesId} onClick={() => {
+                          setConfiguredNarratorVoiceKey(`${details.narratorProvider}\n${details.narratorVoice}`)
+                          setConfiguredCharacterVoiceKeys(Object.fromEntries(details.characters.map(character => [character.id, `${character.voiceProvider}\n${character.voice}`])))
+                          manualVoiceOverrides.current.clear()
+                          setCastingSuggestions({})
+                          setMessage('已還原成目前儲存的聲線。')
+                        }} type="button">還原已儲存聲線</button>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-stone-500">依角色庫設定與聲線目錄的性別、年齡、風格標籤提出建議，保留你手動選擇的聲線。沒有明確相符資料就維持原設定，儲存後才會套用。克隆聲線需自行確認已就緒的角色。</p>
+                    </div>
+                  )}
                   <label className="mt-4 block max-w-md text-xs text-stone-500">
                     固定旁白聲線
-                    <select className="auth-input mt-2" onChange={(event) => selectConfiguredNarrator(event.target.value)} value={configuredNarratorVoiceKey}>
+                    <select className="auth-input mt-2" disabled={formState === 'loading'} onChange={(event) => selectConfiguredNarrator(event.target.value)} value={configuredNarratorVoiceKey}>
                       <option value="">選擇聲線</option>
                       {voiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}
                     </select>
                   </label>
-                  {configuredNarratorVoice?.provider === BLUE_MAGPIE_PROVIDER && (
-                    <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800">BlueMagpie BM1 目前只有內建女聲與男聲兩種 timbre；整系列切換會把旁白與角色的 rate、pitch、volume 重設為中性，下一次 staged rebuild 才會使用。模型權重授權標示為 other，目前限定私人自架使用，不代表可重新散布或商業使用。</p>
-                  )}
                   {details.characters.length > 0 && (
                     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {details.characters.map((character) => (
-                        <label className="text-xs text-stone-500" key={character.id}>
+                        <div className="text-xs text-stone-500" key={character.id}>
+                          <label>
                           {character.canonicalName}
                           <select
                             className="auth-input mt-2"
-                            onChange={(event) => setConfiguredCharacterVoiceKeys((current) => ({ ...current, [character.id]: event.target.value }))}
+                            aria-describedby={castingSuggestions[character.id] ? `casting-reason-${character.id}` : undefined}
+                            disabled={formState === 'loading'}
+                            onChange={(event) => {
+                              manualVoiceOverrides.current.add(character.id)
+                              setConfiguredCharacterVoiceKeys((current) => ({ ...current, [character.id]: event.target.value }))
+                              setCastingSuggestions((current) => {
+                                const next = { ...current }
+                                delete next[character.id]
+                                return next
+                              })
+                            }}
                             value={configuredCharacterVoiceKeys[character.id] ?? ''}
                           >
                             <option value="">選擇相容聲線</option>
                             {configuredCharacterVoiceOptions.map((option) => <option key={voiceKey(option)} value={voiceKey(option)}>{option.displayName}（{option.locale}）</option>)}
                           </select>
-                        </label>
+                          </label>
+                          {castingSuggestions[character.id] && <p className="mt-2 leading-5" id={`casting-reason-${character.id}`}>{castingSuggestions[character.id].reason}</p>}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -974,7 +1008,7 @@ export function SeriesCastPanel() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm text-stone-800">{character.canonicalName} · {character.role}</p>
                           <div className="flex items-center gap-3">
-                            <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider === VOAI_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">{character.voiceProvider === VOAI_VOICE_PROVIDER ? 'VoAI 需伺服器試音' : '播放固定示範句'}</button>
+                            <button className="text-xs text-amber-700 disabled:cursor-not-allowed disabled:text-stone-400" disabled={character.voiceProvider !== CUSTOM_VOICE_PROVIDER} onClick={() => previewVoice(character.voiceProvider, character.voice)} type="button">播放角色參考錄音</button>
                             {localCloneAvailability[character.id]?.available && (
                               <button
                                 className="text-xs font-medium text-sky-700 disabled:cursor-wait disabled:text-stone-400"
@@ -998,7 +1032,7 @@ export function SeriesCastPanel() {
                         </div>
                         <p className="mt-1 text-xs text-stone-500">{voiceLabel(character.voiceProvider, character.voice, voiceOptions)} · 別名：{character.aliases.map((item) => item.value).join('、') || '—'}</p>
                         {localCloneAvailability[character.id]?.available && (
-                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機私人試音聲線'}。只用於比較音色，不會切換目前的 Edge 正式聲線。</p>
+                          <p className="mt-1 text-xs text-sky-700">私人試音：{localCloneAvailability[character.id].label ?? '本機私人試音聲線'}。只用於比較音色，不會自動更換正式聲線。</p>
                         )}
                         {localClonePreviewAudio?.characterId === character.id && (
                           <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
@@ -1056,15 +1090,15 @@ export function SeriesCastPanel() {
                     })}
                   </div>
                   <form className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={addCharacter}>
-                    {isCustomVoiceProvider(details.narratorProvider) ? (
+                    {details.narratorProvider === CUSTOM_VOICE_PROVIDER ? (
                       <label className="text-xs text-stone-500 sm:col-span-3">
-                        從角色庫選擇（可選，選了就沿用角色庫的自訂克隆聲線）
+                        從角色管理選入角色與有效聲線（可選）
                         <select
                           className="auth-input mt-2"
                           onChange={(event) => setSelectedCharacterProfileId(event.target.value)}
                           value={selectedCharacterProfileId}
                         >
-                          <option value="">不使用角色庫，改用 Edge fallback</option>
+                          <option value="">僅設定書中角色名，再於下方選擇角色管理聲線</option>
                           {characterProfiles.map((profile) => {
                             const linkedBy = details.characters.find((character) => character.characterProfileId === profile.id)
                             const unavailable = !profile.isActive || Boolean(linkedBy)
@@ -1077,9 +1111,7 @@ export function SeriesCastPanel() {
                       </label>
                     ) : (
                       <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500 sm:col-span-3">
-                        {details.narratorProvider === VOAI_VOICE_PROVIDER
-                          ? '這個系列使用 VoAI；不可混用 3wa 角色庫自訂聲線，請從下方選擇 VoAI 聲線。'
-                          : '角色庫自訂聲線只支援 3wa 或自架克隆系列；請從下方選擇與旁白相同 provider 的聲線。'}
+                        舊系列必須先重新選擇角色管理中的固定旁白與人物聲線，才可排程。
                       </p>
                     )}
                     <label className="text-xs text-stone-500">
@@ -1129,16 +1161,87 @@ export function SeriesCastPanel() {
                 </section>
               </div>
 
-              {reviewEntries.length > 0 && <SpeechPlanReview characters={details.characters} csrfToken={csrfToken} entries={reviewEntries} onDraftUpdated={(draft) => setDraftsByChapter((current) => ({ ...current, [draft.chapterId]: draft }))} onRebuildCreated={(created) => { setBatch({ ...created, members: [] }); void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`).then(setBatch).catch(() => undefined) }} seriesId={details.id} />}
+              {reviewEntries.length > 0 && (
+                <SpeechPlanReview
+                  key={details.id}
+                  characterVoiceOptions={manualCharacterVoiceOptions}
+                  characters={details.characters}
+                  csrfToken={csrfToken}
+                  entries={reviewEntries}
+                  narratorProvider={details.narratorProvider}
+                  onAddCharacter={async (request) => {
+                    const updated = await fetchJson<SeriesDetails>(`/api/series/${details.id}/characters`, {
+                      method: 'POST',
+                      csrfToken,
+                      body: {
+                        canonicalName: request.canonicalName,
+                        role: request.role,
+                        voiceProvider: request.voiceProvider,
+                        voice: request.voice,
+                        rate: profileDefaults.rate,
+                        pitch: profileDefaults.pitch,
+                        volume: profileDefaults.volume,
+                        notes: null,
+                        characterProfileId: null,
+                      },
+                    })
+                    if (detailsGenerationRef.current !== renderGeneration) return null
+                    setDetails(updated)
+                    return updated.characters.find((character) => character.canonicalName === request.canonicalName) ?? null
+                  }}
+                  onDraftUpdated={(draft) => setDraftsByChapter((current) => ({ ...current, [draft.chapterId]: draft }))}
+                  onRebuildCreated={(created) => {
+                    if (detailsGenerationRef.current !== renderGeneration) return
+                    setBatch({ ...created, members: [] })
+                    void fetchJson<RebuildBatch>(`/api/series/${details.id}/narration-rebuilds/${created.id}`)
+                      .then(loaded => { if (detailsGenerationRef.current === renderGeneration) setBatch(loaded) })
+                      .catch(() => undefined)
+                  }}
+                  seriesId={details.id}
+                />
+              )}
               {details.books.length > 0 && reviewEntries.length === 0 && <div className="library-state mt-8">正在讀取僅屬於你的章節與劇本狀態…</div>}
 
-              {batch && <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="staged rebuild 狀態"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.22em] text-amber-700">Staged rebuild</p><h2 className="mt-1 font-serif text-2xl text-stone-900">{batch.status}</h2></div>{batch.status === 'ReadyToActivate' && <button className="secondary-button" onClick={() => setActivateDialogOpen(true)} type="button">人工啟用完整系列音訊</button>}</div><ul className="mt-4 space-y-2">{batch.members.map((member) => <li className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}><span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span><span className="text-xs text-stone-500">{member.status}</span></li>)}</ul></section>}
+              {batch && (
+                <section className="mt-8 rounded-3xl border border-stone-200 bg-white p-5 sm:p-7" aria-label="配音批次狀態">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-amber-700">最近的配音批次</p>
+                      <h2 className="mt-1 font-serif text-2xl text-stone-900">{rebuildStatusLabels[batch.status] ?? '狀態更新中'}</h2>
+                    </div>
+                    {batch.status === 'ReadyToActivate' && <button className="secondary-button" onClick={() => setActivateDialogOpen(true)} type="button">啟用整個系列的配音</button>}
+                  </div>
+                  <ul className="mt-4 space-y-2">
+                    {batch.members.map((member) => (
+                      <li className="min-w-0 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm" key={member.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="text-stone-700">{details.books.find((book) => book.bookId === member.bookId)?.bookTitle ?? '系列書籍已變更'}</span>
+                          <span className="text-xs text-stone-500">{rebuildStatusLabels[member.status] ?? '狀態更新中'}</span>
+                        </div>
+                        {member.stagedNarrationJobId && <NarrationUsagePanel jobId={member.stagedNarrationJobId} />}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {batch?.status === 'Failed' && details.narratorProvider === CUSTOM_VOICE_PROVIDER && (
+                <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5" aria-label="恢復配音">
+                  <p className="text-sm leading-6 text-stone-700">暫時性錯誤可接續原工作，保留已完成的音訊與片段快取。若正文、劇本或聲線已修改，請建立新批次。</p>
+                  <label className="mt-3 flex items-start gap-2 text-sm text-stone-700">
+                    <input checked={retryRightsAttested} disabled={retryingBatch} onChange={(event) => setRetryRightsAttested(event.target.checked)} type="checkbox" />
+                    我確認仍有權處理這些書籍，並同意接續產生配音。
+                  </label>
+                  <button className="secondary-button mt-4" disabled={!retryRightsAttested || retryingBatch || details.id !== selectedSeriesId} onClick={() => void retryBatch()} type="button">
+                    {retryingBatch ? '正在恢復…' : '接續未完成配音'}
+                  </button>
+                </section>
+              )}
             </>
           )}
         </section>
       </section>
       <p aria-live="polite" className="mt-5 min-h-5 text-sm text-stone-500">{message}</p>
-      <ConfirmDialog confirmLabel="啟用完整系列" description="這會在單一交易中切換整個系列的 current audio；只有所有 staged 冊次都完成時才能成功。" onCancel={() => setActivateDialogOpen(false)} onConfirm={() => void activateBatch()} open={activateDialogOpen} title="確定啟用完整多角色系列音訊？" />
+      <ConfirmDialog confirmLabel="啟用完整系列" description="所有冊次都完成後，會一起切換成這次產生的配音。舊音訊保留為歷史版本。" onCancel={() => setActivateDialogOpen(false)} onConfirm={() => void activateBatch()} open={activateDialogOpen} title="確定啟用整個系列的新配音？" />
     </main>
   )
 }

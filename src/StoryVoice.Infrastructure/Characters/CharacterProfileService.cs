@@ -21,7 +21,8 @@ internal sealed class CharacterProfileService(
     StoryVoiceDbContext dbContext,
     ICurrentUser currentUser,
     LocalCharacterAvatarStorage avatarStorage,
-    LocalCharacterVoiceAudioStorage voiceAudioStorage) : ICharacterProfileService
+    LocalCharacterVoiceAudioStorage voiceAudioStorage,
+    ICharacterProfileAssistGenerator assistGenerator) : ICharacterProfileService
 {
     public async Task<IReadOnlyList<CharacterProfileResponse>> ListAsync(CancellationToken cancellationToken)
     {
@@ -253,6 +254,16 @@ internal sealed class CharacterProfileService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return ToResponse(profile);
+    }
+
+    public Task<GeneratedCharacterProfileAssistResponse> GenerateAssistAsync(
+        GenerateCharacterProfileAssistRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureCurrentOwnerId();
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        return assistGenerator.GenerateAsync(request, cancellationToken);
     }
 
     private async Task<CharacterProfile?> LoadAsync(

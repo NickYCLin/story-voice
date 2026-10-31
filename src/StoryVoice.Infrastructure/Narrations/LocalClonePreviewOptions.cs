@@ -10,14 +10,11 @@ public sealed class LocalClonePreviewOptions
     public const int MaximumReferenceAudioBytes = 10 * 1024 * 1024;
     public const int MaximumTranscriptBytes = 32 * 1024;
 
-    public bool Enabled { get; set; }
-
-    /// <summary>
-    /// Allows the <c>local-clone</c> series provider: full-book multi-character synthesis through
-    /// the self-hosted gateway using each character's linked Ready Clone profile recording.
-    /// Independent of <see cref="Enabled"/>, which only governs the allow-listed private preview.
-    /// </summary>
+    public const string FormalProviderVersion = "local-clone-managed-voices-v3";
     public bool FormalNarrationEnabled { get; set; }
+    public int RetryDelaySeconds { get; set; } = 20;
+
+    public bool Enabled { get; set; }
 
     public string GatewayBaseUrl { get; set; } = PinnedGatewayBaseUrl;
 

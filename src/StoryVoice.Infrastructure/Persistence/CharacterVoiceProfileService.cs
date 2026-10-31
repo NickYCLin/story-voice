@@ -272,27 +272,9 @@ internal sealed class CharacterVoiceProfileService(
 
         var status = await threeWaClient.GetStatusAsync(profile.VoiceProfileTaskId!, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase) || status.TranscriptionFailed)
         {
             profile.MarkFailed(now);
-        }
-        else if (status.TranscriptionFailed && !status.TranscriptConfirmed)
-        {
-            // 3wa 已建立聲線，只是站方 ASR 草稿產生失敗（例如 asr_unavailable）。錄音者上傳時
-            // 已提供預期逐字稿，改以它作為待確認草稿，讓人工確認流程照常進行，而不是整組作廢。
-            if (profile.ConfirmationTranscriptIntent is null
-                && profile.TranscriptConfirmedAt is null
-                && !string.IsNullOrWhiteSpace(profile.ExpectedTranscript))
-            {
-                if (profile.Status == CharacterVoiceProfileStatus.Pending)
-                {
-                    profile.AttachDraftTranscript(profile.VoiceProfileTaskId!, profile.ExpectedTranscript, now);
-                }
-            }
-            else if (profile.ConfirmationTranscriptIntent is null)
-            {
-                profile.MarkFailed(now);
-            }
         }
         else if (status.TranscriptConfirmed)
         {
@@ -506,14 +488,29 @@ internal sealed class CharacterVoiceProfileService(
         var fullPath = audioStorage.ResolveFullPath(profile.ReferenceAudioRelativePath);
         // 服務前驗證整檔雜湊（≤10 MiB，成本可接受）：把磁碟上被改動的檔案
         // 當成「已同意的錄音」播放給擁有者是完整性錯誤，不是 404。
-        if (profile.ReferenceAudioSha256 is not null)
+        try
         {
-            var actualSha256 = await ComputeFileSha256Async(fullPath, cancellationToken);
-            if (!string.Equals(actualSha256, profile.ReferenceAudioSha256, StringComparison.OrdinalIgnoreCase))
+            if (profile.ReferenceAudioSha256 is not null)
             {
-                throw new InvalidOperationException(
-                    "參考音檔與入庫時的雜湊不符，已停止提供播放；請聯絡管理員檢查儲存空間。");
+                var actualSha256 = await ComputeFileSha256Async(fullPath, cancellationToken);
+                if (!string.Equals(actualSha256, profile.ReferenceAudioSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "參考音檔與入庫時的雜湊不符，已停止提供播放；請聯絡管理員檢查儲存空間。");
+                }
             }
+            else if (!File.Exists(fullPath))
+            {
+                return null;
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
         }
 
         return new CharacterVoiceProfileAudio(fullPath, "audio/wav");

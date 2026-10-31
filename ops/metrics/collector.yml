@@ -1,0 +1,46 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  filter/storyvoice:
+    error_mode: propagate
+    metric_conditions:
+      - resource.attributes["service.name"] != "storyvoice-worker"
+      - scope.name != "StoryVoice.BlueMagpie"
+      - not IsMatch(metric.name, "^storyvoice[.]bluemagpie[.]")
+  transform/privacy:
+    error_mode: propagate
+    metric_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.instance.id"])
+      - context: datapoint
+        statements:
+          - keep_keys(attributes, ["outcome", "cache", "reused_cache"])
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 1024
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    translation_strategy: UnderscoreEscapingWithSuffixes
+    metric_expiration: 2m
+    without_scope_info: true
+    resource_constant_labels:
+      included: ["service.name", "service.instance.id"]
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/storyvoice, transform/privacy, batch]
+      exporters: [prometheus]

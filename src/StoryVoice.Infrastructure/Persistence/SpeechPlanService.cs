@@ -194,6 +194,59 @@ internal sealed class SpeechPlanService(
         return await ToResponseAsync(draft, knownCharacters, cancellationToken);
     }
 
+    public async Task<ChapterSpeechPlanDraftResponse?> ConfirmSuggestedSegmentsAsync(
+        Guid seriesId,
+        Guid draftId,
+        ConfirmSuggestedSpeechSegmentsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        var draft = await repository.GetForMutationByIdAsync(seriesId, draftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var confirmedCount = draft.ConfirmSuggestedSegments(request.CharacterId);
+        if (confirmedCount > 0)
+        {
+            await SaveChangesAsync(cancellationToken);
+        }
+
+        var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
+        return await ToResponseAsync(draft, knownCharacters, cancellationToken);
+    }
+
+    public async Task<ChapterSpeechPlanDraftResponse?> ReassignSegmentAsync(
+        Guid seriesId,
+        Guid draftId,
+        Guid segmentId,
+        ReassignSpeechSegmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var ownerId = EnsureCurrentOwnerId();
+        var kind = request.Kind switch
+        {
+            nameof(SpeechSegmentTurnKind.Narrator) => SpeechSegmentTurnKind.Narrator,
+            nameof(SpeechSegmentTurnKind.Dialogue) => SpeechSegmentTurnKind.Dialogue,
+            nameof(SpeechSegmentTurnKind.InnerMonologue) => SpeechSegmentTurnKind.InnerMonologue,
+            _ => throw new ArgumentException(
+                "片段朗讀方式必須是 Narrator、Dialogue 或 InnerMonologue。",
+                nameof(request)),
+        };
+
+        var draft = await repository.GetForMutationByIdAsync(seriesId, draftId, cancellationToken);
+        if (draft is null || draft.Segments.All(segment => segment.Id != segmentId))
+        {
+            return null;
+        }
+
+        draft.ReassignSegment(segmentId, kind, request.CharacterId);
+        await SaveChangesAsync(cancellationToken);
+        var knownCharacters = await LoadKnownCharactersAsync(ownerId, seriesId, cancellationToken);
+        return await ToResponseAsync(draft, knownCharacters, cancellationToken);
+    }
+
     public async Task<ConfirmedSpeechPlanRevisionResponse?> ConfirmPlanAsync(
         Guid seriesId,
         Guid draftId,

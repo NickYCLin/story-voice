@@ -1,18 +1,23 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 
 namespace StoryVoice.Worker;
 
-public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoiceNarrationProvider> logger)
+public sealed class EdgeTtsMultiVoiceNarrationProvider(
+    ILogger<EdgeTtsMultiVoiceNarrationProvider> logger,
+    IOptions<EdgeTtsOptions>? options = null)
     : IMultiVoiceNarrationProvider
 {
     private const string ManifestSchemaVersion = "storyvoice:multi-voice-manifest:v1";
+    internal const string TimelineSchemaVersion = "storyvoice:multi-voice-timeline:v1";
     private static readonly JsonSerializerOptions ManifestSerializerOptions = new(JsonSerializerDefaults.Web);
 
     public string ProviderName => "edge";
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -41,21 +46,11 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
             new Manifest(ManifestSchemaVersion, request.Turns),
             ManifestSerializerOptions);
 
-        var scriptPath = Path.Combine(AppContext.BaseDirectory, "edge_tts_multi_voice_provider.py");
         EdgeTtsNarrationProvider.CleanupTemporaryDirectories(outputPath, logger);
-        var startInfo = new ProcessStartInfo("python3")
-        {
-            RedirectStandardInput = true,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add(scriptPath);
-        startInfo.ArgumentList.Add("--output");
-        startInfo.ArgumentList.Add(outputPath);
+        var startInfo = CreateStartInfo(outputPath);
 
         using var process = new Process { StartInfo = startInfo };
+        string providerOutput;
         try
         {
             if (!process.Start())
@@ -71,7 +66,7 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
                 process.StandardInput.Close();
                 await process.WaitForExitAsync(cancellationToken);
                 var diagnostics = await stderrTask;
-                _ = await stdoutTask;
+                providerOutput = await stdoutTask;
 
                 if (process.ExitCode != 0)
                 {
@@ -102,7 +97,97 @@ public sealed class EdgeTtsMultiVoiceNarrationProvider(ILogger<EdgeTtsMultiVoice
         {
             EdgeTtsNarrationProvider.CleanupTemporaryDirectories(outputPath, logger);
         }
+
+        var turnTimings = TryParseTurnTimings(providerOutput, request.Turns.Count);
+        if (turnTimings is null)
+        {
+            // Timing is best-effort telemetry about audio that already exists — a malformed or
+            // missing timeline must never fail the finished synthesis.
+            logger.LogWarning(
+                "Multi-voice Edge TTS provider completed without a usable turn timeline; playback sync is unavailable for this job");
+        }
+
+        return new MultiVoiceSynthesisResult(turnTimings);
     }
+
+    internal ProcessStartInfo CreateStartInfo(string outputPath)
+    {
+        var concurrency = options?.Value.MaximumConcurrentChunks ?? 1;
+        if (concurrency is < 1 or > 4)
+            throw new InvalidOperationException("Edge TTS chunks per job must use between 1 and 4 concurrent slots.");
+        var startInfo = new ProcessStartInfo("python3")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "edge_tts_multi_voice_provider.py"));
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(outputPath);
+        startInfo.ArgumentList.Add("--max-concurrent-chunks");
+        startInfo.ArgumentList.Add(concurrency.ToString(CultureInfo.InvariantCulture));
+        return startInfo;
+    }
+
+    internal static IReadOnlyList<NarrationTurnTiming>? TryParseTurnTimings(
+        string? providerOutput,
+        int expectedTurnCount)
+    {
+        if (string.IsNullOrWhiteSpace(providerOutput))
+        {
+            return null;
+        }
+
+        TimelineOutput? timeline;
+        try
+        {
+            timeline = JsonSerializer.Deserialize<TimelineOutput>(
+                providerOutput.Trim(),
+                ManifestSerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (timeline is null
+            || !string.Equals(timeline.SchemaVersion, TimelineSchemaVersion, StringComparison.Ordinal)
+            || timeline.Turns is null
+            || timeline.Turns.Count != expectedTurnCount)
+        {
+            return null;
+        }
+
+        var timings = new NarrationTurnTiming[expectedTurnCount];
+        var previousEndMs = 0L;
+        for (var index = 0; index < expectedTurnCount; index++)
+        {
+            var turn = timeline.Turns[index];
+            if (turn is null
+                || turn.Index != index
+                || turn.StartMs < previousEndMs
+                || turn.DurationMs < 0)
+            {
+                return null;
+            }
+
+            timings[index] = new NarrationTurnTiming(index, turn.StartMs, turn.DurationMs);
+            previousEndMs = turn.StartMs + turn.DurationMs;
+        }
+
+        return timings;
+    }
+
+    private sealed record TimelineOutput(
+        [property: JsonPropertyName("schemaVersion")] string? SchemaVersion,
+        [property: JsonPropertyName("turns")] IReadOnlyList<TimelineTurnOutput?>? Turns);
+
+    private sealed record TimelineTurnOutput(
+        [property: JsonPropertyName("index")] int Index,
+        [property: JsonPropertyName("startMs")] long StartMs,
+        [property: JsonPropertyName("durationMs")] long DurationMs);
 
     private const int DiagnosticTailLines = 30;
 

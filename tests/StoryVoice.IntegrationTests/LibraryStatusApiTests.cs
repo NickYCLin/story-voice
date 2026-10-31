@@ -136,6 +136,9 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
             var job = await db.NarrationJobs.SingleAsync(item => item.Id == olderJob.Id, cancellationToken);
             job.Claim("matrix-worker", DateTimeOffset.UtcNow.AddMinutes(20));
             job.Complete("matrix/old-content.mp3", 42);
+            var audioPath = Path.Combine(factory.StorageRoot, "audio", "matrix", "old-content.mp3");
+            Directory.CreateDirectory(Path.GetDirectoryName(audioPath)!);
+            await File.WriteAllBytesAsync(audioPath, new byte[42], cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
         }
         using var unlink = await DeleteWithCsrfAsync(
@@ -153,6 +156,44 @@ public sealed class LibraryStatusApiTests(ApiFactory factory) : IClassFixture<Ap
         Assert.False(unlinkedStatus.StoryVoiceNarrationMatchesAuthorizedText);
         Assert.Equal("audio_ready", unlinkedStatus.State);
         Assert.Equal("authorized_text_required", unlinkedStatus.BlockedReason);
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, false)]
+    [InlineData(41, false)]
+    [InlineData(43, false)]
+    [InlineData(42, true)]
+    public async Task Matrix_only_reports_completed_audio_ready_when_stored_file_matches(
+        int actualBytes, bool expectedReady)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await factory.CreateAuthenticatedClientAsync(cancellationToken);
+        var book = await ImportTextAsync(client, cancellationToken);
+        var queued = await SeedQueuedPublishedAsync(book.Id, book.Id, cancellationToken);
+        var relativePath = $"matrix/{queued.Id:N}.mp3";
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StoryVoiceDbContext>();
+            var job = await db.NarrationJobs.SingleAsync(item => item.Id == queued.Id, cancellationToken);
+            job.Claim("matrix-worker", DateTimeOffset.UtcNow.AddMinutes(20));
+            job.Complete(relativePath, 42);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        if (actualBytes >= 0)
+        {
+            var path = Path.Combine(factory.StorageRoot, "audio", relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, new byte[actualBytes], cancellationToken);
+        }
+
+        var matrix = await client.GetFromJsonAsync<LibraryBookStatusResponse[]>(
+            "/api/library/status-matrix/", cancellationToken);
+        var item = Assert.Single(matrix!, candidate => candidate.BookId == book.Id);
+        Assert.Equal("Completed", item.StoryVoiceNarrationStatus);
+        Assert.Equal(expectedReady ? "audio_ready" : "failed", item.State);
+        Assert.Equal(expectedReady ? null : "narration_audio_unavailable", item.BlockedReason);
     }
 
     [Fact]

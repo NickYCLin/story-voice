@@ -4,7 +4,8 @@ import test from 'node:test'
 
 const authSource = readFileSync(new URL('../src/auth.ts', import.meta.url), 'utf8')
 const authScreenSource = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')
-const appLayoutSource = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const appLayoutSource = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 const libraryPageSource = readFileSync(new URL('../src/pages/LibraryPage.tsx', import.meta.url), 'utf8')
 
@@ -41,4 +42,12 @@ test('登入後引導使用者自行匯入有權處理的檔案', () => {
   assert.match(authScreenSource, /匯入檔案並檢查解析後的章節/)
   assert.match(libraryPageSource, /書籍來自哪個平台都沒關係/)
   assert.doesNotMatch(libraryPageSource, /companion-token|Companion|博客來/)
+})
+
+test('匿名登入畫面可切換語言，並導向公開雙語介紹', () => {
+  assert.match(authScreenSource, /<PublicSiteHeader/)
+  assert.match(readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'), /<LanguageSwitcher/)
+  assert.match(authScreenSource, /to="\/about"/)
+  assert.match(authScreenSource, /Learn about StoryVoice/)
+  assert.match(appSource, /<LandingPage publicMode \/>.*path="\/about"/)
 })

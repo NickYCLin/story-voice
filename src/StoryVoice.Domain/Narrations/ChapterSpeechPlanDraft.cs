@@ -92,6 +92,50 @@ public sealed class ChapterSpeechPlanDraft
         Touch();
     }
 
+    /// <summary>
+    /// Confirms every dialogue segment that still carries an unreviewed suggestion with an actual
+    /// character attached. Suggestions without a character (unknown speakers) are deliberately
+    /// left for manual review — bulk-accept must never silently turn unknowns into narrator turns.
+    /// When <paramref name="characterId"/> is provided, only suggestions pointing at that
+    /// character are confirmed, so one badly attributed name does not ride along with the rest.
+    /// </summary>
+    public int ConfirmSuggestedSegments(Guid? characterId)
+    {
+        EnsureNotStale();
+        var suggested = _segments
+            .Where(segment => segment.Kind == SpeechSegmentTurnKind.Dialogue
+                && segment.ReviewStatus == SpeechSegmentReviewStatus.Suggested
+                && segment.CharacterId is not null
+                && (characterId is null || segment.CharacterId == characterId))
+            .ToArray();
+        foreach (var segment in suggested)
+        {
+            segment.Confirm(segment.CharacterId);
+        }
+
+        if (suggested.Length > 0)
+        {
+            RecomputeStatus();
+            Touch();
+        }
+
+        return suggested.Length;
+    }
+
+    /// <summary>
+    /// User override of a body segment's turn kind (narrator / dialogue / inner monologue) and
+    /// speaker. This is the correction path for segmenter misreads and for auto-confirmed rule
+    /// decisions that turned out to be wrong.
+    /// </summary>
+    public void ReassignSegment(Guid segmentId, SpeechSegmentTurnKind kind, Guid? characterId)
+    {
+        EnsureNotStale();
+        var segment = FindSegment(segmentId);
+        segment.Reassign(kind, characterId);
+        RecomputeStatus();
+        Touch();
+    }
+
     public void RejectSegment(Guid segmentId)
     {
         EnsureNotStale();

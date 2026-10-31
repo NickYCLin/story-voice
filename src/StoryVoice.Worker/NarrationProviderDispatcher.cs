@@ -8,7 +8,7 @@ namespace StoryVoice.Worker;
 /// </summary>
 public sealed class NarrationProviderDispatcher(INarrationProviderRegistry registry)
 {
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         string providerName,
         MultiVoiceNarrationRequest request,
         string outputPath,
@@ -25,7 +25,7 @@ public sealed class NarrationProviderDispatcher(INarrationProviderRegistry regis
                 request.NarratorProvider.ProviderVersion);
         }
 
-        await provider.SynthesizeAsync(request, outputPath, progressCallback, cancellationToken);
+        return await provider.SynthesizeAsync(request, outputPath, progressCallback, cancellationToken);
     }
 }
 

@@ -6,12 +6,25 @@ namespace StoryVoice.IntegrationTests;
 
 internal static class TestClientAuthentication
 {
-    public static HttpClient CreateCookieClient(this WebApplicationFactory<Program> factory) =>
-        factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-            HandleCookies = true
-        });
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<HttpClient, WebApplicationFactory<Program>> Factories = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<HttpClient, Dictionary<string, string>> Voices = new();
+
+    public static async Task<string> ManagedVoiceAsync(this HttpClient client, CancellationToken ct, string role = "default")
+    {
+        var voices = Voices.GetOrCreateValue(client);
+        if (voices.TryGetValue(role, out var voice)) return voice;
+        var id = await ManagedNarrationVoiceApiTests.SeedAsync(Factories.GetValue(client, _ => throw new InvalidOperationException("Register a test client first.")), client, true, ct);
+        voice = StoryVoice.Infrastructure.Persistence.ManagedNarrationVoices.Reference(id);
+        voices.Add(role, voice);
+        return voice;
+    }
+
+    public static HttpClient CreateCookieClient(this WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
+        Factories.Add(client, factory);
+        return client;
+    }
 
     public static async Task<HttpClient> CreateAuthenticatedClientAsync(
         this WebApplicationFactory<Program> factory,

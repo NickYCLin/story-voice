@@ -27,6 +27,34 @@ public sealed class SpeechPlanIntegrityException(string reasonCode) : InvalidOpe
 }
 
 /// <summary>
+/// One confirmed-segment slice folded into a turn: which chapter source text it came from and the
+/// exact offsets, plus the segment's story-level identity (kind and speaking character). A merged
+/// turn carries one slice per merged segment, in narration order.
+/// </summary>
+public sealed record NarrationTurnSlice(
+    SpeechSegmentSourceKind SourceKind,
+    int StartOffset,
+    int Length,
+    SpeechSegmentTurnKind Kind,
+    Guid? CharacterId);
+
+/// <summary>Story-side provenance for one <see cref="NarrationTurn"/>, aligned by index.</summary>
+public sealed record NarrationTurnSource(
+    Guid ChapterId,
+    int ChapterSortOrder,
+    bool ChapterStart,
+    IReadOnlyList<NarrationTurnSlice> Slices);
+
+/// <summary>
+/// The synthesis turns plus, per turn, where its text actually came from. Turns and sources are
+/// index-aligned; providers only ever see <see cref="Turns"/>, so cache keys and manifests are
+/// unaffected by the provenance data.
+/// </summary>
+public sealed record MultiCharacterTurnPlan(
+    IReadOnlyList<NarrationTurn> Turns,
+    IReadOnlyList<NarrationTurnSource> Sources);
+
+/// <summary>
 /// Compiles the immutable, job-locked confirmed speech plans for every chapter in a
 /// multi-character narration job into an ordered <see cref="NarrationTurn"/> sequence: resolves
 /// each segment's full synthesis profile from the job's cast revision, merges adjacent equal-profile turns within a
@@ -43,6 +71,13 @@ public static class MultiCharacterTurnBuilder
         NarrationCastRevision castRevision,
         IReadOnlyList<ChapterPlanSource> chapterPlans,
         IReadOnlyList<CharacterVoiceProfile>? voiceProfiles = null,
+        IReadOnlyDictionary<Guid, Guid>? characterProfileIdsByCharacterId = null) =>
+        BuildTurnPlan(castRevision, chapterPlans, voiceProfiles, characterProfileIdsByCharacterId).Turns;
+
+    public static MultiCharacterTurnPlan BuildTurnPlan(
+        NarrationCastRevision castRevision,
+        IReadOnlyList<ChapterPlanSource> chapterPlans,
+        IReadOnlyList<CharacterVoiceProfile>? voiceProfiles = null,
         IReadOnlyDictionary<Guid, Guid>? characterProfileIdsByCharacterId = null)
     {
         ArgumentNullException.ThrowIfNull(castRevision);
@@ -52,12 +87,22 @@ public static class MultiCharacterTurnBuilder
             throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
         }
 
-        var profilesByCharacter = BuildProfileLookup(
-            castRevision,
-            voiceProfiles,
-            characterProfileIdsByCharacterId);
+        var managed = castRevision.NarratorVoice.StartsWith(LocalCloneReferencePrefix, StringComparison.Ordinal);
+        var profilesByCharacter = managed ? new Dictionary<Guid, CharacterVoiceProfileBundle>() : BuildProfileLookup(
+            castRevision, voiceProfiles, characterProfileIdsByCharacterId);
+        if (managed)
+        {
+            foreach (var voice in castRevision.Assignments.Select(a => a.Voice).Append(castRevision.NarratorVoice))
+            {
+                if (voiceProfiles is null || !voiceProfiles.Any(p => p.Status == CharacterVoiceProfileStatus.Ready
+                    && p.Mode == CharacterVoiceProfileMode.Clone && EncodeLocalCloneReference(p.Id) == voice))
+                    throw MissingCloneVoice();
+            }
+        }
         var orderedChapters = chapterPlans.OrderBy(plan => plan.ChapterSortOrder).ToArray();
         var turns = new List<NarrationTurn>();
+        var sliceLists = new List<List<NarrationTurnSlice>>();
+        var sources = new List<NarrationTurnSource>();
         string? previousVoice = null;
         string? previousRate = null;
         string? previousPitch = null;
@@ -119,9 +164,16 @@ public static class MultiCharacterTurnBuilder
                     && sameVoiceAsPrevious
                     && turns[^1].Text.Length + text.Length <= MaximumMergedTurnLength;
 
+                var slice = new NarrationTurnSlice(
+                    segment.SourceKind,
+                    segment.StartOffset,
+                    segment.Length,
+                    segment.Kind,
+                    segment.CharacterId);
                 if (canMerge)
                 {
                     turns[^1] = turns[^1] with { Text = turns[^1].Text + text };
+                    sliceLists[^1].Add(slice);
                 }
                 else
                 {
@@ -131,6 +183,14 @@ public static class MultiCharacterTurnBuilder
                             ? castRevision.ChapterPauseMs
                             : sameVoiceAsPrevious ? 0 : castRevision.DefaultSpeakerPauseMs;
                     turns.Add(new NarrationTurn(text, voice, rate, pitch, volume, pauseBeforeMs));
+                    // The source record holds the same list instance, so later merges into this
+                    // turn keep its slice list in sync without rebuilding the record.
+                    sliceLists.Add([slice]);
+                    sources.Add(new NarrationTurnSource(
+                        chapterPlan.Revision.ChapterId,
+                        chapterPlan.ChapterSortOrder,
+                        isFirstSegmentOfChapter,
+                        sliceLists[^1]));
                 }
 
                 previousVoice = voice;
@@ -141,7 +201,7 @@ public static class MultiCharacterTurnBuilder
             }
         }
 
-        return turns;
+        return new MultiCharacterTurnPlan(turns, sources);
     }
 
     private static (string Voice, string Rate, string Pitch, string Volume) ResolveVoice(
@@ -151,6 +211,18 @@ public static class MultiCharacterTurnBuilder
         string precedingContext,
         IReadOnlyDictionary<Guid, CharacterVoiceProfileBundle> profilesByCharacter)
     {
+        if (castRevision.NarratorVoice.StartsWith(LocalCloneReferencePrefix, StringComparison.Ordinal))
+        {
+            if (segment.CharacterId is Guid id && segment.Kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue)
+            {
+                var selected = castRevision.Assignments.SingleOrDefault(a => a.CharacterId == id)
+                    ?? throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+                return (selected.Voice, selected.Rate, selected.Pitch, selected.Volume);
+            }
+            if (segment.Kind == SpeechSegmentTurnKind.InnerMonologue)
+                throw new SpeechPlanIntegrityException(IntegrityMismatchReasonCode);
+            return (castRevision.NarratorVoice, castRevision.NarratorRate, castRevision.NarratorPitch, castRevision.NarratorVolume);
+        }
         if ((segment.Kind is SpeechSegmentTurnKind.Dialogue or SpeechSegmentTurnKind.InnerMonologue)
             && segment.CharacterId is Guid characterId)
         {
@@ -244,6 +316,7 @@ public static class MultiCharacterTurnBuilder
     /// <summary>Packs a Ready Clone profile into the opaque reference carried by a narration turn.
     /// Design profiles are rejected while the provider contract cannot distinguish voice prompts.</summary>
     public const string LocalCloneReferencePrefix = "localclone:";
+    public static string EncodeLocalCloneReference(Guid id) => $"{LocalCloneReferencePrefix}{id:N}";
 
     private static string EncodeVoiceReference(CharacterVoiceProfile profile, string provider)
     {
@@ -252,15 +325,9 @@ public static class MultiCharacterTurnBuilder
             throw UnsupportedDesignVoice();
         }
 
-        // The self-hosted provider synthesizes from the stored reference recording itself, so
-        // the turn carries the local profile id; the 3wa provider replays a remote task handle.
         return string.Equals(provider, CharacterVoiceProviders.LocalClone, StringComparison.OrdinalIgnoreCase)
-            ? EncodeLocalCloneReference(profile.Id)
-            : $"clone:{profile.VoiceProfileTaskId}";
+            ? EncodeLocalCloneReference(profile.Id) : $"clone:{profile.VoiceProfileTaskId}";
     }
-
-    public static string EncodeLocalCloneReference(Guid voiceProfileId) =>
-        $"{LocalCloneReferencePrefix}{voiceProfileId:N}";
 
     /// <summary>
     /// Voice profiles hang off a <c>CharacterProfile</c> library entry, not off any one series'

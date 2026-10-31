@@ -4,7 +4,7 @@ public interface IMultiVoiceNarrationProvider
 {
     string ProviderName { get; }
 
-    Task SynthesizeAsync(
+    Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,

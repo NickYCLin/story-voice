@@ -121,6 +121,13 @@ public sealed class SeriesCastRebuildMember
         _status = SeriesCastRebuildMemberStatus.Failed;
     }
 
+    internal void Resume(bool completed)
+    {
+        if (_stagedNarrationJobId is null)
+            throw new InvalidOperationException("尚未附加工作的批次成員無法恢復。");
+        _status = completed ? SeriesCastRebuildMemberStatus.Ready : SeriesCastRebuildMemberStatus.Building;
+    }
+
     private static void EnsureId(Guid value, string parameterName)
     {
         if (value == Guid.Empty)

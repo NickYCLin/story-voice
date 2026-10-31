@@ -10,6 +10,35 @@ StoryVoice 的 external voice API 只接受系統擁有者自行建立、沒有�
 目前 repository 預設 `ExternalVoiceApi.Enabled=false`、`VoiceCatalog.Enabled=false`、
 Consumers 與 catalog Entries 都是空集合，且不包含任何真實 token 或授權素材。
 
+## 公開聲線查詢、固定試聽與部署子路徑
+
+公開目錄啟用時，下列 GET 不需 API 金鑰，且只回傳通過公開授權檢查的聲線：
+
+| API 路徑（加在部署 base URL 後） | 用途 |
+|---|---|
+| `/api/public/v1/voices` | 取得目錄與 `alias`、`sampleUrl`、`canPreview` |
+| `/api/public/v1/voices/{alias}` | 取得單一聲線的公開資訊與目前授權摘要 |
+| `/api/public/v1/voices/{alias}/demo` | 取得固定 `audio/wav` 試聽，不觸發合成 |
+
+外部合成的 `voice` 使用配置的 `alias`，不是可變動的顯示名稱，也不是私人角色 ID。
+公開可見不會自動賦予 consumer 合成 entitlement；私人角色不會因使用公開 GET 而曝光。
+目錄停用回 404；啟用但沒有合格項目回空陣列。失效或未公開 alias 的 detail／demo 回 404。
+
+本服務的部署 base URL 為 `https://aiprod.wrbtycg.tw/StoryVoice`，例如：
+
+~~~bash
+curl --fail --silent --show-error https://aiprod.wrbtycg.tw/StoryVoice/api/public/v1/voices
+~~~
+
+目錄內的 `sampleUrl` 以 `/api/` 開頭。外部程式必須將它接在上述部署 base URL 後，
+不要以網域根目錄解析而丟失 `/StoryVoice`，也不要重複加子路徑。
+合成完整 URL 是 `https://aiprod.wrbtycg.tw/StoryVoice/api/external/v1/speech`。
+以下範例的 `<base-path>` 應填 `/StoryVoice`；若部署在網域根目錄則留空。
+
+TTS 是伺服器對伺服器介接，不以跨來源瀏覽器 CORS 作為驗收前提，也不可將 Bearer token
+放進前端。公開頁內的試聽使用同來源 URL；其他網站以 JavaScript 讀取音訊 bytes 的跨來源
+用法需要另行定義 CORS 契約，不能假設目前已支援。
+
 ## HTTP contract
 
 兩種 tier 共用：
@@ -43,7 +72,7 @@ Bearer prefix 與 tier 強制綁定：
 互換。
 
 ~~~bash
-curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" --header "Idempotency-Key: <unique-16-to-64-character-key>" --header "Content-Type: application/json" --data '{"voice":"<authorized-alias>","text":"<authorized-text>"}' --output sample.wav https://<host>/api/external/v1/speech
+curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE_VOICE_TOKEN" --header "Idempotency-Key: <unique-16-to-64-character-key>" --header "Content-Type: application/json" --data '{"voice":"<authorized-alias>","text":"<authorized-text>"}' --output sample.wav https://<host><base-path>/api/external/v1/speech
 ~~~
 
 | HTTP | code | 意義 |
@@ -59,14 +88,16 @@ curl --fail-with-body --request POST --header "Authorization: Bearer $STORYVOICE
 
 失敗的請求不會被冪等快取釘住：收到 429／503 後用同一個 Idempotency-Key 重試會真正重新執行；只有成功的音訊會在 TTL 內以同一 key 重播。
 
-精確的 speech POST 在 bearer authentication 與受管金鑰資料庫查詢前，會先通過一層
+路由到 speech endpoint 的 POST 在 bearer authentication 與受管金鑰資料庫查詢前，會先通過一層
 process-local 防濫用閘門：預設每個來源網段 60 次／分鐘、全 process 600 次／分鐘，分別可用
 `ExternalVoiceApi__PreAuthenticationRequestsPerMinute` 與
 `ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute` 調整。來源只採用可信代理鏈已解析的
 remote address；IPv4-mapped IPv6 會歸回 IPv4，native IPv6 以 `/64` 分組，並雜湊到固定 256 個
 bucket，攻擊者輪換地址不會讓記憶體無界增長。這層 429 尚未可靠歸屬 owner／consumer，因此不寫
-usage ledger；通過驗證後，Playground 與 external API 才共同消耗既有 consumer 額度。兩層目前
-皆為單一 process 狀態，多 replica 仍須改用共用協調。
+usage ledger；通過驗證後，Playground 與 external API 才共同消耗既有 consumer 額度。匿名入口
+與 consumer 額度可分別啟用預設關閉的 Redis 共用固定視窗。來源防洪依實際選中的 endpoint
+判定，路由接受的大寫或尾端斜線也會先受限；正式 API 仍只接受原本的標準路徑。詳見
+[共用請求額度](EXTERNAL_VOICE_SHARED_LIMITS.md)。
 
 ## 安全產生 credential
 
@@ -244,6 +275,7 @@ API process 內的 bounded background queue，不持有 request-scoped `DbContex
 可用 `ExternalVoiceApi__UsageLedgerQueueCapacity` 調整為 1 至 10000。owner 可由
 `GET /api/developer/external-voice/usage` 或 `/developer/usage` 查詢最多 90 天的使用量。
 
-目前 rate limit、single-flight 與 idempotency cache 仍是單一 API process 內的有界狀態，
-只支援一個 API replica。正式多 replica 或付費訂閱前，必須改用共享協調／entitlement
+目前 single-flight 與 idempotency cache 仍是單一 API process 內的有界狀態，
+正式部署仍只支援一個 API replica。consumer rate limit 與匿名入口防洪已可選用 Redis 共用額度；正式多
+replica 或付費訂閱前，仍須完成其餘共享協調／entitlement
 storage、決定 usage retention／歸檔政策，並完成實際 provider terms 與商用權利審查。

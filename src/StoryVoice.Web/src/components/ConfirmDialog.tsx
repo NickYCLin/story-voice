@@ -30,12 +30,14 @@ export function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
     const cancelButton = cancelButtonRef.current
     const confirmButton = confirmButtonRef.current
-    ;(destructive ? cancelButton : confirmButton)?.focus()
+    ;(destructive ? cancelButton : confirmButton)?.focus({ preventScroll: true })
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -55,7 +57,8 @@ export function ConfirmDialog({
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
-      previouslyFocused?.focus()
+      document.body.style.overflow = previousOverflow
+      previouslyFocused?.focus({ preventScroll: true })
     }
   }, [destructive, open])
 
@@ -66,10 +69,10 @@ export function ConfirmDialog({
       aria-describedby={description ? descriptionId : undefined}
       aria-labelledby={titleId}
       aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-stone-900/40 px-5 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-stone-900/40 px-5 py-6 backdrop-blur-sm"
       role="dialog"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl shadow-stone-400/30">
+      <div className="max-h-full overflow-y-auto w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl shadow-stone-400/30">
         <h3 className="font-serif text-xl text-stone-900" id={titleId}>{title}</h3>
         {description && <p className="mt-3 text-sm leading-6 text-stone-600" id={descriptionId}>{description}</p>}
         <div className="mt-6 flex justify-end gap-3">

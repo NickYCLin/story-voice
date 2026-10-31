@@ -1,0 +1,42 @@
+services:
+  metrics-collector:
+    profiles: ["metrics"]
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/storyvoice/collector.yml"]
+    volumes:
+      - ./ops/metrics/collector.yml:/etc/storyvoice/collector.yml:ro
+    environment:
+      GOMEMLIMIT: 384MiB
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  metrics-prometheus:
+    profiles: ["metrics"]
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+    command:
+      - --config.file=/etc/storyvoice/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --storage.tsdb.retention.size=1GB
+    volumes:
+      - ./ops/metrics:/etc/storyvoice:ro
+      - metrics-data:/prometheus
+    ports:
+      - "127.0.0.1:${STORYVOICE_METRICS_PORT:-9090}:9090"
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    depends_on:
+      - metrics-collector
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+volumes:
+  metrics-data:

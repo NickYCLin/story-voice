@@ -10,4 +10,5 @@ public sealed class NarrationOptions
     public int ProviderTimeoutMinutes { get; set; } = 20;
     public int LeaseMinutes { get; set; } = 5;
     public int MaxAttempts { get; set; } = 3;
+    public int MaximumConcurrentJobs { get; set; } = 1;
 }

@@ -14,6 +14,68 @@ namespace StoryVoice.UnitTests;
 
 public sealed class LocalCloneGatewayClientTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Times_out_when_headers_arrive_but_the_audio_body_stalls(bool partialBody)
+    {
+        using var cleanup = new CancellationTokenSource();
+        using var stream = new StalledAudioStream(partialBody);
+        var handler = new StubHandler(_ => CreateStalledResponse(stream));
+        using var httpClient = CreateHttpClient(handler);
+        httpClient.Timeout = TimeSpan.FromMilliseconds(200);
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        var client = CreateClient(httpClient, logger);
+        var synthesis = client.SynthesizeAsync(
+            new LocalCloneGatewayRequest("private-text", "private-transcript", [1]), cleanup.Token);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<LocalClonePreviewUnavailableException>(
+                () => synthesis.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+            Assert.Equal(LocalClonePreviewFailureKind.GatewayUnavailable, exception.FailureKind);
+            Assert.Contains("FailureClass=Timeout", logger.Combined);
+            Assert.DoesNotContain("private-text", logger.Combined);
+            Assert.DoesNotContain("private-transcript", logger.Combined);
+            Assert.Equal(1, handler.RequestCount);
+            Assert.True(stream.WasDisposed);
+        }
+        finally
+        {
+            await cleanup.CancelAsync();
+            try
+            {
+                await synthesis;
+            }
+            catch (Exception exception) when (exception is OperationCanceledException
+                or LocalClonePreviewUnavailableException)
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_during_audio_read_is_not_reported_as_a_gateway_timeout()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        using var stream = new StalledAudioStream(false);
+        var handler = new StubHandler(_ => CreateStalledResponse(stream));
+        using var httpClient = CreateHttpClient(handler);
+        var logger = new RecordingLogger<LocalCloneGatewayClient>();
+        var client = CreateClient(httpClient, logger);
+        var synthesis = client.SynthesizeAsync(
+            new LocalCloneGatewayRequest("private-text", "private-transcript", [1]), cancellation.Token);
+
+        await stream.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellation.Token);
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => synthesis.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+
+        Assert.Empty(logger.Messages);
+        Assert.Equal(1, handler.RequestCount);
+        Assert.True(stream.WasDisposed);
+    }
+
     [Fact]
     public async Task Sends_only_the_pinned_internal_contract_and_accepts_strict_pcm_output()
     {
@@ -364,6 +426,50 @@ public sealed class LocalCloneGatewayClientTests
         return content;
     }
 
+    private static HttpResponseMessage CreateStalledResponse(Stream stream)
+    {
+        var response = CreateSuccessResponse(CreatePcmWave(24_000, 1));
+        var headers = response.Content.Headers.ToArray();
+        response.Content.Dispose();
+        response.Content = new StreamContent(stream);
+        foreach (var header in headers)
+        {
+            response.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        response.Content.Headers.ContentLength = 48_044;
+        return response;
+    }
+
+    private sealed class StalledAudioStream(bool partialBody) : MemoryStream
+    {
+        private bool prefixRead;
+
+        public TaskCompletionSource ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool WasDisposed { get; private set; }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ReadStarted.TrySetResult();
+            if (partialBody && !prefixRead)
+            {
+                prefixRead = true;
+                "RIFF"u8.CopyTo(buffer.Span);
+                return 4;
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            WasDisposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class StubHandler(
         Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {
@@ -372,11 +478,13 @@ public sealed class LocalCloneGatewayClientTests
         public string? Token { get; private set; }
 
         public string[] MultipartNames { get; private set; } = [];
+        public int RequestCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            RequestCount++;
             RequestUri = request.RequestUri;
             Token = request.Headers.GetValues("X-StoryVoice-Internal-Token").Single();
             var multipart = Assert.IsType<MultipartFormDataContent>(request.Content);

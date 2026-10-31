@@ -1298,6 +1298,99 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.ListeningProgress", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("NarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PositionMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("OwnerId", "NarrationJobId");
+
+                    b.HasIndex("NarrationJobId");
+
+                    b.ToTable("listening_progress", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_listening_progress_position", "\"PositionMs\" >= 0 AND \"PositionMs\" <= \"DurationMs\" AND \"DurationMs\" > 0 AND \"DurationMs\" <= 2592000000");
+                        });
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationAttemptUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("AudioBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("CompletedChunks")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("ElapsedMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("InputCharacters")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("LeaseOwner")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("NarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("SynthesisElapsedMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("TotalChunks")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "NarrationJobId", "StartedAt");
+
+                    b.ToTable("narration_attempt_usage", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_narration_usage_outcome", "\"Outcome\" IN ('Running', 'Completed', 'Failed', 'TimedOut', 'Cancelled', 'WorkerStopped', 'LeaseLost', 'Unknown')");
+
+                            t.HasCheckConstraint("CK_narration_usage_quantities", "(\"InputCharacters\" IS NULL OR \"InputCharacters\" >= 0) AND (\"ElapsedMs\" IS NULL OR \"ElapsedMs\" >= 0) AND (\"SynthesisElapsedMs\" IS NULL OR \"SynthesisElapsedMs\" >= 0) AND (\"AudioBytes\" IS NULL OR \"AudioBytes\" > 0) AND ((\"CompletedChunks\" IS NULL AND \"TotalChunks\" IS NULL) OR (\"CompletedChunks\" IS NOT NULL AND \"TotalChunks\" IS NOT NULL AND \"CompletedChunks\" >= 0 AND \"TotalChunks\" > 0 AND \"CompletedChunks\" <= \"TotalChunks\"))");
+                        });
+                });
+
             modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationCastAssignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1681,6 +1774,66 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTimeline", b =>
+                {
+                    b.Property<Guid>("NarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TimelineJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("NarrationJobId");
+
+                    b.HasIndex("OwnerId", "NarrationJobId")
+                        .HasDatabaseName("IX_narration_timelines_owner_job");
+
+                    b.ToTable("narration_timelines", (string)null);
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTrackSelection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BookId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("NarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreviousNarrationJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "NarrationJobId");
+
+                    b.HasIndex("OwnerId", "BookId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("narration_track_selections", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_track_selection_revision", "\"Revision\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("StoryVoice.Domain.Narrations.SeriesCastRebuildBatch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1725,7 +1878,8 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "SeriesId", "DraftCastRevisionId")
                         .IsUnique()
-                        .HasDatabaseName("UX_rebuild_batches_draft_cast");
+                        .HasDatabaseName("UX_rebuild_batches_draft_cast")
+                        .HasFilter("\"Status\" <> 'Failed'");
 
                     b.ToTable("series_cast_rebuild_batches", null, t =>
                         {
@@ -2486,6 +2640,25 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.ListeningProgress", b =>
+                {
+                    b.HasOne("StoryVoice.Domain.Narrations.NarrationJob", null)
+                        .WithMany()
+                        .HasForeignKey("NarrationJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationAttemptUsage", b =>
+                {
+                    b.HasOne("StoryVoice.Domain.Narrations.NarrationJob", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "NarrationJobId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationCastAssignment", b =>
                 {
                     b.HasOne("StoryVoice.Domain.Narrations.NarrationCastRevision", null)
@@ -2575,6 +2748,26 @@ namespace StoryVoice.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_njob_speech_plans_revision_scope");
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTimeline", b =>
+                {
+                    b.HasOne("StoryVoice.Domain.Narrations.NarrationJob", null)
+                        .WithMany()
+                        .HasForeignKey("NarrationJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_narration_timelines_job");
+                });
+
+            modelBuilder.Entity("StoryVoice.Domain.Narrations.NarrationTrackSelection", b =>
+                {
+                    b.HasOne("StoryVoice.Domain.Narrations.NarrationJob", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "NarrationJobId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("StoryVoice.Domain.Narrations.SeriesCastRebuildBatch", b =>

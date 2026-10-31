@@ -497,8 +497,8 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
             new
             {
                 name = $"本機克隆試音 {Guid.NewGuid():N}",
-                narratorProvider = "edge",
-                narratorVoice = "zh-TW-YunJheNeural",
+                narratorProvider = "local-clone",
+                narratorVoice = await owner.ManagedVoiceAsync(cancellationToken),
                 narratorRate = "-5%",
                 narratorPitch = "+0Hz",
                 narratorVolume = "+0%",
@@ -516,8 +516,8 @@ public sealed class LocalClonePreviewApiTests(ApiFactory factory) : IClassFixtur
             {
                 canonicalName = "褚冥漾",
                 role = "Main",
-                voiceProvider = "edge",
-                voice = "zh-TW-YunJheNeural",
+                voiceProvider = "local-clone",
+                voice = await owner.ManagedVoiceAsync(cancellationToken),
                 rate = "-8%",
                 pitch = "+2Hz",
                 volume = "-3%",

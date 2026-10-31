@@ -177,6 +177,7 @@ internal sealed class PostgreSqlCastEpochActivationPublisher(StoryVoiceDbContext
                     WHERE "OwnerId" = {command.OwnerId}
                         AND "SeriesId" = {command.SeriesId}
                         AND "DraftCastRevisionId" = {baseRevisionId}
+                        AND "Status" = 'Activated'
                     ORDER BY "Id"
                     FOR UPDATE
                     """)

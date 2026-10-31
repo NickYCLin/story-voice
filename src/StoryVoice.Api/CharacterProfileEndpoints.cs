@@ -79,6 +79,17 @@ public static class CharacterProfileEndpoints
         })
         .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
+        group.MapPost("/ai-assist", async (
+            GenerateCharacterProfileAssistRequest request,
+            ICharacterProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await service.GenerateAssistAsync(request, cancellationToken);
+            return Results.Ok(result);
+        })
+        .AddEndpointFilter<AntiforgeryEndpointFilter>()
+        .WithName("GenerateCharacterProfileAssist");
+
         group.MapPut("/{characterProfileId:guid}", async (
             Guid characterProfileId,
             UpdateCharacterProfileRequest request,

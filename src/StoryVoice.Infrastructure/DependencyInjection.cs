@@ -64,6 +64,7 @@ public static class DependencyInjection
             .Validate(options => !string.IsNullOrWhiteSpace(options.AudioRootPath), "Narration audio root is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Voice), "Narration voice is required.")
             .Validate(options => options.MaxAttempts is >= 1 and <= 10, "Narration attempts must be between 1 and 10.")
+            .Validate(options => options.MaximumConcurrentJobs is >= 1 and <= 4, "Narration concurrent jobs must be between 1 and 4.")
             .Validate(options => options.ProviderTimeoutMinutes >= 1, "Narration provider timeout must be positive.")
             .Validate(options => options.LeaseMinutes is >= 2 and <= 60,
                 "Narration lease must be between 2 and 60 minutes; the Worker renews it while synthesis is active.")
@@ -141,9 +142,11 @@ public static class DependencyInjection
                     LocalClonePreviewOptions.PinnedGatewayBaseUrl,
                     StringComparison.Ordinal),
                 "Local clone preview gateway URL must be the pinned internal HTTP endpoint.")
-            .Validate(options => !options.Enabled
+            .Validate(options => (!options.Enabled && !options.FormalNarrationEnabled)
                 || IsValidLocalCloneInternalToken(options.InternalToken),
-                "Enabled local clone preview requires a 32-512 character printable ASCII internal token.")
+                "Enabled local clone preview or formal narration requires a 32-512 character printable ASCII internal token.")
+            .Validate(options => options.RetryDelaySeconds is >= 1 and <= 60,
+                "Local clone retry delay must be between 1 and 60 seconds.")
             .Validate(options => !options.Enabled || IsValidPrivateAssetRoot(options.AssetRootPath),
                 "Enabled local clone preview requires a non-root private asset directory.")
             .Validate(options => options.ConnectTimeoutSeconds is >= 1 and <= 30,
@@ -183,8 +186,7 @@ public static class DependencyInjection
                 }
             })
             .Validate(
-                options => options.Voices.Count > 0
-                    && options.Voices.All(voice =>
+                options => options.Voices.All(voice =>
                         !string.IsNullOrWhiteSpace(voice.Provider)
                         && !string.IsNullOrWhiteSpace(voice.Voice)
                         && !string.IsNullOrWhiteSpace(voice.DisplayName)
@@ -194,6 +196,8 @@ public static class DependencyInjection
                         .Distinct(StringComparer.Ordinal)
                         .Count() == options.Voices.Count,
                 "Series voice catalog entries must be complete and unique.")
+            .Validate(options => options.Voices.All(voice => voice.HasValidCastingMetadata()),
+                "Series voice casting metadata must use a known gender, a valid age range, and at most 16 distinct short tags.")
             .ValidateOnStart();
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IBookMetadataCorrectionService, BookMetadataCorrectionService>();
@@ -251,12 +255,17 @@ public static class DependencyInjection
         services.AddScoped<IBookInsightsService, BookInsightsService>();
         services.AddScoped<ILibraryStatusService, LibraryStatusService>();
         services.AddScoped<INarrationService, NarrationService>();
+        services.AddScoped<INarrationTrackService, NarrationTrackService>();
         services.AddScoped<ISeriesNarrationService, SeriesNarrationService>();
         services.AddScoped<IStagedNarrationBatchProgressService, StagedNarrationBatchProgressService>();
         services.AddScoped<IStorySeriesRepository, StorySeriesRepository>();
         services.AddScoped<ISeriesService, SeriesService>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<ExternalVoiceIdempotencyCoordinator>();
+        services.AddSingleton<IExternalVoiceSharedRateLimiter>(provider =>
+            new RedisExternalVoiceSharedRateLimiter(
+                provider.GetRequiredService<IOptions<ExternalVoiceApiOptions>>(),
+                () => provider.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>()));
         services.AddSingleton<ExternalVoiceConcurrencyGate>();
         services.AddScoped<LocalCloneProfileSynthesizer>();
         services.AddScoped<IExternalVoiceSynthesisService, ExternalVoiceSynthesisService>();
@@ -290,12 +299,20 @@ public static class DependencyInjection
         });
         services.AddScoped<IChapterSpeechPlanRepository, ChapterSpeechPlanRepository>();
         services.AddScoped<ISpeechPlanService, SpeechPlanService>();
+        services.AddScoped<ISpeechSegmentPreviewService, SpeechSegmentPreviewService>();
         services.AddSingleton<IBookImportParser, PlainTextBookParser>();
         services.AddSingleton<IBookImportParser, EpubBookParser>();
         services.AddSingleton<IBookFileStorage, LocalBookFileStorage>();
         services.AddSingleton<LocalCharacterVoiceAudioStorage>();
         services.AddSingleton<LocalCharacterAvatarStorage>();
         services.AddScoped<ICharacterProfileService, CharacterProfileService>();
+        services.AddHttpClient<ICharacterProfileAssistGenerator, OllamaCharacterAnalysisProvider>((provider, client) =>
+        {
+            var localLlmOptions = provider.GetRequiredService<IOptions<LocalLlmCharacterAnalysisOptions>>().Value;
+            client.BaseAddress = new Uri(localLlmOptions.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(localLlmOptions.TimeoutSeconds);
+        })
+        .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler { UseProxy = false });
         services.AddScoped<ICharacterVoiceProfileService, CharacterVoiceProfileService>();
         services.AddScoped<ICharacterVoicePreviewService, CharacterVoicePreviewService>();
         services.AddHttpClient<IThreeWaVoiceProfileClient, ThreeWaVoiceProfileClient>((provider, client) =>

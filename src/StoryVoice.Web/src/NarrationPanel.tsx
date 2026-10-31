@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { Link } from 'react-router-dom'
 
 import { apiUrl, responseProblem } from './api'
+import { AudioPlayer, type NarrationTimeline } from './components/AudioPlayer'
+import { PrivateNarrationTracks } from './components/PrivateNarrationTracks'
+import { NarrationUsagePanel } from './components/NarrationUsagePanel'
+import { useListeningProgress } from './useListeningProgress'
+import { localize, useLocale } from './i18n'
 
 type NarrationBook = {
   id: string
@@ -50,6 +55,52 @@ function VoiceWave() {
         <span key={index} style={{ '--wave': `${height * 100}%`, '--delay': `${(index % 5) * .15}s` } as CSSProperties} />
       ))}
     </div>
+  )
+}
+
+function CompletedNarrationPlayer({ job, csrfToken }: { job: NarrationJob; csrfToken: string }) {
+  const [timeline, setTimeline] = useState<NarrationTimeline | null>(null)
+  const progress = useListeningProgress(job.id, csrfToken)
+  const { locale } = useLocale()
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/narrations/${job.id}/timeline`), {
+          credentials: 'same-origin',
+          signal: controller.signal,
+        })
+        // 404 代表這個工作沒有時間軸（較舊的音訊或 provider 不支援）；播放器維持原樣。
+        if (!response.ok) return
+        const loaded = await response.json() as NarrationTimeline
+        if (!controller.signal.aborted) setTimeline(loaded)
+      } catch {
+        // 時間軸是加值資訊，讀取失敗不影響播放。
+      }
+    })()
+    return () => controller.abort()
+  }, [job.id])
+
+  return (
+    <>
+    <AudioPlayer
+      className="mt-4"
+      src={apiUrl(`/api/narrations/${job.id}/audio`)}
+      storageKey={`narration-${job.id}`}
+      timeline={timeline}
+      title={`${job.voice} · ${job.rate}`}
+      serverProgress={progress.progress}
+      onSaveProgress={progress.save}
+    />
+    {(progress.status === 'error' || progress.status === 'conflict') && (
+      <p className="mt-2 text-sm text-amber-700" role="status">
+        {progress.status === 'conflict'
+          ? localize(locale, '其他分頁或裝置已更新進度，目前只保存在此瀏覽器。重新開啟播放器可讀取最新位置。', 'Another tab or device updated your progress. Progress is saved only in this browser. Reopen the player to load the latest position.')
+          : localize(locale, '播放進度尚未同步，目前只保存在此瀏覽器。連線恢復或繼續播放時會再嘗試。', 'Progress has not synced and is saved only in this browser. We will retry when the connection returns or you continue listening.')}
+      </p>
+    )}
+    </>
   )
 }
 
@@ -117,7 +168,6 @@ export function NarrationPanel({ book, csrfToken }: Props) {
     }
   }, [active, loadJobs])
 
-
   async function cancelNarration(jobId: string) {
     setMessage('正在取消朗讀工作…')
     try {
@@ -166,6 +216,8 @@ export function NarrationPanel({ book, csrfToken }: Props) {
         </div>
       )}
 
+      <PrivateNarrationTracks key={book.id} bookId={book.id} csrfToken={csrfToken} />
+
       <div aria-live="polite" className="mt-3 min-h-5 text-xs text-stone-500">{message}</div>
 
       <div className="mt-4 space-y-3">
@@ -208,11 +260,8 @@ export function NarrationPanel({ book, csrfToken }: Props) {
                 取消工作
               </button>
             )}
-            {job.status === 'Completed' && (
-              <audio className="mt-4 w-full" controls preload="metadata" src={apiUrl(`/api/narrations/${job.id}/audio`)}>
-                你的瀏覽器不支援音訊播放。
-              </audio>
-            )}
+            {job.status === 'Completed' && <CompletedNarrationPlayer key={job.id} job={job} csrfToken={csrfToken} />}
+            <NarrationUsagePanel jobId={job.id} />
             {job.status === 'Failed' && (
               <p className="mt-3 text-sm text-rose-600">語音服務未能完成這次工作（{job.errorCode ?? 'provider_failed'}）。重新確認授權後可再次建立。</p>
             )}

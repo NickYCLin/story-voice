@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using StoryVoice.Application.BookImports;
 using StoryVoice.Application.Insights;
 using StoryVoice.Application.Narrations;
+using StoryVoice.Application.Narrations.SpeechPlanning;
 using StoryVoice.Application.Series;
 
 namespace StoryVoice.Api;
@@ -30,6 +31,7 @@ public sealed class ApiExceptionHandler(
             LocalLlmCharacterAnalysisUnavailableException => StatusCodes.Status503ServiceUnavailable,
             SeriesVoicePreviewUnavailableException => StatusCodes.Status503ServiceUnavailable,
             LocalClonePreviewUnavailableException => StatusCodes.Status503ServiceUnavailable,
+            SpeechSegmentPreviewUnsupportedProviderException => StatusCodes.Status422UnprocessableEntity,
             AntiforgeryValidationException => StatusCodes.Status400BadRequest,
             ArgumentException or InvalidOperationException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
@@ -61,6 +63,7 @@ public sealed class ApiExceptionHandler(
                 StatusCodes.Status409Conflict => "Book text is unavailable",
                 StatusCodes.Status413PayloadTooLarge => "Book text exceeds local LLM analysis limits",
                 StatusCodes.Status415UnsupportedMediaType => "Book format is not supported",
+                StatusCodes.Status422UnprocessableEntity => "Segment preview is not supported for this voice provider",
                 StatusCodes.Status503ServiceUnavailable => "Local LLM analysis is temporarily unavailable",
                 _ => "The service could not complete the request"
             },
@@ -109,6 +112,10 @@ public sealed class ApiExceptionHandler(
         {
             problemDetails.Title = "Local clone preview is temporarily unavailable";
             problemDetails.Extensions["code"] = localCloneException.StableCode;
+        }
+        else if (exception is SpeechSegmentPreviewUnsupportedProviderException)
+        {
+            problemDetails.Extensions["code"] = SpeechSegmentPreviewUnsupportedProviderException.StableCode;
         }
 
         httpContext.Response.StatusCode = statusCode;

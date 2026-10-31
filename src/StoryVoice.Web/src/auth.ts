@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, createElement, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
 import { apiUrl } from './api'
 
@@ -14,7 +14,16 @@ export type AuthState =
   | { status: 'anonymous'; email: null; csrfToken: string }
   | { status: 'authenticated'; email: string; csrfToken: string }
 
-export function useAuthSession() {
+type SessionController = { authState: AuthState; loadAuthSession: () => Promise<void>; logout: () => Promise<void> }
+export const AuthSessionContext = createContext<SessionController | null>(null)
+
+export function AuthSessionProvider({ children }: { children: ReactNode }) {
+  const session = useAuthSession()
+  return createElement(AuthSessionContext.Provider, { value: session }, children)
+}
+
+export function useAuthSession(): SessionController {
+  const sharedSession = useContext(AuthSessionContext)
   const [authState, setAuthState] = useState<AuthState>({ status: 'loading', email: null, csrfToken: '' })
 
   const loadAuthSession = useCallback(async () => {
@@ -33,8 +42,8 @@ export function useAuthSession() {
   }, [])
 
   useEffect(() => {
-    void loadAuthSession()
-  }, [loadAuthSession])
+    if (!sharedSession) void loadAuthSession()
+  }, [loadAuthSession, sharedSession])
 
   const logout = useCallback(async () => {
     if (authState.status !== 'authenticated') return
@@ -51,5 +60,5 @@ export function useAuthSession() {
     await loadAuthSession()
   }, [authState, loadAuthSession])
 
-  return { authState, loadAuthSession, logout }
+  return sharedSession ?? { authState, loadAuthSession, logout }
 }

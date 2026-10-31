@@ -1,14 +1,17 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StoryVoice.Application.Authentication;
 using StoryVoice.Application.Library;
 using StoryVoice.Domain.Books;
 using StoryVoice.Domain.Narrations;
+using StoryVoice.Infrastructure.Narrations;
 
 namespace StoryVoice.Infrastructure.Persistence;
 
 public sealed class LibraryStatusService(
     StoryVoiceDbContext dbContext,
-    ICurrentUser currentUser) : ILibraryStatusService
+    ICurrentUser currentUser,
+    IOptions<NarrationOptions> narrationOptions) : ILibraryStatusService
 {
     public async Task<IReadOnlyList<LibraryBookStatusResponse>> ListAsync(
         CancellationToken cancellationToken)
@@ -49,6 +52,8 @@ public sealed class LibraryStatusService(
                 job.BookId,
                 job.ContentBookId,
                 job.Status,
+                job.AudioRelativePath,
+                job.AudioBytes,
                 job.CreatedAt,
                 job.UpdatedAt
             })
@@ -82,14 +87,19 @@ public sealed class LibraryStatusService(
                 var narrationStatus = selectedNarration?.Status;
                 var narrationMatchesAuthorizedText = authorizedContentBookId.HasValue
                     && selectedNarration?.ContentBookId == authorizedContentBookId.Value;
+                var audioUnavailable = narrationStatus == NarrationJobStatus.Completed
+                    && !HasStoredAudio(selectedNarration?.AudioRelativePath, selectedNarration?.AudioBytes);
                 var state = narrationStatus switch
                 {
+                    NarrationJobStatus.Completed when audioUnavailable => "failed",
                     NarrationJobStatus.Completed => "audio_ready",
                     NarrationJobStatus.Queued or NarrationJobStatus.Running => "processing",
                     NarrationJobStatus.Failed => "failed",
                     _ => authorizedText ? "ready" : "blocked"
                 };
-                var blockedReason = !authorizedText
+                var blockedReason = audioUnavailable
+                    ? "narration_audio_unavailable"
+                    : !authorizedText
                     ? "authorized_text_required"
                     : narrationStatus == NarrationJobStatus.Failed && narrationMatchesAuthorizedText
                         ? "narration_failed"
@@ -110,5 +120,28 @@ public sealed class LibraryStatusService(
             })
             .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private bool HasStoredAudio(string? relativePath, long? expectedBytes)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) || expectedBytes is not > 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = Path.GetFullPath(narrationOptions.Value.AudioRootPath);
+            var path = Path.GetFullPath(Path.Combine(root, relativePath));
+            var prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return path.StartsWith(prefix, StringComparison.Ordinal)
+                && File.Exists(path)
+                && new FileInfo(path).Length == expectedBytes.Value;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

@@ -1,12 +1,117 @@
 # StoryVoice 開發進度
 
-最後更新：2026-08-30（repository／production 唯讀狀態、前後端、CI、可在本機驗證的相依安全與文件全面稽核）
+最後更新：2026-09-08（帳號續播、配音恢復／監測、共用請求限制與播放器等待狀態）
 
 本文件記錄已由程式碼與測試證實的能力，以及接下來可直接實作的項目。
 產品方向與長期資料模型仍以
 [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) 和
 [`plans/2026-08-11-multi-character-series-cast.md`](plans/2026-08-11-multi-character-series-cast.md)
 為準。
+
+## 2026-09-08 播放器等待音訊
+
+- 音訊開始播放前若還在等資料，改顯示「等待音訊載入…」；等待期間可暫停，資料恢復後不會擅自重播。正常播放、暫停、錯誤、結束與更換音檔都會更新提示。
+- Chrome 152、Firefox 155、WebKit 26.5 以真正 HTTP WAV／Range 延遲回應通過等待、暫停及恢復操作，1440／390／320px 沒有水平溢位。69 項前端互動測試、164 項靜態檢查通過。
+- 這是本機正式建置與合成資料的驗證，尚未部署；完整平台與弱網路驗收範圍見 [`BROWSER_PLAYBACK.md`](BROWSER_PLAYBACK.md)。
+
+## 2026-09-08 固定試聽取消與重試
+
+- 公開目錄與聲線詳情共用的固定試聽，現在可辨識主動暫停造成的播放取消；舊要求或舊聲線的晚到錯誤不會污染新播放。等音訊時顯示載入提示，真正音檔失敗後可手動重新載入。
+- 74 項前端互動測試、164 項靜態檢查及 lint 通過；Chrome／Firefox／WebKit 以真正 HTTP 延遲音訊驗證暫停、恢復與 1440／390／320px 排版。範圍見 [`PUBLIC_VOICE_DETAIL.md`](PUBLIC_VOICE_DETAIL.md)，本次未部署或啟用公開聲線。
+
+## 2026-09-08 VoAI 片段平行
+
+- VoAI 多角色工作新增 `MaximumConcurrentChunks`，預設 1、最多 4；各段可先後完成，組合仍依原文與停頓順序，進度依完成數逐次回報。
+- 失敗會取消並等待其他片段收尾，再清理檔案；工作音訊預算共用同一計數，超出不組合成品。保留付費失敗／逾時不自動重送，沒有啟用金鑰或提高正式並行數。
+- 完整 677 項單元測試通過，含 42 項 VoAI 測試；VoAI staging 與 PostgreSQL Worker 工作／租約整合測試通過。Worker 測試首次因 Docker 清理逾時失敗，單獨重跑通過。設定與音訊預算的限制見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)，實際供應商限制與效能尚未驗收。
+
+## 2026-09-08 配音文字分段
+
+- VoAI／3wa 的固定長度切點不再拆開 emoji、罕見漢字與音樂符號所用的 UTF-16 surrogate pair，避免單片段轉為 UTF-8／JSON 時變成替代字元。保留原本 1000／4000 的長度限制及優先在標點斷句的規則。
+- 8 項新測試涵蓋字元位於切點前、跨過切點與切點後，以及標點與一般漢字長度；其中 6 項先在修正前重現錯誤。95 項相關 provider、分段與音訊組合測試通過。這驗證送出文字的完整性，不代表供應商對罕見字的發音已驗收；本次沒有呼叫外部合成服務或重產既有音檔。
+
+## 2026-09-08 監測收集與告警範例
+
+- 新增選用的 Collector／Prometheus Compose 設定，映像鎖定版本與 digest；Worker 匯出預設仍關閉，正式配音設定未變更。
+- 設定驗證、六組告警規則與真正 OTLP／Prometheus 接收及欄位過濾測試通過，並接入 CI；另以兩個獨立 Worker SDK 程序驗證九項指標與程序計數隔離，確認 Prometheus 重建後保留測試資料。
+- 操作、初始門檻與保留限制見 [`METRICS_STACK.md`](METRICS_STACK.md)。正式部署、Alertmanager 通知、流量門檻調整及 ARM64／NVIDIA 驗收仍未完成。
+
+## 2026-09-08 角色聲線建議
+
+- 系列聲線設定新增「依角色資料建議聲線」與還原；依已連結、啟用中的角色庫設定及目錄明確標籤比對，只選擇與旁白相同引擎且正式可用的聲線。
+- 建議先填表並說明理由，保留手動選擇；角色資料不足就維持原聲線，不從名字猜測性別或年齡。順序固定，已保存的相符聲線優先保留，儲存後沿用既有 cast 鎖定流程。
+- 聲線目錄新增可選性別、年齡範圍與風格標籤，啟動時驗證數量、重複與範圍。內建目錄只標示原本已知的男／女聲，沒有捏造年齡與個性；也不呼叫 LLM 或 TTS 分析角色資料。
+- 聲線儲存補上系列切換與晚到回應檢查，切換系列不會被舊儲存結果拉回去。相關前端互動、API 和設定驗證通過；前端完整 164 項靜態檢查、46 項互動測試、lint 與根路徑／子路徑建置通過。
+
+使用方式與限制見 [`VOICE_CASTING.md`](VOICE_CASTING.md)。Chromium 以合成角色與模擬 API 驗證 1440／390／320px、手動選擇保留、先填表後儲存、重新開啟後讀回；實際模型品質與正式部署仍另行驗收。
+
+## 2026-09-08 Worker 平行配音
+
+- 新增每個 Worker process 的 `MaximumConcurrentJobs` 設定，預設 1、最多 4；只有空位可用才領取工作，領取與租約回收仍走單一循環。
+- 不同工作可各自進行合成；每份使用獨立 scope、租約、取消／timeout 與檔案。完成便補下一份，停止時等待所有執行中的工作收尾，既有 provider 重試與整批啟用規則保持有效。
+- 真實 PostgreSQL 測試啟動 Worker，驗證 2 份同時執行、第三份等空位、租約與音訊隔離，以及停止後由新 Worker 回收過期租約並完成剩餘工作。
+
+本機完整回歸：609 項單元測試、256 項整合測試通過；Compose 設定解析與 `git diff --check` 通過。
+
+設定、資源限制與恢復行為見 [`WORKER_CONCURRENCY.md`](WORKER_CONCURRENCY.md)。本輪沒有修改正式環境的並行數，也沒有用外部 TTS 或 GPU 進行負載測試。單 GPU 仍先保留 1；Edge／VoAI 已另有預設 1 的工作內片段設定，跨 replica 公平排程仍未實作。
+
+## 2026-09-08 BlueMagpie 合成監測
+
+- Worker 新增 `StoryVoice.BlueMagpie` Meter，記錄每次嘗試的執行中數量、耗時、結束原因、片段快取命中／未命中、WAV bytes、片段處理與實際 gateway 呼叫延遲。
+- 成功且有完整有效 PCM 時間軸才計算音訊秒數與 RTF；有重用快取的資料另加標示，不拿來冒充冷啟動的模型速度。取消、失敗與無時間軸都不填入成功音訊指標。
+- 結束與長時間處理的進度 log 只記錄工作識別與統計，不記正文、路徑或 provider 例外內容；metrics 標籤不放 owner／book／job ID，避免識別資料與無界標籤數量。
+- 本機 597 項單元測試通過；另補清理失敗與 log 資料邊界後，27 項 BlueMagpie provider／metrics 測試通過。測試以真正的 .NET MeterListener 和檔案快取驗證中斷恢復、全命中、取消、失敗，以及中途接上 active gauge。
+
+讀取方法、指標定義與驗證範圍見 [`BLUEMAGPIE_OBSERVABILITY.md`](BLUEMAGPIE_OBSERVABILITY.md)。目前沒有安裝正式 metrics exporter／儀表板，也尚未進行 GPU 長時間壓力驗收。
+
+## 2026-09-08 BlueMagpie 失敗批次恢復
+
+- 系列頁重新開啟時會載入最近批次；BlueMagpie 批次因暫時性 provider／timeout／lease 錯誤耗盡重試後，可重新確認書籍處理權利並接續原工作。已完成冊次保留音訊，失敗與被連帶取消的冊次重新排程，不會自動啟用成品。
+- 恢復沿用 job、cast 與 confirmed plan ID，因此仍可使用原本的 chunk cache。會重新檢查正式 admission gate、chunk／音訊預算，以及正文、劇本、系列成員、目前啟用版本、聲線與合成設定；任一版本已變更便要求建立新批次，永久 contract 錯誤也不可直接恢復。
+- PostgreSQL 依系列、批次、工作順序鎖定，重複要求不會建立另一份工作。Worker 取得批次鎖後重讀工作狀態，避免先前的失敗回報把剛恢復的批次再次標成失敗。
+- UI 以中文顯示批次狀態，恢復期間停用重複操作；切換系列會取消輪詢並忽略晚到的批次清單、重試與啟用回應。清單與重試 API 維持登入、owner isolation 與 CSRF 邊界。
+
+本機驗證：16 項批次 domain 測試與 45 項相關整合測試通過，包含真實 PostgreSQL 併發恢復、延遲回報與既有啟用流程；前端 164 項靜態檢查、37 項互動測試、lint 與建置通過。Chromium 以合成資料和模擬 API 檢查 1440／390／320px 恢復畫面、權利勾選及恢復後狀態，未使用正式帳號或 GPU。
+
+這項程式修改不代表已啟用正式長篇生成；BlueMagpie formal flag 仍預設為 `false`，GPU 長時間運行與模型品質需要另外驗收。
+
+## 2026-09-08 續播與播放時間軸
+
+- 新增帳號內的播放進度 API 與 `listening_progress` migration；進度綁定確切朗讀工作，不會套用到重產後的另一份音檔。只有擁有者可讀寫已完成、已發布且未封存書籍的進度，寫入需通過 CSRF。
+- 儲存使用版本檢查；兩個分頁或裝置同時建立／更新時只有一方成功，過期要求回 409。播放器會停止覆寫並提示重新開啟以取得最新位置。
+- 播放器可讀取帳號進度並提供續播，播放、跳轉、暫停、切到背景與離頁時保存；單純查看不會清除舊進度。網路失敗保留本機續播與目前工作最後待送位置，恢復連線或後續操作會再嘗試同步；重試仍使用原先版本，遇到 409 就停止。尚未同步的本機位置不代表其他裝置已取得。
+- BlueMagpie／VoAI 由共用 FFmpeg composer 量測重採樣、音量與停頓處理後的 PCM；3wa 量測實際串接的 MP3 與靜音片段。分塊會合併回原本 turn，累積邊界後才取整數毫秒，避免長篇逐塊四捨五入偏移。BlueMagpie 仍保留可續用的 chunk cache。
+- 新產生的四種 provider 多角色音訊都可附章節／文字／角色時間軸；既有音檔不會自動補出時間軸。3wa 成品改以同磁碟 rename 發布，Windows 含空白與單引號路徑也有合成測試。
+
+新增測試涵蓋 API 權限、PostgreSQL migration／真正的併發寫入、前端同步與晚到回應，以及合成測試音的 FFmpeg／ffprobe 實際處理。這些修改尚不代表正式站已更新，也不代表外部 provider 或 GPU 模型的實際生成品質已驗收。
+
+本機驗證：592 項單元測試、245 項整合測試、164 項前端靜態檢查與 33 項互動測試通過；前端 lint、根路徑／子路徑建置與 EF migration 一致性檢查通過。Chromium 使用合成 WAV 與模擬進度 API，檢查續播、鍵盤回到開頭、下一章、清除 localStorage 後讀回帳號位置，以及 1440／390／320px 排版；真實資料庫行為另由 PostgreSQL 整合測試驗證。
+
+## 2026-09-07 產品介紹整理
+
+- `/about` 與登入後首頁改用製作流程、功能、適用對象與常見問題卡片；以虛構對話說明角色配音，重要文字不放在圖片裡。
+- 文案改為直接說明用途與操作，補充模型設定、聲線可用條件、費用及外部服務的資料流向，移除過度保證。
+- 新增複製介紹、繁中／英文 Markdown、JSON 與 `llms.txt` 閱讀入口，不需登入即可取得介紹內容。
+- 網頁與文件共用 `product-overview.json`，`npm run docs:product` 更新 repository 文件，`npm test` 檢查是否同步。Vite 會依部署路徑產生連結，nginx 為 Markdown、JSON 與文字索引標示正確類型和 UTF-8，避免中文被讀成亂碼。
+- 本機前端 164 項靜態契約與 27 項互動測試通過；另以 Chromium 實際檢查兩種語言、1440／768／390／320px、FAQ 鍵盤操作、複製內容和 `/StoryVoice/` 下的文字文件。
+
+完整介紹：[`PRODUCT_OVERVIEW.zh-TW.md`](PRODUCT_OVERVIEW.zh-TW.md)／[`PRODUCT_OVERVIEW.en.md`](PRODUCT_OVERVIEW.en.md)。本輪修改不代表正式站已更新。
+
+## 2026-09-07 功能補完與互動檢查
+
+- 角色設定的「AI 輔助生成」原本回傳固定模板，單項 `speakingStyle` 也因大小寫比對錯誤而沒有結果。現在透過獨立的 `ICharacterProfileAssistGenerator` 接到既有 Ollama client，使用 `LocalLlmCharacterAnalysis` 設定、共用 GPU lease 與模型卸載流程；只接受指定欄位、限制輸入與回應長度，模型錯誤回 503，不再以模板充當生成成功。草稿仍須使用者按儲存才會寫入角色資料。
+- AI 填表會在切換角色或重設時取消；晚到回應不能改寫別的角色，也不會覆蓋等待期間手動編輯的欄位。角色聲線摘要與試講也補上取消和過期回應檢查。
+- 播放器修正鍵盤跳轉、換音檔殘留狀態、播放失敗無提示、無效音訊長度與零音量取消靜音；暫停、離頁與跳轉會保存進度，僅瀏覽播放器不會清除舊的續播位置。
+- 角色試講與劇本單句試聽改用可暫停、重播的播放器；切換項目、播放錯誤及離頁時回收 Blob URL，過期要求不會自行播放。Playground 取消會立即解除等待，不必等網路回應才可重試。
+- 書庫的筆記與朗讀面板使用不同 React key，快速換書時也會忽略舊回應。書庫載入中不再顯示假的零本狀態。
+- 私人工作頁面依路由載入 JavaScript，等候時保留導覽列；模組下載／渲染失敗時可重新整理或切換頁面。正常路由切換不因錯誤狀態重設而額外卸載內容。初始載入、帳號邊界與建置大小的驗證範圍見 [WEB_LOADING.md](WEB_LOADING.md)。
+- 手機主要導覽改成可展開選單，支援 Escape 關閉與焦點返回；角色表單修正標籤與輸入框的關聯，播放器增加操作區域與鍵盤焦點提示，Playground 產生按鈕改用共用按鈕樣式。
+- `npm test` 現在同時執行靜態契約與 Vitest／jsdom 互動測試，涵蓋播放器、角色 AI、書庫、試聽、Playground 與確認對話框。使用可控制延遲的合成回應驗證競態，已接入現有 frontend CI。
+
+本輪瀏覽器驗證使用獨立本機 Compose 與合成資料：註冊、TXT 匯入、角色儲存後重開、書冊建立、確認對話框鍵盤操作，以及 1440／390／320px 的主要頁面。播放器另以合成 WAV 驗證鍵盤跳轉、章節切換、倍速、播放／暫停與重新整理後續播。
+驗證結果：Release 建置通過，582 項單元測試、238 項整合測試、164 項前端靜態契約、22 項前端互動測試與 13 項 Python 測試通過；前端 lint、根目錄與子路徑建置、EF migration 一致性檢查也通過。Compose 重建後 API readiness 與 Web 均回 200，實際頁面確認模型離線回 503 並保留原表單。前端互動測試使用單一 threads worker，保留每份測試的隔離並減少 Windows 子程序啟動負擔。
+
+這些證據不代表正式站已部署；本機沒有可用的 Ollama 模型，角色生成的回應格式、錯誤與取消流程由測試驗證，實際生成品質仍需模型環境驗收。
 
 ## 2026-08-30 全面稽核與修正
 
@@ -56,6 +161,7 @@
   成功、失敗、429 與平均耗時；摘要讀取失敗時不會連帶中斷專案卡。rate limit、single-flight 與
   idempotency 仍是單一 process memory。
 - 受限說話者辨識：明確 reporting clause 等強規則維持最高優先，不會被模型覆蓋；其餘對話再整章交給本機 `gpt-oss:20b` 補判。模型 schema 只能輸出目前系列已知角色 ID，≥85 信心才自動確認，中／低信心留在人工審核；逾時、例外、漏答、未知 ID 或卸載失敗都安全退回規則結果／Unknown。主角視角模式只轉換非對白，不改變真正對白的 attribution 上下文。
+- 說話者回應在合併前與建立草稿前都會驗證：null、重複片段、超出 0～100 的分數、不合法狀態／來源與角色不一致的結果留待人工確認。模型重複回答不取最高分，也不能把模型來源標成規則；其餘有效片段與既有規則結果保留。呼叫者取消後，忽略取消而晚到的正常回應也不會被套用。
 - 逐章劇本審核 API：草稿建立／重建、逐片段確認或拒絕、確認為不可變 `ConfirmedSpeechPlanRevision`（含 canonical fingerprint），私人正文不進回應。
 - 多聲線 provider registry／dispatcher：Edge TTS 以 JSON manifest 透過 stdin 傳入每個 turn 的文字／聲線／停頓，ffmpeg concat + ffprobe 驗證後才原子發布；新增供應商不用改動既有系列角色 ID。
 - BlueMagpie BM1 本機正式 provider 已接上同一套不可變 speech plan、cast revision、staged rebuild 與原子 MP3 發布流程。固定句試音由 `BLUEMAGPIE_ENABLED` 控制；正式系列 catalog 與工作 admission 另由預設關閉的 `BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 控制。目前只提供 `female_voice`、`hung_yi_lee` 兩個內建聲線，且固定使用中性 rate／pitch／volume，不套用 Edge 的情緒參數差值。
@@ -64,6 +170,7 @@
 - BlueMagpie 正式工作在建立任何 cast／batch／job 前會逐冊執行保守的 chunk 與 PCM/WAV budget preflight；Worker 再以實際 chunks 與快取／gateway 音訊 bytes 重驗。合成進度只在整數百分比增加時寫入資料庫，暫時性失敗與 timeout 會等待 GPU lease 安全冷卻後才重試。
 - Edge 對白依情緒（緊張／開心／生氣／難過）微調 rate/pitch/volume，規則式判斷只讀取合成當下已合法取得的正文與 reporting clause，不做情感分析宣稱；BlueMagpie 維持固定中性參數。
 - 角色庫（Character Library，見下方獨立章節）：owner-scoped、跨系列共用的角色管理頁面（`/characters`），角色的基本資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格）與自訂聲線（Character Voice Studio）都掛在角色庫上，任何系列的多角色配音都能直接選用同一個角色，不用每個系列各自重建。
+- 播放器章節／句子／角色同步：Edge／VoAI／BlueMagpie／3wa 多角色合成時由 provider 以 ffprobe 實測回報逐 turn 起點與時長，Worker 在完成音訊後把「時間 + 章節 + 確認片段 offset」寫入 `narration_timelines`（一 job 一份 JSON 文件，只存 offset 不存正文；寫入為 best-effort，失敗不影響完成的音訊）。owner-scoped `GET /api/narrations/{jobId}/timeline` 讀取時會重算書籍 source hash，僅在與工作鎖定的正文一致時才切出逐 turn 文字，否則保留時間軸但不供文；合併 turn 若混合旁白與角色片段會誠實標為 mixed，不會誤標為單一角色。前端播放器據此顯示章節列表（點擊跳轉、上一章／下一章）、目前句子文字與目前說話角色（含內心獨白標示）；無時間軸的舊工作維持原本純播放 UI。
 
 ## 多角色系列配音進度
 
@@ -86,15 +193,13 @@
 ## 角色庫（Character Library）與角色自訂聲線工作室（Character Voice Studio）
 
 `/characters` 是獨立於任何系列的 owner-scoped 角色管理頁面：可以建立角色的基本
-資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格——AI 補完／AI
-全部重寫按鈕先保留位置，尚未接 LLM），也可以直接在同一頁替角色建立一組基礎
+資料（頭像、年齡、性別、生日、個性、口頭禪、人物背景、說話風格；AI 單項補完與完整
+人設生成已接到本機 Ollama，產生結果仍需人工儲存），也可以直接在同一頁替角色建立一組基礎
 聲線，以及緊張／開心／生氣／難過（加上「平常」）最多五組情境聲線。3wa 官方
 manifest 已明載目前不會把 `voice_prompt` 傳給 VoxCPM2，因此「文字設計」已在 API、
 試音、系列 admission 與 Worker 全部 fail closed；既有描述資料保留但不可視為可用聲線。
 可用流程只剩「上傳錄音克隆」（需要選擇同意類型：本人親自錄製／已取得明確同意／
-已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒；若 3wa 的
-profile 已建立但站方 ASR 回報失敗（例如 `asr_unavailable`），refresh-status 會改以
-上傳時附的預期逐字稿作為待確認草稿，仍需人工確認，不會直接作廢）。角色建好
+已取得合法授權，上傳後走語音辨識草稿→人工確認文字稿的流程才會就緒）。角色建好
 之後，在「多角色系列配音」加入角色時可以直接從角色庫選入，同一個角色（與其聲線）
 能跨多個系列重複使用，不用每個
 系列各自重建一次；系列裡的角色也可以不連結角色庫、維持原本手動設定固定 Edge
@@ -114,8 +219,12 @@ profile 已建立但站方 ASR 回報失敗（例如 `asr_unavailable`），refr
 - **摘要卡片**：基礎聲線狀態、情境聲線數量（已就緒／5）、樣本語料時數（所有克隆
   聲線參考音檔的 ffprobe 時長加總，API 容器已補上 ffmpeg）、最近進行中的任務。
 - **試講**：針對任一已就緒（`Ready`）的 Clone 聲線，輸入一小段文字（上限 200 字）即時合成
-  播放；重用既有的 3wa 合成 client 同步跑一次 submit/poll/result/artifact，不進
-  Worker 的 job 佇列、不落地存檔，純粹是 UI 預覽用途。
+  播放；使用該聲線的受管原始錄音與已確認逐字稿，經既有內部
+  `local-clone-gateway:8082` 交給 `facespeak-voice-clone:8093` 的 CosyVoice 合成。
+  保留擁有者與私人試音授權檢查，驗證錄音雜湊與 PCM 格式；本機停用、素材不符
+  或 gateway 失敗時明確回錯，不重試、不 fallback 至 3wa、Edge 或其他外部供應商。
+  不進 Worker 的 job 佇列、不覆寫參考錄音或正式音檔。部署仍需先核對既有
+  主機與內部網路；不因這項修正新增公網 port 或憑證。
 - **任務紀錄**：以這個角色所有 `CharacterVoiceProfile`（含歷史 Pending／Failed 紀錄）
   依最後更新時間列出的簡易表格；沒有另外做一套持久化的非同步任務追蹤系統，也
   沒有 3wa 端回傳的即時進度百分比（3wa 文件雖提到 status 回應可能帶 `progress`
@@ -133,41 +242,36 @@ Design 模式的 submit/poll/result/artifact 短句實測：任務雖由 `runnin
 number，產物為可解析的 `audio/x-wav`（PCM 16-bit、48 kHz、mono）。Client 現已同時
 支援 number/string ID，只會將 Bearer token 送往設定的同源 HTTPS API 目錄，並限制
 JSON/音訊回應大小。
-新 canonical Clone 的 profile prepare/confirm 已於 2026-09-05 以 19 組角色實測完成
-（其中 17 組以 Edge TTS 合成的擁有者自製參考音建立，2 組沿用主機允許清單素材），
-全部走到 Ready；當日 3wa 的 ASR 與 GPU 常駐服務不可用（`asr_unavailable`、
-`waiting_gpu` / `resident_service_unavailable`），因此逐字稿改由預期逐字稿人工確認，
-私人試音則會在應用程式 60 秒輪詢上限後逾時，待 3wa 恢復即可使用。2026-09-06 起
-`SupportsTrustedCloneFormalNarration` 改為 true：這是單一擁有者部署，clone operation
-內的 `FormalNarrationAllowed` 自我聲明即視為足夠授權，具備 Ready Clone Base 且授權
-範圍含正式配音的角色可用於系列正式配音（Design 聲線仍拒絕）。舊的 legacy
-Clone task 已被新的 canonical Clone 取代。
-
-同日新增自架克隆 provider `local-clone`（`LocalClonePreview__FormalNarrationEnabled`
-開放）：Worker 的 `LocalCloneMultiVoiceNarrationProvider` 讀取每個角色連結的 Ready Clone
-參考錄音與逐字稿，逐 turn 送到 local-clone gateway（FaceSpeak CosyVoice3，需以
-`compose.gpu.yaml` 掛 GPU，否則會退回 CPU、慢十倍以上）合成，24 kHz WAV 轉 44.1 kHz
-MP3 串接；旁白 fallback 改用該工作中台詞最多的克隆聲（POV 模式即主角），完全不使用
-Edge 或 3wa；每段音訊以 job 為範圍快取於 `/data/audio/local-clone-cache/`，重試可續跑。
-特殊傳說系列已切成 `local-clone`，114 位角色全部連結各自的克隆聲線並開始批次合成。
+新 canonical Clone 的 profile prepare/confirm 尚需以另一份授權短 WAV 完成實測；
+現存 legacy Clone task 的 ASR 轉錄失敗，不能視為可用聲線。
 
 已知限制（刻意排除的範圍，不是漏做）：
 - **旁白聲線無法克隆**：角色庫只服務 `SeriesCharacter`，系列旁白沒有對應的克隆
   流程。系列旁白 provider 設成 `3wa-voxcpm2` 時，角色可以混用 Edge 固定聲線與具備
   合法授權、已完成的 3wa Clone 聲線；旁白本身永遠只能是 Edge 聲線。任何缺少 Ready
   Clone Base 或仍含 Design profile 的 3wa 角色會在設定、staging 與 Worker 三層被拒絕。
-- 角色基本資料的「AI 補完」／「AI 全部重寫」按鈕只是預留位置，沒有接 LLM（3wa
-  Cluster API 目前沒有對應的 chat/生成 mode）。
+- 角色基本資料的 AI 補完已接本機 Ollama；實際模型品質與延遲仍需另行驗收。
 - 已新增 BlueMagpie BM1 作為第二個固定聲線引擎；只有內建女聲 `female_voice` 與男聲
   `hung_yi_lee`。durable deterministic chunk cache/resume 已完成，受控 Worker restart
   canary 只重算缺少 chunks；另一次 36-chunk cold benchmark 在約 6.15 分鐘內產生
   690.58 秒 staged 音訊（RTF 0.534），沒有重啟、沒有啟用測試音訊，且測試後 formal
-  flag 已關閉。完整書籍啟用前仍須補 exhausted-attempt 後的同工作恢復、結構化長跑
-  metrics 與 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
+  flag 已關閉。exhausted-attempt 後的同工作恢復、結構化 metrics 與預設關閉的 OTLP 匯出已實作；完整書籍啟用前
+  仍須建立正式監測收集與完成 GPU/LLM 共存壓力驗證。模型權重 license 標示為 `other`，不代表可公開、
   重新散布或商業使用；`BLUEMAGPIE_FORMAL_NARRATION_ENABLED` 預設並應持續為 `false`。
 - BlueMagpie 自架 canary 不需要 VoAI；`VOAI_API_KEY` 與 `VOAI_PAID_API_KEY` 都必須保持
   空值。Worker 只認獨立 opt-in 的 `VOAI_PAID_API_KEY`，避免舊 key 意外產生付費呼叫。
 - 沒有匿名／公開的角色或聲線建立入口，一律維持既有的 owner-scoped 私有資料邊界。
+
+## 配音用量與耗時
+
+Worker 每次開始處理配音會保存獨立的嘗試紀錄，包含送入流程的文字量、最後已知片段進度、
+處理／合成耗時與已確認成品大小；失敗、取消與重試也保留。書籍和系列批次可展開查看。
+沒有結束紀錄且租約已失效時顯示未知，不把缺漏換算為零。
+
+owner-scoped `/api/narrations/{jobId}/usage` 包含 staged／historical 工作的用量 metadata，
+不改變音訊可見範圍。儲存為 best effort，失敗不觸發重複合成；沒有保存正文或價格。
+文字與片段可能包含快取，不等於供應商計費單位。migration、欄位定義與邊界見
+[NARRATION_USAGE.md](NARRATION_USAGE.md)。金額估算與正式部署尚未完成。
 
 ## 明確未完成／需要產品或營運決策
 
@@ -179,14 +283,14 @@ Repository 的 PR／main CI 與 production 人工部署是兩組獨立證據；�
 | 區域 | 尚未完成 | 完成前的邊界 |
 |---|---|---|
 | Production credential | owner-session 的正式 create／rotate／revoke smoke | 涉及一次性正式 secret 與資料 mutation，須由 owner 明確授權操作 |
-| Public voice catalog | 核准 entry、固定 demo、detail DTO／route、creator publication／revoke workflow | `/voices` shell 已部署但 feature flag 關閉，public API 維持 404 |
+| Public voice catalog | 核准 entry、固定 demo、creator publication／revoke workflow | list／demo／detail API 與 `/voices/:alias` 已實作；detail 每次驗證授權與素材，只回傳公開摘要。正式環境尚未部署本次 detail，feature flag 維持關閉，public API 維持 404 |
 | 商業化／營運 | 申請、subscription、billing、invoice、billing-grade metering、hard quota、admin、usage retention／archive | 現有 best-effort ledger 不作唯一計費／硬額度來源；不顯示假價格、假訂閱或假用量 |
-| 多 replica | 共用 rate limit、idempotency、single-flight 與公平排程 | Playground 與 external API 已在同一 process 共用額度；跨 replica 尚未完成 |
-| 前端 runtime regression automation | ConfirmDialog focus trap、Playground stale response／Blob URL lifecycle 的完整 DOM／browser 自動化 | 本輪有 source-level regression tests、獨立 review 與實際 Chrome 核心流程驗證，但 CI 尚未模擬這些焦點與競態時序 |
+| 多 replica | 共用 idempotency、single-flight 與公平排程 | 已實作預設關閉的 Redis consumer 額度與驗證前來源／全域防洪；其餘協調尚未完成，不代表可直接擴增正式 replica。見 [EXTERNAL_VOICE_SHARED_LIMITS.md](EXTERNAL_VOICE_SHARED_LIMITS.md) |
+| 跨瀏覽器驗收 | 真正的 Safari、行動裝置、背景播放、弱網路，以及 MP3 長度差異 | Windows Chrome／Firefox／WebKit 已以合成 MP3、WAV 檢查播放控制、續播與窄版排版；WebKit 不等於 Safari，API 固定回應也不代表正式同步驗收。範圍與限制見 [BROWSER_PLAYBACK.md](BROWSER_PLAYBACK.md) |
 | 私有書庫 | Git 外 backfill | 不把私人正文、識別資訊或 dump 放進 repository |
-| BlueMagpie 正式長篇 | exhausted-attempt recovery、結構化長跑 metrics、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
-| 角色建立 | 角色基本資料的 AI 補完／全部重寫 | 目前 UI 明示尚未提供；3wa 沒有對應文字生成 mode |
-| 長期有聲書 UX | automatic casting、單片段重生、平行生成、cost logging、loudness normalize、章節／句子／角色同步、播放進度與 resume | 已完成的 private audio player 與 staged narration 不等於這些後續能力 |
+| BlueMagpie 正式長篇 | 正式 metrics 收集／告警、GPU／LLM 共存、完整書籍 gate、權重 license 決策，以及 NGC constraints／CUDA／model production image 的完整 dependency 與 vulnerability audit | 同工作恢復、程式 metrics 與預設關閉的 OTLP 匯出已實作，仍須營運端設定 Collector 與告警；formal flag 預設保持 `false`；目前 `pip-audit` 證據只涵蓋已安裝的 contract／HTTP test 環境，本機 x86_64 不能冒充 ARM64／NVIDIA production image 驗證 |
+| 角色 AI 品質 | 本機 Ollama 模型的真實生成品質與延遲驗收 | 程式已接既有本機 LLM，provider contract／auth／CSRF／取消與錯誤有測試；本輪本機無可用模型，不能把固定測試回應當成模型驗收 |
+| 長期有聲書 UX | BlueMagpie／3wa 的單工作片段平行、金額估算與供應商用量對帳 | Edge／VoAI 多角色片段與不同工作間有界平行、配音嘗試用量／耗時、規則式聲線建議、單片段重生、loudness normalize、帳號播放進度／resume 與四種 provider 的多角色時間軸已實作；平行上限各自預設 1；既有音檔不會自動補時間軸，尚未同步的本機進度不保證跨裝置可見 |
 | AI Director／Audio Drama | whisper、完整 scene context、環境音、音效、BGM 與混音 | 目前只有 Edge 的受限規則式情緒 rate／pitch／volume 差值 |
 
 ## 公開 repository 邊界
@@ -240,4 +344,4 @@ docker compose config --quiet
 git diff --check
 ```
 
-PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。
+PostgreSQL constraint／migration 測試使用 Testcontainers，因此本機必須先啟動 Docker。音訊合成測試需要 PATH 上有 `ffmpeg` 與 `ffprobe`，只使用測試產生的音調，不呼叫付費 API。

@@ -16,6 +16,14 @@ public static class PublicVoiceCatalogEndpoints
             .WithSummary("List publicly licensed StoryVoice character voices")
             .Produces<IReadOnlyList<PublicVoiceCatalogCard>>(StatusCodes.Status200OK);
 
+        endpoints.MapGet("/api/public/v1/voices/{alias}", GetVoiceAsync)
+            .AllowAnonymous()
+            .WithTags("Public voice catalog")
+            .WithName("GetPublicVoiceDetail")
+            .WithSummary("Read a public voice and its current license summary")
+            .Produces<PublicVoiceCatalogDetail>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
         endpoints.MapGet("/api/public/v1/voices/{alias}/demo", GetDemoAsync)
             .AllowAnonymous()
             .WithTags("Public voice catalog")
@@ -35,6 +43,17 @@ public static class PublicVoiceCatalogEndpoints
         ApplyNoStoreHeaders(httpContext.Response);
         var voices = await catalogService.GetVoicesAsync(cancellationToken);
         return Results.Ok(voices);
+    }
+
+    private static async Task<IResult> GetVoiceAsync(
+        string alias,
+        HttpContext httpContext,
+        IPublicVoiceCatalogService catalogService,
+        CancellationToken cancellationToken)
+    {
+        ApplyNoStoreHeaders(httpContext.Response);
+        var voice = await catalogService.GetVoiceAsync(alias, cancellationToken);
+        return voice is null ? Results.NotFound() : Results.Ok(voice);
     }
 
     private static async Task<IResult> GetDemoAsync(

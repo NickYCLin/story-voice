@@ -45,8 +45,19 @@ builder.Services.AddOptions<VoAiOptions>()
         "VoAI aggregate job response limit must be between 64 MiB and 8 GiB.")
     .Validate(options => options.MaximumChunksPerJob is >= 1 and <= 10_000,
         "VoAI chunks per job must be between 1 and 10000.")
+    .Validate(options => options.MaximumConcurrentChunks is >= 1 and <= 4,
+        "VoAI chunks per job must use between 1 and 4 concurrent slots.")
     .Validate(options => options.SampleRate == 32_000,
         "VoAI synthesis currently requires a 32000 Hz WAV response.")
+    .ValidateOnStart();
+builder.Services.AddOptions<AudioComposerOptions>()
+    .Bind(builder.Configuration.GetSection(AudioComposerOptions.SectionName))
+    .Validate(options => options.TargetIntegratedLoudness is >= -70.0 and <= -5.0,
+        "Target integrated loudness must be between -70.0 and -5.0 LUFS.")
+    .Validate(options => options.TargetTruePeak is >= -9.0 and <= 0.0,
+        "Target true peak must be between -9.0 and 0.0 dBFS.")
+    .Validate(options => options.TargetLoudnessRange is >= 1.0 and <= 50.0,
+        "Target loudness range must be between 1.0 and 50.0 LU.")
     .ValidateOnStart();
 builder.Services.AddHttpClient(VoAiTtsClient.HttpClientName, client =>
         client.Timeout = Timeout.InfiniteTimeSpan)
@@ -58,8 +69,9 @@ builder.Services.AddHttpClient(VoAiTtsClient.HttpClientName, client =>
         string.Equals(headerName, "x-api-key", StringComparison.OrdinalIgnoreCase));
 builder.Services.AddSingleton<IVoAiTtsClient, VoAiTtsClient>();
 builder.Services.AddSingleton<IBlueMagpieChunkCache, BlueMagpieChunkCache>();
-builder.Services.AddSingleton<INarrationProvider, EdgeTtsNarrationProvider>();
-builder.Services.AddSingleton<IMultiVoiceNarrationProvider, EdgeTtsMultiVoiceNarrationProvider>();
+builder.Services.AddStoryVoiceWorkerMetrics(builder.Configuration);
+builder.Services.AddSingleton<BlueMagpieNarrationMetrics>();
+builder.Services.AddSingleton<INarrationProvider, RetiredSingleVoiceProvider>();
 builder.Services.AddSingleton<IMultiVoiceNarrationProvider, ThreeWaVoxCpm2NarrationProvider>();
 builder.Services.AddSingleton<FfmpegVoAiAudioComposer>();
 builder.Services.AddSingleton<IVoAiAudioComposer>(services =>

@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
+import { PublicSiteHeader } from '../components/PublicSiteHeader'
 
 export function NotFoundPage() {
   return (
-    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#faf6ee] px-6 py-16 text-center text-[#332a1f]">
+    <><PublicSiteHeader />
+    <main className="site-page relative grid min-h-[60svh] place-items-center overflow-hidden bg-[#faf6ee] text-center text-[#332a1f]" id="main-content" tabIndex={-1}>
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
       <section className="relative z-10 max-w-xl rounded-3xl border border-stone-200 bg-white/90 p-8 shadow-[0_18px_60px_rgba(96,70,30,.10)] sm:p-12" aria-labelledby="not-found-heading">
@@ -16,6 +18,6 @@ export function NotFoundPage() {
           <Link className="secondary-button public-focus" to="/developers/docs">查看 API 文件</Link>
         </div>
       </section>
-    </main>
+    </main></>
   )
 }

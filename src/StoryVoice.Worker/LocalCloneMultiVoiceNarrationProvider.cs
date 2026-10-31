@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using StoryVoice.Application.Series;
 using StoryVoice.Domain.Narrations;
@@ -15,11 +16,13 @@ namespace StoryVoice.Worker;
 /// clone instead, so no third-party TTS is ever used. Each synthesized chunk is cached on disk
 /// under the job so a retried attempt resumes instead of paying for the whole book again.
 /// </summary>
+// Integrated from the owner-authorized host source, SHA256
+// 0990cc2b6bf85365345484056bbee39694dd4721f28be2688a091749e7f33e06.
 public sealed class LocalCloneMultiVoiceNarrationProvider(
     ILocalCloneGatewayClient client,
     IOptions<LocalClonePreviewOptions> localCloneOptions,
     IOptions<NarrationOptions> narrationOptions,
-    ILogger<LocalCloneMultiVoiceNarrationProvider> logger) : IMultiVoiceNarrationProvider
+    ILogger<LocalCloneMultiVoiceNarrationProvider> logger) : IVersionedMultiVoiceNarrationProvider
 {
     public const string UnavailableCode = "local_clone_formal_narration_disabled";
     public const string MissingReferenceCode = "local_clone_reference_missing";
@@ -28,12 +31,13 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
     // 300 s, so keep chunks to roughly one paragraph.
     private const int MaxChars = 160;
     private const int MaxGatewayAttempts = 6;
-    private static readonly TimeSpan GatewayRetryDelay = TimeSpan.FromSeconds(20);
+    private TimeSpan GatewayRetryDelay => TimeSpan.FromSeconds(localCloneOptions.Value.RetryDelaySeconds);
     private const string BreakCharacters = "\n。！？；，、,.!?:：";
 
     public string ProviderName => CharacterVoiceProviders.LocalClone;
+    public string ProviderVersion => LocalClonePreviewOptions.FormalProviderVersion;
 
-    public async Task SynthesizeAsync(
+    public async Task<MultiVoiceSynthesisResult> SynthesizeAsync(
         MultiVoiceNarrationRequest request,
         string outputPath,
         Func<NarrationSynthesisProgress, CancellationToken, Task>? progressCallback,
@@ -53,9 +57,8 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         }
 
         var references = request.CloneReferences ?? new Dictionary<string, LocalCloneVoiceReference>();
-        var fallbackReferenceKey = ResolveFallbackReferenceKey(request.Turns, references);
         var resolvedTurns = request.Turns
-            .Select(turn => (Turn: turn, ReferenceKey: ResolveReferenceKey(turn, references, fallbackReferenceKey)))
+            .Select(turn => (Turn: turn, ReferenceKey: ResolveReferenceKey(turn, references)))
             .ToArray();
 
         var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
@@ -63,10 +66,14 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         var workDirectory = Path.Combine(outputDirectory, $"local-clone-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workDirectory);
         var cacheDirectory = ResolveCacheDirectory(request);
+        var integrity = new LocalCloneIntegrityReceipt(request.CacheContext, request.Turns.Sum(turn => turn.Text.Length));
         Directory.CreateDirectory(cacheDirectory);
         var referenceAudioCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         try
         {
+            // Validate actual reference bytes even when resuming cached synthesized chunks.
+            foreach (var key in resolvedTurns.Select(turn => turn.ReferenceKey).Distinct(StringComparer.Ordinal))
+                await LoadReferenceAudioAsync(references[key], referenceAudioCache, workDirectory, cancellationToken);
             var turnChunks = resolvedTurns
                 .Select(entry => (entry.Turn, entry.ReferenceKey, Chunks: SplitText(entry.Turn.Text, MaxChars)))
                 .ToArray();
@@ -92,20 +99,21 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!HasSpeakableText(chunks[chunkIndex]))
+                    var chunk = chunks[chunkIndex];
+                    var evidence = new LocalCloneChunkEvidence(turnIndex, chunkIndex, chunk.Length,
+                        Hash(Encoding.UTF8.GetBytes(chunk)), "pending", null, null);
+                    integrity.Chunks.Add(evidence);
+                    await WriteReceiptAsync(Path.Combine(cacheDirectory, "integrity.json"), integrity, cancellationToken);
+                    if (!HasSpeakableText(chunk))
                     {
-                        // CosyVoice's Chinese front end drops text without any CJK characters
-                        // (chapter headers such as "Atlantis AM8：20") and then reports zero
-                        // output, which the gateway surfaces as a 503. Nothing to voice here.
-                        logger.LogInformation(
-                            "Local clone skipped a chunk without speakable CJK text ({Length} chars)",
-                            chunks[chunkIndex].Length);
+                        // Only whitespace and Unicode punctuation may be omitted, explicitly.
+                        evidence.Disposition = "punctuation-only";
                         completed++;
                         continue;
                     }
 
                     var cachedPath = Path.Combine(cacheDirectory, $"{ChunkCacheKey(referenceKey, chunks[chunkIndex])}.mp3");
-                    if (!File.Exists(cachedPath) || new FileInfo(cachedPath).Length < 1)
+                    if (!await CacheMatchesAsync(cachedPath, cancellationToken))
                     {
                         var produced = await SynthesizeChunkWithFallbackAsync(
                             reference,
@@ -114,13 +122,15 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                             cachedPath,
                             workDirectory,
                             cancellationToken);
-                        if (!produced)
-                        {
-                            completed++;
-                            continue;
-                        }
+                        if (!produced) throw Incomplete();
+                        await File.WriteAllTextAsync(cachedPath + ".sha256",
+                            await HashFileAsync(cachedPath, cancellationToken), cancellationToken);
                     }
 
+                    evidence.Disposition = "synthesized";
+                    evidence.AudioSha256 = await HashFileAsync(cachedPath, cancellationToken);
+                    evidence.AudioBytes = new FileInfo(cachedPath).Length;
+                    await WriteReceiptAsync(Path.Combine(cacheDirectory, "integrity.json"), integrity, cancellationToken);
                     sequence.Add(cachedPath);
                     completed++;
                     if (progressCallback is not null)
@@ -138,8 +148,19 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 throw new InvalidOperationException("自架克隆聲線合成沒有產生可用音訊。");
             }
 
-            File.Copy(candidate, outputPath, overwrite: true);
+            integrity.Status = "complete";
+            integrity.AudioSha256 = await HashFileAsync(candidate, cancellationToken);
+            integrity.AudioBytes = new FileInfo(candidate).Length;
+            await WriteReceiptAsync(outputPath + ".integrity.json", integrity, cancellationToken);
+            File.Copy(candidate, outputPath, overwrite: false);
             TryDeleteDirectory(cacheDirectory, logger);
+            return MultiVoiceSynthesisResult.None;
+        }
+        catch
+        {
+            integrity.Status = cancellationToken.IsCancellationRequested ? "cancelled" : "incomplete";
+            await WriteReceiptAsync(Path.Combine(cacheDirectory, "integrity.json"), integrity, CancellationToken.None);
+            throw;
         }
         finally
         {
@@ -149,8 +170,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
 
     private static string ResolveReferenceKey(
         NarrationTurn turn,
-        IReadOnlyDictionary<string, LocalCloneVoiceReference> references,
-        string? fallbackReferenceKey)
+        IReadOnlyDictionary<string, LocalCloneVoiceReference> references)
     {
         if (turn.Voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal))
         {
@@ -171,37 +191,39 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 ThreeWaSynthesisCapabilities.DesignVoiceUnavailableMessage);
         }
 
-        // Narrator / narrator-fallback turns carry a catalog voice id. This provider never calls a
-        // third-party TTS, so they are voiced by the point-of-view clone instead.
-        return fallbackReferenceKey
-            ?? throw new PermanentNarrationProviderException(
-                MissingReferenceCode,
-                "自架克隆聲線系列沒有任何可用的角色克隆聲線可作為旁白。");
-    }
-
-    /// <summary>The clone used for narrator-fallback turns: the reference that voices the most
-    /// text in this job, which under point-of-view narration is the POV character.</summary>
-    internal static string? ResolveFallbackReferenceKey(
-        IReadOnlyList<NarrationTurn> turns,
-        IReadOnlyDictionary<string, LocalCloneVoiceReference> references)
-    {
-        return turns
-            .Where(turn => turn.Voice.StartsWith(MultiCharacterTurnBuilder.LocalCloneReferencePrefix, StringComparison.Ordinal)
-                && references.ContainsKey(turn.Voice))
-            .GroupBy(turn => turn.Voice, StringComparer.Ordinal)
-            .OrderByDescending(group => group.Sum(turn => turn.Text.Length))
-            .ThenBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => group.Key)
-            .FirstOrDefault();
+        throw new PermanentNarrationProviderException(MissingReferenceCode,
+            "旁白與人物都必須明確選擇角色管理聲線，不會自動替換為其他角色或 Edge。");
     }
 
     private string ResolveCacheDirectory(MultiVoiceNarrationRequest request)
     {
-        var scope = request.CacheContext is { } context
-            ? $"{context.JobId:N}-{context.CastRevisionId:N}"
-            : $"adhoc-{Guid.NewGuid():N}";
-        return Path.Combine(narrationOptions.Value.AudioRootPath, "local-clone-cache", scope);
+        // Scope includes every immutable job identity plus reference bytes and transcript.
+        // A new version cannot reuse old potentially partial cache entries.
+        var identity = JsonSerializer.Serialize(new {
+            Version = ProviderVersion, request.CacheContext,
+            References = (request.CloneReferences ?? new Dictionary<string, LocalCloneVoiceReference>())
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new { pair.Key, pair.Value.ReferenceAudioSha256,
+                    Transcript = Hash(Encoding.UTF8.GetBytes(pair.Value.ReferenceTranscript)) })
+        });
+        return Path.Combine(narrationOptions.Value.AudioRootPath, "local-clone-cache-v2",
+            Hash(Encoding.UTF8.GetBytes(identity)));
     }
+
+    private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static async Task<string> HashFileAsync(string path, CancellationToken token)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, token)).ToLowerInvariant();
+    }
+    private static async Task<bool> CacheMatchesAsync(string path, CancellationToken token) =>
+        File.Exists(path) && new FileInfo(path).Length > 0 && File.Exists(path + ".sha256")
+        && string.Equals(await File.ReadAllTextAsync(path + ".sha256", token),
+            await HashFileAsync(path, token), StringComparison.Ordinal);
+    private static Task WriteReceiptAsync(string path, LocalCloneIntegrityReceipt receipt, CancellationToken token) =>
+        File.WriteAllTextAsync(path, JsonSerializer.Serialize(receipt), token);
+    private static PermanentNarrationProviderException Incomplete() => new(
+        "local_clone_incomplete_audio", "自架聲線有文字未成功合成；已保留進度，不會發布缺漏的音訊。");
 
     private static string ChunkCacheKey(string referenceKey, string text)
     {
@@ -211,9 +233,8 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
 
     /// <summary>
     /// Synthesizes one chunk into <paramref name="cachedPath"/>. A chunk the gateway rejects twice
-    /// is retried sentence by sentence so a single unsynthesizable fragment (a stray header, a
-    /// symbol-only line) is dropped instead of failing the whole book. Returns false when nothing
-    /// speakable could be produced for the chunk.
+    /// is retried sentence by sentence. Every meaningful piece must succeed before caching;
+    /// partial audio is never accepted as a completed chunk.
     /// </summary>
     private async Task<bool> SynthesizeChunkWithFallbackAsync(
         LocalCloneVoiceReference reference,
@@ -270,13 +291,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
             throw new InvalidOperationException("自架克隆聲線 gateway 持續無法合成。");
         }
 
-        if (rejected > 0)
-        {
-            logger.LogWarning(
-                "Local clone dropped {Rejected} of {Total} sentence(s) the gateway could not synthesize in one chunk",
-                rejected,
-                pieces.Length);
-        }
+        if (rejected > 0) throw Incomplete();
 
         if (parts.Count == 1)
         {
@@ -320,7 +335,11 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                 "自架克隆聲線的參考錄音檔案不存在。");
         }
 
+        if (new FileInfo(reference.ReferenceAudioPath).Length > LocalClonePreviewOptions.MaximumReferenceAudioBytes)
+            throw new PermanentNarrationProviderException(MissingReferenceCode, "參考錄音超過大小限制。");
         audio = await File.ReadAllBytesAsync(reference.ReferenceAudioPath, cancellationToken);
+        if (!string.Equals(Hash(audio), reference.ReferenceAudioSha256, StringComparison.Ordinal))
+            throw new PermanentNarrationProviderException(MissingReferenceCode, "參考錄音已變更，請重新確認聲線。");
         var seconds = EstimateWavSeconds(audio);
         if (seconds > MaximumReferenceSeconds)
         {
@@ -424,28 +443,9 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
         return true;
     }
 
-    /// <summary>True when the text contains at least one CJK ideograph, bopomofo, kana or hangul
-    /// character — anything else (Latin headers, digits, symbols) yields no CosyVoice output.</summary>
-    internal static bool HasSpeakableText(string text)
-    {
-        foreach (var rune in text.EnumerateRunes())
-        {
-            var value = rune.Value;
-            if ((value >= 0x4E00 && value <= 0x9FFF)
-                || (value >= 0x3400 && value <= 0x4DBF)
-                || (value >= 0x20000 && value <= 0x2FA1F)
-                || (value >= 0xF900 && value <= 0xFAFF)
-                || (value >= 0x3100 && value <= 0x312F)
-                || (value >= 0x31A0 && value <= 0x31BF)
-                || (value >= 0x3040 && value <= 0x30FF)
-                || (value >= 0xAC00 && value <= 0xD7AF))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    /// <summary>Only Unicode punctuation and whitespace may be omitted without synthesis.</summary>
+    internal static bool HasSpeakableText(string text) =>
+        text.EnumerateRunes().Any(rune => !Rune.IsWhiteSpace(rune) && !Rune.IsPunctuation(rune));
 
     internal static IReadOnlyList<string> SplitSentences(string text)
     {
@@ -477,7 +477,8 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
 
     internal static IReadOnlyList<string> SplitText(string text, int maxChars)
     {
-        var remaining = text.Trim();
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxChars, 2);
+        var remaining = text;
         var chunks = new List<string>();
         while (remaining.Length > 0)
         {
@@ -499,13 +500,15 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
             }
 
             var cut = boundary >= maxChars / 2 ? boundary + 1 : maxChars;
-            var chunk = remaining[..cut].Trim();
+            if (cut < remaining.Length && char.IsHighSurrogate(remaining[cut - 1])
+                && char.IsLowSurrogate(remaining[cut])) cut--;
+            var chunk = remaining[..cut];
             if (chunk.Length > 0)
             {
                 chunks.Add(chunk);
             }
 
-            remaining = remaining[cut..].TrimStart();
+            remaining = remaining[cut..];
         }
 
         return chunks;
@@ -583,7 +586,13 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        try { await process.WaitForExitAsync(cancellationToken); }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            throw;
+        }
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
         if (process.ExitCode != 0)

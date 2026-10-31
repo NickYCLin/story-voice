@@ -22,6 +22,7 @@ type Props = {
 
 const narrationLabel = (status: LibraryBookStatus) => {
   if (!status.storyVoiceNarrationStatus) return '尚未建立 StoryVoice 音訊'
+  if (status.blockedReason === 'narration_audio_unavailable') return 'StoryVoice 產製紀錄已完成，但音訊檔案目前不可用'
   const label = status.storyVoiceNarrationMatchesAuthorizedText
     ? 'StoryVoice 音訊'
     : '既有 StoryVoice 音訊（非目前合法正文）'
@@ -111,6 +112,9 @@ export default function LibraryStatusMatrix({ refreshKey }: Props) {
             )}
             {item.blockedReason === 'narration_failed' && (
               <p className="status-matrix-blocked">Blocked：最近一次 StoryVoice 音訊產製失敗，可在書籍詳情重新建立。</p>
+            )}
+            {item.blockedReason === 'narration_audio_unavailable' && (
+              <p className="status-matrix-blocked">音檔遺失、無法讀取或大小不符，尚不能確認可播放。請先檢查音訊儲存空間與備份，再決定是否重新產製。</p>
             )}
           </article>
         ))}

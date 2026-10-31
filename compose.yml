@@ -36,8 +36,6 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
@@ -63,8 +61,8 @@ services:
       BlueMagpie__MaximumResponseBytes: ${BLUEMAGPIE_MAXIMUM_RESPONSE_BYTES:-5242880}
       BlueMagpie__MaximumChunksPerJob: ${BLUEMAGPIE_MAXIMUM_CHUNKS_PER_JOB:-10000}
       BlueMagpie__MaximumJobAudioBytes: ${BLUEMAGPIE_MAXIMUM_JOB_AUDIO_BYTES:-8589934592}
-      LocalClonePreview__Enabled: ${LOCAL_CLONE_PREVIEW_ENABLED:-false}
       LocalClonePreview__FormalNarrationEnabled: ${LOCAL_CLONE_FORMAL_NARRATION_ENABLED:-false}
+      LocalClonePreview__Enabled: ${LOCAL_CLONE_PREVIEW_ENABLED:-false}
       LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
       LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
       LocalClonePreview__AssetRootPath: /data/local-clone-assets
@@ -90,6 +88,9 @@ services:
       ExternalVoiceApi__MaximumTextUtf8Bytes: ${EXTERNAL_VOICE_API_MAXIMUM_TEXT_UTF8_BYTES:-2048}
       ExternalVoiceApi__MaximumResponseBytes: ${EXTERNAL_VOICE_API_MAXIMUM_RESPONSE_BYTES:-3145728}
       ExternalVoiceApi__RequestsPerMinute: ${EXTERNAL_VOICE_API_REQUESTS_PER_MINUTE:-3}
+      ExternalVoiceApi__SharedRateLimitEnabled: ${EXTERNAL_VOICE_API_SHARED_RATE_LIMIT_ENABLED:-false}
+      ExternalVoiceApi__SharedPreAuthenticationRateLimitEnabled: ${EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_RATE_LIMIT_ENABLED:-false}
+      ExternalVoiceApi__SharedPreAuthenticationHashKey: ${EXTERNAL_VOICE_API_SHARED_PRE_AUTHENTICATION_HASH_KEY:-}
       ExternalVoiceApi__PreAuthenticationRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_REQUESTS_PER_MINUTE:-60}
       ExternalVoiceApi__PreAuthenticationGlobalRequestsPerMinute: ${EXTERNAL_VOICE_API_PRE_AUTHENTICATION_GLOBAL_REQUESTS_PER_MINUTE:-600}
       ExternalVoiceApi__IdempotencyCacheEntries: ${EXTERNAL_VOICE_API_IDEMPOTENCY_CACHE_ENTRIES:-32}
@@ -130,11 +131,16 @@ services:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=storyvoice;Username=storyvoice;Password=${POSTGRES_PASSWORD:-storyvoice_local}
       BookStorage__RootPath: /data/books
+      CharacterVoiceStorage__RootPath: /data/character-voices
+      LocalClonePreview__FormalNarrationEnabled: ${LOCAL_CLONE_FORMAL_NARRATION_ENABLED:-false}
+      LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
+      LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
       ThreeWaAiHub__BaseUrl: ${THREEWA_BASE_URL:-https://3wa.tw/3waAIHub/}
       ThreeWaAiHub__ApiToken: ${THREEWA_API_TOKEN:-}
       VoAi__BaseUrl: ${VOAI_BASE_URL:-https://connect.voai.ai/}
       # Paid VoAI calls are opt-in. A legacy VOAI_API_KEY is intentionally ignored.
       VoAi__ApiKey: ${VOAI_PAID_API_KEY:-}
+      VoAi__MaximumConcurrentChunks: ${VOAI_MAX_CONCURRENT_CHUNKS:-1}
       BlueMagpie__Enabled: ${BLUEMAGPIE_ENABLED:-false}
       BlueMagpie__FormalNarrationEnabled: ${BLUEMAGPIE_FORMAL_NARRATION_ENABLED:-false}
       BlueMagpie__BaseUrl: http://bluemagpie-gateway:8081/
@@ -158,21 +164,18 @@ services:
       Narration__Voice: zh-TW-YunJheNeural
       Narration__Rate: -5%
       Narration__ProviderTimeoutMinutes: ${NARRATION_PROVIDER_TIMEOUT_MINUTES:-180}
+      Narration__MaximumConcurrentJobs: ${NARRATION_MAX_CONCURRENT_JOBS:-1}
+      EdgeTts__MaximumConcurrentChunks: ${EDGE_TTS_MAX_CONCURRENT_CHUNKS:-1}
+      WorkerMetrics__Enabled: ${WORKER_METRICS_ENABLED:-false}
+      WorkerMetrics__Endpoint: ${WORKER_METRICS_ENDPOINT:-}
+      WorkerMetrics__ExportIntervalSeconds: ${WORKER_METRICS_EXPORT_INTERVAL_SECONDS:-30}
+      WorkerMetrics__ExportTimeoutSeconds: ${WORKER_METRICS_EXPORT_TIMEOUT_SECONDS:-5}
       Narration__LeaseMinutes: ${NARRATION_LEASE_MINUTES:-5}
-      # Self-hosted CosyVoice clone narration: the worker reads each character's stored
-      # reference recording and sends it to the private gateway turn by turn.
-      CharacterVoiceStorage__RootPath: /data/character-voices
-      LocalClonePreview__FormalNarrationEnabled: ${LOCAL_CLONE_FORMAL_NARRATION_ENABLED:-false}
-      LocalClonePreview__GatewayBaseUrl: http://local-clone-gateway:8082/
-      LocalClonePreview__InternalToken: ${LOCAL_CLONE_INTERNAL_TOKEN:-}
-      LocalClonePreview__ConnectTimeoutSeconds: 10
-      LocalClonePreview__RequestTimeoutSeconds: ${LOCAL_CLONE_NARRATION_REQUEST_TIMEOUT_SECONDS:-600}
-      LocalClonePreview__MaximumResponseBytes: 16777216
     volumes:
       - book-storage:/data/books
+      - character-voice-storage:/data/character-voices:ro
       - audio-storage:/data/audio
       - bluemagpie-chunk-cache:/data/bluemagpie-cache
-      - character-voice-storage:/data/character-voices:ro
     depends_on:
       postgres:
         condition: service_healthy

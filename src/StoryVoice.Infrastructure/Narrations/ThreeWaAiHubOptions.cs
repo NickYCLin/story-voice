@@ -36,13 +36,11 @@ public static class ThreeWaSynthesisCapabilities
 {
     public static bool SupportsVoiceDesign => false;
     /// <summary>
-    /// A receipt uploaded by an owner is an auditable self-attestation. This single-owner
-    /// deployment accepts that attestation (recorded per clone operation with
-    /// <c>FormalNarrationAllowed</c>) as sufficient for full-book synthesis; admission still
-    /// requires every 3wa character to link a Ready Clone base profile whose activated operation
-    /// carries formal-narration consent. Design profiles remain rejected.
+    /// A receipt uploaded by an owner is an auditable self-attestation, not a trusted issuer
+    /// signature. Keep full-book synthesis code-pinned off until StoryVoice has an independent
+    /// approval/signature workflow. Private, owner-scoped preview remains available.
     /// </summary>
-    public static bool SupportsTrustedCloneFormalNarration => true;
+    public static bool SupportsTrustedCloneFormalNarration => false;
     public const string DesignVoiceUnavailableCode = "3wa_design_voice_unsupported";
     public const string DesignVoiceUnavailableMessage =
         "3wa 目前不會把 voice_prompt 傳給 VoxCPM2，文字設計聲線無法產生可區分的角色聲音；請改用已授權且已完成的克隆聲線。";

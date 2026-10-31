@@ -6,9 +6,10 @@ namespace StoryVoice.Worker;
 
 public sealed class FfmpegVoAiAudioComposer(
     IOptions<VoAiOptions> options,
-    ILogger<FfmpegVoAiAudioComposer> logger) : IVoAiAudioComposer, IFfmpegAudioComposer
+    ILogger<FfmpegVoAiAudioComposer> logger,
+    IOptions<AudioComposerOptions>? composerOptions = null) : IVoAiAudioComposer, IFfmpegAudioComposer
 {
-    public Task ComposeAsync(
+    public Task<MultiVoiceSynthesisResult> ComposeAsync(
         IReadOnlyList<VoAiAudioSegment> segments,
         string outputPath,
         CancellationToken cancellationToken) =>
@@ -16,19 +17,20 @@ public sealed class FfmpegVoAiAudioComposer(
             segments.Select(segment => new FfmpegAudioSegment(
                 segment.InputWavPath,
                 segment.Volume,
-                segment.PauseBeforeMs)).ToArray(),
+                segment.PauseBeforeMs,
+                TurnIndex: segment.TurnIndex)).ToArray(),
             outputPath,
             options.Value.SampleRate,
             cancellationToken);
 
-    Task IFfmpegAudioComposer.ComposeAsync(
+    Task<MultiVoiceSynthesisResult> IFfmpegAudioComposer.ComposeAsync(
         IReadOnlyList<FfmpegAudioSegment> segments,
         string outputPath,
         int outputSampleRate,
         CancellationToken cancellationToken) =>
         ComposeCoreAsync(segments, outputPath, outputSampleRate, cancellationToken);
 
-    private async Task ComposeCoreAsync(
+    private async Task<MultiVoiceSynthesisResult> ComposeCoreAsync(
         IReadOnlyList<FfmpegAudioSegment> segments,
         string outputPath,
         int outputSampleRate,
@@ -59,6 +61,7 @@ public sealed class FfmpegVoAiAudioComposer(
         try
         {
             var normalizedPaths = new List<string>(segments.Count);
+            var timing = new NarrationTimingAccumulator();
             for (var index = 0; index < segments.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -87,6 +90,9 @@ public sealed class FfmpegVoAiAudioComposer(
                     ],
                     cancellationToken);
                 normalizedPaths.Add(normalizedPath);
+                // Measure the PCM after resampling, volume and leading silence are applied.
+                timing.Add(segment.TurnIndex,
+                    await ProbeDurationSecondsAsync(normalizedPath, cancellationToken), segment.PauseBeforeMs);
                 if (segment.DeleteInputAfterNormalization)
                 {
                     File.Delete(segment.InputWavPath);
@@ -99,21 +105,31 @@ public sealed class FfmpegVoAiAudioComposer(
             await File.WriteAllLinesAsync(concatListPath, concatLines, cancellationToken);
 
             var candidatePath = Path.Combine(workDirectory, "complete.mp3");
-            await RunFfmpegAsync(
-                [
-                    "-y", "-hide_banner", "-loglevel", "error",
-                    "-f", "concat", "-safe", "0", "-i", concatListPath,
-                    "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3",
-                    candidatePath
-                ],
-                cancellationToken);
+            var compositionArguments = new List<string>
+            {
+                "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "concat", "-safe", "0", "-i", concatListPath
+            };
+
+            var normalization = composerOptions?.Value;
+            if (normalization is null || normalization.EnableLoudnessNormalization)
+            {
+                var targetI = normalization?.TargetIntegratedLoudness ?? -16.0;
+                var targetTp = normalization?.TargetTruePeak ?? -1.5;
+                var targetLra = normalization?.TargetLoudnessRange ?? 11.0;
+                compositionArguments.Add("-af");
+                compositionArguments.Add(BuildLoudnessNormalizationFilter(targetI, targetTp, targetLra));
+            }
+
+            compositionArguments.AddRange(["-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", candidatePath]);
+            await RunFfmpegAsync(compositionArguments, cancellationToken);
             if (!File.Exists(candidatePath) || new FileInfo(candidatePath).Length < 1)
             {
                 throw new InvalidOperationException("Audio composition produced no MP3 output.");
             }
 
             var duration = await ProbeDurationSecondsAsync(candidatePath, cancellationToken);
-            if (duration <= 0)
+            if (!double.IsFinite(duration) || duration <= 0)
             {
                 throw new InvalidOperationException("Audio composition produced a zero-duration MP3.");
             }
@@ -121,11 +137,46 @@ public sealed class FfmpegVoAiAudioComposer(
             // candidatePath and outputPath share a filesystem, so the final rename exposes either
             // the previous complete artifact or the new complete artifact, never a partial MP3.
             File.Move(candidatePath, outputPath, overwrite: true);
+            return timing.ToResult(segments[^1].TurnIndex + 1);
         }
         finally
         {
             TryDeleteDirectory(workDirectory);
         }
+    }
+
+    internal static string BuildLoudnessNormalizationFilter(
+        double integratedLoudness = -16.0,
+        double truePeak = -1.5,
+        double loudnessRange = 11.0)
+    {
+        if (integratedLoudness is < -70.0 or > -5.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(integratedLoudness),
+                "Target integrated loudness must be between -70.0 and -5.0 LUFS.");
+        }
+
+        if (truePeak is < -9.0 or > 0.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(truePeak),
+                "Target true peak must be between -9.0 and 0.0 dBFS.");
+        }
+
+        if (loudnessRange is < 1.0 or > 50.0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(loudnessRange),
+                "Target loudness range must be between 1.0 and 50.0 LU.");
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "loudnorm=I={0:0.#}:TP={1:0.#}:LRA={2:0.#}",
+            integratedLoudness,
+            truePeak,
+            loudnessRange);
     }
 
     internal static string BuildAudioFilter(string volume, int pauseBeforeMs)

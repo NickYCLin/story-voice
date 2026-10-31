@@ -17,7 +17,7 @@ test('直接上傳是唯一且清楚的書籍匯入主流程', () => {
   assert.doesNotMatch(libraryPage, /同步博客來|Companion/)
 })
 
-test('空書庫畫面直接教使用者 3 步驟開始，不需要另一個行銷頁面', () => {
+test('空書庫畫面直接教使用者 3 步驟開始，不依賴公開介紹頁', () => {
   const emptyState = positionOf(libraryPage, "books.length === 0")
   const stepOne = positionOf(libraryPage, '準備一本你有權處理、無 DRM 的 EPUB 或 UTF-8 TXT')
   const stepTwo = positionOf(libraryPage, '選擇檔案並按「匯入並解析」')

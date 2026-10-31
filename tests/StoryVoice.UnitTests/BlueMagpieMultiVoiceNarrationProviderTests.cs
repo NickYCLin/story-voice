@@ -1,15 +1,22 @@
 using System.Text;
 using System.Buffers.Binary;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using StoryVoice.Application.Series;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
 
-public sealed class BlueMagpieMultiVoiceNarrationProviderTests
+public sealed partial class BlueMagpieMultiVoiceNarrationProviderTests : IDisposable
 {
+    private readonly ServiceProvider _metricsServices = new ServiceCollection().AddMetrics()
+        .AddSingleton<BlueMagpieNarrationMetrics>().BuildServiceProvider();
+
+    public void Dispose() => _metricsServices.Dispose();
+
     [Fact]
     public void Job_budget_defaults_preserve_the_existing_formal_runtime_contract()
     {
@@ -62,7 +69,7 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
 
         try
         {
-            await provider.SynthesizeAsync(
+            var result = await provider.SynthesizeAsync(
                 request,
                 outputPath,
                 (value, _) =>
@@ -90,6 +97,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                     Assert.Equal(BlueMagpieOptions.MaleVoice, item.Voice);
                 });
             Assert.Equal(48_000, composer.OutputSampleRate);
+            Assert.Same(composer.Result, result);
+            Assert.Equal(new[] { 0, 0, 1 }, composer.Segments.Select(segment => segment.TurnIndex));
             Assert.Collection(
                 composer.Segments,
                 item =>
@@ -341,7 +350,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 InternalToken = new string('t', 32),
                 ModelRevision = BlueMagpieOptions.PinnedModelRevision,
             }),
-            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance,
+            _metricsServices.GetRequiredService<BlueMagpieNarrationMetrics>());
 
         var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() =>
             provider.SynthesizeAsync(
@@ -553,11 +563,12 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
         Assert.Empty(client.Requests);
     }
 
-    private static BlueMagpieMultiVoiceNarrationProvider CreateProvider(
+    private BlueMagpieMultiVoiceNarrationProvider CreateProvider(
         IBlueMagpieTtsClient client,
         IFfmpegAudioComposer composer,
         IBlueMagpieChunkCache? cache = null,
-        BlueMagpieOptions? providerOptions = null)
+        BlueMagpieOptions? providerOptions = null,
+        ILogger<BlueMagpieMultiVoiceNarrationProvider>? logger = null)
     {
         var configured = providerOptions ?? new BlueMagpieOptions();
         configured.Enabled = true;
@@ -569,7 +580,8 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
             cache ?? new EphemeralChunkCache(),
             composer,
             Options.Create(configured),
-            NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance);
+            logger ?? NullLogger<BlueMagpieMultiVoiceNarrationProvider>.Instance,
+            _metricsServices.GetRequiredService<BlueMagpieNarrationMetrics>());
     }
 
     private static BlueMagpieChunkCache CreatePersistentCache(string root) =>
@@ -702,8 +714,9 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
     {
         public IReadOnlyList<FfmpegAudioSegment> Segments { get; private set; } = [];
         public int OutputSampleRate { get; private set; }
+        public MultiVoiceSynthesisResult Result { get; } = new([new(0, 250, 2000), new(1, 2750, 1000)]);
 
-        public async Task ComposeAsync(
+        public async Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<FfmpegAudioSegment> segments,
             string outputPath,
             int outputSampleRate,
@@ -717,17 +730,18 @@ public sealed class BlueMagpieMultiVoiceNarrationProviderTests
                 outputPath,
                 Encoding.ASCII.GetBytes("ID3-mock"),
                 cancellationToken);
+            return Result;
         }
     }
 
     private sealed class ThrowingComposer : IFfmpegAudioComposer
     {
-        public Task ComposeAsync(
+        public Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<FfmpegAudioSegment> segments,
             string outputPath,
             int outputSampleRate,
             CancellationToken cancellationToken) =>
-            Task.FromException(new InvalidOperationException("synthetic composer failure"));
+            Task.FromException<MultiVoiceSynthesisResult>(new InvalidOperationException("synthetic composer failure"));
     }
 
     private sealed class EphemeralChunkCache : IBlueMagpieChunkCache

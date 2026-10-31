@@ -40,7 +40,7 @@ public sealed class VoAiMultiVoiceNarrationProviderTests
 
         try
         {
-            await provider.SynthesizeAsync(
+            var result = await provider.SynthesizeAsync(
                 request,
                 outputPath,
                 (value, _) =>
@@ -51,6 +51,8 @@ public sealed class VoAiMultiVoiceNarrationProviderTests
                 CancellationToken.None);
 
             Assert.Equal(2, client.Requests.Count);
+            Assert.Same(composer.Result, result);
+            Assert.All(composer.Segments, segment => Assert.Equal(0, segment.TurnIndex));
             Assert.Equal(1_000, client.Requests[0].Text.Length);
             Assert.Single(client.Requests[1].Text);
             Assert.All(client.Requests, item =>
@@ -253,20 +255,22 @@ public sealed class VoAiMultiVoiceNarrationProviderTests
     private sealed class CapturingAudioComposer : IVoAiAudioComposer
     {
         public IReadOnlyList<VoAiAudioSegment> Segments { get; private set; } = [];
+        public MultiVoiceSynthesisResult Result { get; } = new([new(0, 250, 2000)]);
 
-        public async Task ComposeAsync(
+        public async Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<VoAiAudioSegment> segments,
             string outputPath,
             CancellationToken cancellationToken)
         {
             Segments = segments.ToArray();
             await File.WriteAllBytesAsync(outputPath, Encoding.ASCII.GetBytes("ID3-mock"), cancellationToken);
+            return Result;
         }
     }
 
     private sealed class ThrowingAudioComposer : IVoAiAudioComposer
     {
-        public Task ComposeAsync(
+        public Task<MultiVoiceSynthesisResult> ComposeAsync(
             IReadOnlyList<VoAiAudioSegment> segments,
             string outputPath,
             CancellationToken cancellationToken) =>

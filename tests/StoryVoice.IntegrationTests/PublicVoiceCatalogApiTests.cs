@@ -16,11 +16,13 @@ public sealed class PublicVoiceCatalogApiTests(ApiFactory factory) : IClassFixtu
         var cancellationToken = TestContext.Current.CancellationToken;
 
         using var catalog = await client.GetAsync("/api/public/v1/voices", cancellationToken);
+        using var detail = await client.GetAsync($"/api/public/v1/voices/{Alias}", cancellationToken);
         using var demo = await client.GetAsync(
             $"/api/public/v1/voices/{Alias}/demo",
             cancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, catalog.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, demo.StatusCode);
     }
 
@@ -46,5 +48,12 @@ public sealed class PublicVoiceCatalogApiTests(ApiFactory factory) : IClassFixtu
         Assert.Empty(cards ?? []);
         Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
         Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+
+        foreach (var alias in new[] { Alias, "UNKNOWN", "unknown_voice", "-invalid", new string('a', 65) })
+        {
+            using var detail = await client.GetAsync($"/api/public/v1/voices/{alias}", TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+            Assert.Contains("no-store", detail.Headers.CacheControl?.ToString());
+        }
     }
 }

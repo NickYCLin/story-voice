@@ -1,175 +1,147 @@
-using StoryVoice.Domain.Narrations;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using StoryVoice.Application.Series;
+using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
 namespace StoryVoice.UnitTests;
 
-public sealed class LocalCloneMultiVoiceNarrationProviderTests
+public sealed class LocalCloneMultiVoiceNarrationProviderTests : IDisposable
 {
-    private static readonly Guid OwnerId = Guid.NewGuid();
-    private static readonly Guid SeriesId = Guid.NewGuid();
-    private static readonly Guid CharacterProfileId = Guid.NewGuid();
-
-    [Fact]
-    public void Narrator_fallback_turns_use_the_clone_that_voices_the_most_text()
-    {
-        var pov = MultiCharacterTurnBuilder.EncodeLocalCloneReference(Guid.NewGuid());
-        var other = MultiCharacterTurnBuilder.EncodeLocalCloneReference(Guid.NewGuid());
-        var references = new Dictionary<string, LocalCloneVoiceReference>
-        {
-            [pov] = new("/refs/pov.wav", "pov transcript"),
-            [other] = new("/refs/other.wav", "other transcript"),
-        };
-        var turns = new[]
-        {
-            new NarrationTurn("我走進教室，四周一片安靜，只有窗外的風聲。", pov, "+0%", "+0Hz", "+0%", 0),
-            new NarrationTurn("「早。」", other, "+0%", "+0Hz", "+0%", 200),
-            new NarrationTurn("「誰在那裡？」", "zh-TW-YunJheNeural", "+0%", "+0Hz", "+0%", 200),
-        };
-
-        Assert.Equal(pov, LocalCloneMultiVoiceNarrationProvider.ResolveFallbackReferenceKey(turns, references));
-    }
-
-    [Fact]
-    public void Fallback_is_absent_when_no_turn_carries_a_known_clone_reference()
-    {
-        var turns = new[] { new NarrationTurn("旁白", "zh-TW-YunJheNeural", "+0%", "+0Hz", "+0%", 0) };
-
-        Assert.Null(LocalCloneMultiVoiceNarrationProvider.ResolveFallbackReferenceKey(
-            turns,
-            new Dictionary<string, LocalCloneVoiceReference>()));
-    }
+    private readonly string root = Path.Combine(Path.GetTempPath(), $"clone-integrity-{Guid.NewGuid():N}");
+    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
 
     [Theory]
-    [InlineData("Atlantis AM8：20", false)]
-    [InlineData("......", false)]
-    [InlineData("2026/08/13", false)]
-    [InlineData("「早。」", true)]
-    [InlineData("Atlantis 學園 AM8：20", true)]
-    [InlineData("ㄅㄆㄇ", true)]
-    public void Only_text_with_cjk_characters_is_sent_to_the_clone_engine(string text, bool speakable)
+    [InlineData("English 123", true)]
+    [InlineData("123", true)]
+    [InlineData("🙂", true)]
+    [InlineData("中文字", true)]
+    [InlineData(" \t。！？…\n", false)]
+    public void Only_punctuation_and_whitespace_may_be_omitted(string text, bool expected) =>
+        Assert.Equal(expected, LocalCloneMultiVoiceNarrationProvider.HasSpeakableText(text));
+
+    [Theory]
+    [InlineData("zh-TW-YunJheNeural")]
+    [InlineData("local-clone-narrator")]
+    public async Task Unmanaged_narrator_never_falls_back_to_an_available_character(string voice)
     {
-        Assert.Equal(speakable, LocalCloneMultiVoiceNarrationProvider.HasSpeakableText(text));
+        var client = new FakeClient(_ => Wave());
+        var request = Request("必須明確選擇旁白。");
+        request = request with { Turns = request.Turns.Select(t => t with { Voice = voice }).ToArray() };
+        var error = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() => Provider(client)
+            .SynthesizeAsync(request, Path.Combine(root, "blocked.mp3"), null, TestContext.Current.CancellationToken));
+        Assert.Equal(LocalCloneMultiVoiceNarrationProvider.MissingReferenceCode, error.ErrorCode);
+        Assert.Empty(client.Texts);
     }
 
     [Fact]
-    public void Reference_duration_is_read_from_the_wav_data_chunk()
+    public void Chunking_preserves_every_utf16_unit_and_surrogate_pair()
     {
-        var seconds = 31.0;
-        var dataBytes = (int)(seconds * 48_000 * 2);
-        var wav = new byte[44 + dataBytes];
-        "RIFF"u8.CopyTo(wav.AsSpan(0, 4));
-        BitConverter.GetBytes((uint)(wav.Length - 8)).CopyTo(wav, 4);
-        "WAVE"u8.CopyTo(wav.AsSpan(8, 4));
-        "fmt "u8.CopyTo(wav.AsSpan(12, 4));
-        BitConverter.GetBytes(16u).CopyTo(wav, 16);
-        "data"u8.CopyTo(wav.AsSpan(36, 4));
-        BitConverter.GetBytes((uint)dataBytes).CopyTo(wav, 40);
-
-        Assert.Equal(seconds, LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds(wav), precision: 3);
-        Assert.True(LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds(wav) > LocalCloneMultiVoiceNarrationProvider.MaximumReferenceSeconds);
-        Assert.Equal(0, LocalCloneMultiVoiceNarrationProvider.EstimateWavSeconds([1, 2, 3]));
-    }
-
-    [Fact]
-    public void Sentence_fallback_splits_on_terminal_punctuation()
-    {
-        var pieces = LocalCloneMultiVoiceNarrationProvider.SplitSentences("你好。Atlantis AM8：20！再見？尾巴");
-
-        Assert.Equal(["你好。", "Atlantis AM8：20！", "再見？", "尾巴"], pieces);
-    }
-
-    [Fact]
-    public void Long_turns_split_on_sentence_boundaries_within_the_chunk_limit()
-    {
-        var sentence = "這是一個句子。";
-        var text = string.Concat(Enumerable.Repeat(sentence, 40));
-
-        var chunks = LocalCloneMultiVoiceNarrationProvider.SplitText(text, 60);
-
-        Assert.All(chunks, chunk => Assert.True(chunk.Length <= 60));
-        Assert.All(chunks, chunk => Assert.EndsWith("。", chunk));
+        var text = "  " + new string('a', 156) + "🙂 中文，" + new string('b', 170) + "\n ";
+        var chunks = LocalCloneMultiVoiceNarrationProvider.SplitText(text, 160);
         Assert.Equal(text, string.Concat(chunks));
+        Assert.All(chunks, chunk =>
+        {
+            Assert.InRange(chunk.Length, 1, 160);
+            Assert.False(char.IsHighSurrogate(chunk[^1]));
+            Assert.False(char.IsLowSurrogate(chunk[0]));
+        });
     }
 
     [Fact]
-    public void Worker_maps_ready_clone_profiles_to_their_stored_recording_only_for_the_local_clone_provider()
+    public async Task Disabled_formal_provider_never_calls_gateway()
     {
-        var now = DateTimeOffset.UtcNow;
-        var ready = CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(),
-            OwnerId,
-            CharacterProfileId,
-            CharacterVoiceProfileKind.Base,
-            sceneCode: null,
-            CharacterVoiceConsentTypes.SelfRecorded,
-            referenceAudioRelativePath: "2026/09/reference.wav",
-            referenceAudioSha256: new string('a', 64),
-            referenceAudioDurationSeconds: 12.0,
-            rightsConfirmedByUserId: OwnerId,
-            now);
-        ready.AttachDraftTranscript("task", "草稿", now);
-        ready.ConfirmTranscript("確認後的逐字稿。", now);
-        var pending = CharacterVoiceProfile.CreateClone(
-            Guid.NewGuid(),
-            OwnerId,
-            CharacterProfileId,
-            CharacterVoiceProfileKind.Scene,
-            CharacterVoiceSceneCodes.Angry,
-            CharacterVoiceConsentTypes.SelfRecorded,
-            referenceAudioRelativePath: "2026/09/angry.wav",
-            referenceAudioSha256: new string('b', 64),
-            referenceAudioDurationSeconds: 12.0,
-            rightsConfirmedByUserId: OwnerId,
-            now);
-        var localCloneRevision = BuildCastRevision(CharacterVoiceProviders.LocalClone);
-        var root = Path.Combine(Path.GetTempPath(), "storyvoice-voices");
-
-        var references = StoryPipelineWorker.BuildLocalCloneReferences(localCloneRevision, [ready, pending], root);
-
-        Assert.NotNull(references);
-        var entry = Assert.Single(references);
-        Assert.Equal(MultiCharacterTurnBuilder.EncodeLocalCloneReference(ready.Id), entry.Key);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, "2026/09/reference.wav")), entry.Value.ReferenceAudioPath);
-        Assert.Equal("確認後的逐字稿。", entry.Value.ReferenceTranscript);
-
-        Assert.Null(StoryPipelineWorker.BuildLocalCloneReferences(
-            BuildCastRevision(CharacterVoiceProviders.ThreeWaVoxCpm2),
-            [ready],
-            root));
+        var client = new FakeClient(_ => Wave());
+        await Assert.ThrowsAsync<PermanentNarrationProviderException>(() => Provider(client, false)
+            .SynthesizeAsync(Request("hello"), Path.Combine(root, "out.mp3"), null, TestContext.Current.CancellationToken));
+        Assert.Empty(client.Texts);
     }
 
-    private static NarrationCastRevision BuildCastRevision(string narratorProvider)
+    [Fact]
+    public async Task Mixed_language_chunks_produce_hash_bound_receipt_without_private_text()
     {
-        var revisionId = Guid.NewGuid();
-        var assignment = NarrationCastAssignment.Create(
-            Guid.NewGuid(),
-            OwnerId,
-            SeriesId,
-            revisionId,
-            Guid.NewGuid(),
-            "艾莉絲",
-            narratorProvider,
-            "1",
-            "zh-TW-YunJheNeural",
-            "+0%",
-            "+0Hz",
-            "+0%");
-        return NarrationCastRevision.Create(
-            revisionId,
-            OwnerId,
-            SeriesId,
-            revisionNumber: 1,
-            narratorProvider: narratorProvider,
-            narratorProviderVersion: "1",
-            narratorVoice: "zh-TW-YunJheNeural",
-            narratorRate: "+0%",
-            narratorPitch: "+0Hz",
-            narratorVolume: "+0%",
-            defaultSpeakerPauseMs: 200,
-            chapterPauseMs: 700,
-            compositionVersion: "v1",
-            ffmpegProfile: "default",
-            createdAt: DateTimeOffset.UtcNow,
-            assignments: [assignment]);
+        var client = new FakeClient(_ => Wave());
+        var output = Path.Combine(root, "out.mp3");
+        await Provider(client).SynthesizeAsync(Request("English 123 中文🙂"), output, null, TestContext.Current.CancellationToken);
+        Assert.Contains("English 123 中文🙂", client.Texts);
+        Assert.True(new FileInfo(output).Length > 0);
+        var receiptText = await File.ReadAllTextAsync(output + ".integrity.json", TestContext.Current.CancellationToken);
+        using var receipt = JsonDocument.Parse(receiptText);
+        Assert.Equal("complete", receipt.RootElement.GetProperty("Status").GetString());
+        Assert.Equal(Hash(await File.ReadAllBytesAsync(output, TestContext.Current.CancellationToken)), receipt.RootElement.GetProperty("AudioSha256").GetString());
+        Assert.DoesNotContain("English", receiptText);
+    }
+
+    [Fact]
+    public async Task Failed_fallback_sentence_cannot_publish_partial_audio()
+    {
+        var client = new FakeClient(text => text == "成功。" ? Wave() : throw Unavailable());
+        var output = Path.Combine(root, "out.mp3");
+        var exception = await Assert.ThrowsAsync<PermanentNarrationProviderException>(() => Provider(client)
+            .SynthesizeAsync(Request("成功。失敗。"), output, null, TestContext.Current.CancellationToken));
+        Assert.Equal("local_clone_incomplete_audio", exception.ErrorCode);
+        Assert.False(File.Exists(output));
+        Assert.False(File.Exists(output + ".integrity.json"));
+        var receipt = Assert.Single(Directory.GetFiles(root, "integrity.json", SearchOption.AllDirectories));
+        Assert.Contains("incomplete", await File.ReadAllTextAsync(receipt, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Altered_reference_fails_before_gateway()
+    {
+        var client = new FakeClient(_ => Wave());
+        var request = Request("hello");
+        await File.WriteAllBytesAsync(request.CloneReferences!.Values.Single().ReferenceAudioPath, [1, 2, 3], TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<PermanentNarrationProviderException>(() => Provider(client)
+            .SynthesizeAsync(request, Path.Combine(root, "out.mp3"), null, TestContext.Current.CancellationToken));
+        Assert.Empty(client.Texts);
+    }
+
+    private LocalCloneMultiVoiceNarrationProvider Provider(FakeClient client, bool enabled = true) => new(client,
+        Options.Create(new LocalClonePreviewOptions { FormalNarrationEnabled = enabled, RetryDelaySeconds = 0 }),
+        Options.Create(new NarrationOptions { AudioRootPath = root }),
+        NullLogger<LocalCloneMultiVoiceNarrationProvider>.Instance);
+
+    private MultiVoiceNarrationRequest Request(string text)
+    {
+        Directory.CreateDirectory(root);
+        var bytes = Wave();
+        var path = Path.Combine(root, "reference.wav");
+        File.WriteAllBytes(path, bytes);
+        var key = MultiCharacterTurnBuilder.EncodeLocalCloneReference(Guid.NewGuid());
+        return new([new(text, key, "+0%", "+0Hz", "+0%", 0)], CloneReferences:
+            new Dictionary<string, LocalCloneVoiceReference> { [key] = new(path, "fixture transcript", Hash(bytes)) });
+    }
+
+    private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static LocalClonePreviewUnavailableException Unavailable() => new(LocalClonePreviewFailureKind.GatewayUnavailable);
+    private sealed class FakeClient(Func<string, byte[]> synthesize) : ILocalCloneGatewayClient
+    {
+        public List<string> Texts { get; } = [];
+        public Task<LocalCloneGatewayAudio> SynthesizeAsync(LocalCloneGatewayRequest request, CancellationToken cancellationToken)
+        {
+            Texts.Add(request.Text);
+            return Task.FromResult(new LocalCloneGatewayAudio(synthesize(request.Text), "audio/wav"));
+        }
+    }
+    private static byte[] Wave()
+    {
+        var result = new byte[44 + 96000];
+        "RIFF"u8.CopyTo(result);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4), (uint)(result.Length - 8));
+        "WAVEfmt "u8.CopyTo(result.AsSpan(8));
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(16), 16);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(20), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(22), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(24), 48000);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(28), 96000);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(32), 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(34), 16);
+        "data"u8.CopyTo(result.AsSpan(36));
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(40), 96000);
+        return result;
     }
 }

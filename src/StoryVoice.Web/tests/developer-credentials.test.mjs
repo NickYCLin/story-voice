@@ -53,23 +53,23 @@ test('keyId query 會先解析成 select 與 API 共用的 canonical projectId',
 test('一次性 secret 未關閉前會阻擋另一個建立或換發操作', () => {
   assert.match(page, /if \(issued\) \{[\s\S]*請先保存並關閉目前的一次性金鑰/)
   assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(issued\) \|\| Boolean\(pendingAction\) \|\| !overview\.serviceEnabled \|\| !selectedProject \|\| selectedProject\.status === 'expired'\}/)
-  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(issued\) \|\| Boolean\(pendingAction\) \|\| !overview\.serviceEnabled\}[\s\S]*>換發<\/button>/)
+  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(issued\) \|\| Boolean\(pendingAction\) \|\| !overview\.serviceEnabled\}[\s\S]*t\('換發', 'Rotate'\)/)
   assert.match(page, /建立與換發功能會暫停/)
 })
 
 test('mutation 成功後 refresh 失敗會保留成功語意並提示畫面可能過期', () => {
   assert.match(page, /async function refreshAfterMutation\(successMessage: string\)/)
-  assert.match(page, /await refresh\(\)[\s\S]*catch \{[\s\S]*\$\{successMessage\} 但金鑰清單與異動紀錄重新整理失敗/)
-  assert.match(page, /await refreshAfterMutation\('金鑰已撤銷。'\)/)
+  assert.match(page, /await refresh\(\)[\s\S]*catch \{[\s\S]*\$\{successMessage\}[\s\S]*但金鑰清單與異動紀錄重新整理失敗/)
+  assert.match(page, /await refreshAfterMutation\(t\('金鑰已撤銷。', 'Key revoked.'\)\)/)
 })
 
 test('金鑰頁停用服務時阻擋建立與換發但保留撤銷，並顯示預定撤銷時間', () => {
   assert.equal(page.match(/if \(!overview\?\.serviceEnabled\)/g)?.length, 2)
   assert.match(page, /語音 API 目前未啟用，暫時無法建立或換發金鑰；現有受管金鑰仍可撤銷/)
-  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(issued\) \|\| Boolean\(pendingAction\) \|\| !overview\.serviceEnabled\}[\s\S]*>換發<\/button>/)
-  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(pendingAction\)\}[\s\S]*>立即撤銷<\/button>/)
-  assert.match(page, /credential\.status === 'revocation-scheduled' \? '預定撤銷' : '撤銷時間'/)
-  assert.match(page, /formatUtc\(credential\.revokedAtUtc\)/)
+  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(issued\) \|\| Boolean\(pendingAction\) \|\| !overview\.serviceEnabled\}[\s\S]*t\('換發', 'Rotate'\)/)
+  assert.match(page, /disabled=\{routeTransitioning \|\| busy \|\| Boolean\(pendingAction\)\}[\s\S]*t\('立即撤銷', 'Revoke now'\)/)
+  assert.match(page, /credential\.status === 'revocation-scheduled'[\s\S]*t\('預定撤銷', 'Scheduled revocation'\)[\s\S]*t\('撤銷時間', 'Revoked at'\)/)
+  assert.match(page, /formatUtc\(credential\.revokedAtUtc, locale\)/)
   assert.match(page, /<ConfirmDialog/)
   assert.doesNotMatch(page, /window\.confirm/)
 })
@@ -110,4 +110,14 @@ test('project query 切換或載入失敗時仍保留正在顯示的一次性 se
   assert.match(page.slice(errorStart, readyStart), /\{issuedCredentialPanel\}/)
   assert.match(page, /const issuedCredentialPanel = issued &&/)
   assert.doesNotMatch(page.slice(0, routeEffectEnd), /setIssued\(null\)/)
+})
+
+test('金鑰生命週期與一次性 secret 警告提供完整英文介面', () => {
+  assert.match(page, /const \{ locale \} = useLocale\(\)/)
+  assert.match(shared, /CREDENTIAL_STATUS_LABEL_EN/)
+  assert.match(page, /credentialStatusLabel/)
+  assert.match(page, /Each complete key is shown only once/)
+  assert.match(page, /immediately\? This action cannot be undone/)
+  assert.match(page, /Key activity log/)
+  assert.match(page, /Production backend/)
 })

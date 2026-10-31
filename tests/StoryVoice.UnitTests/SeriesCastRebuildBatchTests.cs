@@ -7,6 +7,30 @@ namespace StoryVoice.UnitTests;
 public sealed class SeriesCastRebuildBatchTests
 {
     [Fact]
+    public void Resume_failed_batch_preserves_completed_jobs_and_all_original_bindings()
+    {
+        var fixture = CreateFixture();
+        var batch = fixture.Batch.Create();
+        var firstJob = Guid.NewGuid();
+        var secondJob = Guid.NewGuid();
+        batch.StartBuilding(DateTimeOffset.UtcNow);
+        batch.AttachStagedJob(fixture.First.SeriesBookId, firstJob);
+        batch.AttachStagedJob(fixture.Second.SeriesBookId, secondJob);
+        batch.MarkMemberReady(fixture.First.SeriesBookId, DateTimeOffset.UtcNow);
+        batch.MarkMemberFailed(fixture.Second.SeriesBookId, DateTimeOffset.UtcNow);
+        batch.ResumeFailed(new HashSet<Guid> { firstJob }, DateTimeOffset.UtcNow);
+        Assert.Equal(SeriesCastRebuildBatchStatus.Building, batch.Status);
+        Assert.Equal(SeriesCastRebuildMemberStatus.Ready, batch.Members[0].Status);
+        Assert.Equal(SeriesCastRebuildMemberStatus.Building, batch.Members[1].Status);
+        Assert.Equal(firstJob, batch.Members[0].StagedNarrationJobId);
+        Assert.Equal(secondJob, batch.Members[1].StagedNarrationJobId);
+        Assert.Equal(fixture.Batch.DraftCastRevisionId, batch.DraftCastRevisionId);
+        batch.MarkMemberReady(fixture.Second.SeriesBookId, DateTimeOffset.UtcNow);
+        Assert.Equal(SeriesCastRebuildBatchStatus.ReadyToActivate, batch.Status);
+        Assert.Throws<InvalidOperationException>(() => batch.ResumeFailed(new HashSet<Guid>(), DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public void Creation_captures_an_immutable_pending_cohort_and_exact_status_enums()
     {
         var fixture = CreateFixture();

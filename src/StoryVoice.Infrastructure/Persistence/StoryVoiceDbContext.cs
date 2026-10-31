@@ -28,6 +28,8 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
 
     public DbSet<NarrationJob> NarrationJobs => Set<NarrationJob>();
 
+    public DbSet<NarrationAttemptUsage> NarrationAttemptUsage => Set<NarrationAttemptUsage>();
+
     public DbSet<NarrationCastRevision> NarrationCastRevisions => Set<NarrationCastRevision>();
 
     public DbSet<NarrationCastAssignment> NarrationCastAssignments => Set<NarrationCastAssignment>();
@@ -75,6 +77,12 @@ public sealed class StoryVoiceDbContext(DbContextOptions<StoryVoiceDbContext> op
     public DbSet<ConfirmedSpeechSegment> ConfirmedSpeechSegments => Set<ConfirmedSpeechSegment>();
 
     public DbSet<NarrationJobSpeechPlan> NarrationJobSpeechPlans => Set<NarrationJobSpeechPlan>();
+
+    public DbSet<NarrationTimeline> NarrationTimelines => Set<NarrationTimeline>();
+
+    public DbSet<NarrationTrackSelection> NarrationTrackSelections => Set<NarrationTrackSelection>();
+
+    public DbSet<ListeningProgress> ListeningProgress => Set<ListeningProgress>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

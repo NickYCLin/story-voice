@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const page = readFileSync(new URL('../src/pages/PublicVoicesPage.tsx', import.meta.url), 'utf8')
+const page = ['../src/pages/PublicVoicesPage.tsx', '../src/publicVoiceCatalog.ts', '../src/components/PublicVoicePreview.tsx']
+  .map(path => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const layout = readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8')
+const layout = (readFileSync(new URL('../src/AppLayout.tsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/components/PublicSiteHeader.tsx', import.meta.url), 'utf8'))
 const authScreen = readFileSync(new URL('../src/AuthScreen.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
@@ -14,8 +15,8 @@ test('公開聲線館位於登入殼層外，並可從私人導覽開啟', () =>
   assert.notEqual(publicRoute, -1)
   assert.notEqual(privateLayout, -1)
   assert.ok(publicRoute < privateLayout, '公開路由必須獨立於需要登入的 AppLayout')
-  assert.match(layout, /to="\/voices">公開聲線/)
-  assert.match(authScreen, /to="\/voices">瀏覽公開聲線館/)
+  assert.match(layout, /to="\/voices">\{t\('公開聲線', 'Voices'\)\}/)
+  assert.match(authScreen, /to="\/voices">\{t\('瀏覽公開聲線館', 'Browse public voices'\)\}/)
 })
 
 test('目錄匿名讀取公開 API，並將 404 與空目錄安全呈現', () => {
@@ -45,15 +46,11 @@ test('公開 DTO 的文字、alias 與標籤界限和後端契約一致', () => 
   assert.match(page, /isShortText\(item, 40\)/)
 })
 
-test('訂閱 CTA 必須同時通過 view-plans 與 subscriptionAvailable', () => {
-  assert.match(page, /voice\.ctaKind === 'view-plans' && voice\.subscriptionAvailable/)
-  assert.match(page, /可公開試聽／可申請訂閱/)
-  assert.match(page, /查看訂閱與申請說明/)
-  assert.match(page, /不會立即結帳或顯示價格/)
+test('聲線選擇前往授權詳情，不假裝已提供訂閱或自動加入故事', () => {
+  assert.match(page, /查看聲線與使用範圍/)
+  assert.match(page, /公開聲線目前不能一鍵加入故事/)
+  assert.match(page, /目前不提供線上訂閱或結帳/)
   assert.match(page, /目前未連接即時結帳，也未提供方案價格/)
-  assert.doesNotMatch(page, /查看訂閱方式|可公開試聽與訂閱/)
-  assert.match(page, /尚未開放訂閱/)
-  assert.match(page, /完成商用與跨專案授權後才會開放/)
 })
 
 test('卡片資料完全來自公開 DTO，不硬編角色姓名或推測屬性', () => {

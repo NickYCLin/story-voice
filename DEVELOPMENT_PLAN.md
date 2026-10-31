@@ -1448,7 +1448,7 @@ AI 能合理判斷是否同一角色。
 - [x] TTS Provider Interface／registry
 - [x] Voice Listing
 - [x] Voice Sample
-- [ ] Automatic Casting
+- [x] Automatic Casting（角色庫資料與明確聲線標籤的規則式建議，人工儲存後固定使用）
 - [x] Manual Casting
 - [x] Character Voice Lock（不可變 cast revision）
 
@@ -1472,9 +1472,10 @@ Chapter 50
 - [x] Segment Audio
 - [x] Audio Cache（BlueMagpie durable chunk cache）
 - [x] Retry
-- [ ] Regenerate Segment
-- [ ] Parallel Generation
-- [ ] Cost Logging
+- [x] Regenerate / Preview Segment（單段語音試聽與生成效果預覽）
+- [x] Parallel Generation（工作間及 Edge／VoAI 多角色工作內片段皆有界平行，各自預設 1、最多 4；BlueMagpie／3wa 片段仍依序生成）
+- [x] 配音用量與耗時紀錄（每次嘗試獨立保存，包含失敗／取消與 owner 查詢）
+- [ ] Cost Logging（金額估算仍缺單價、幣別與供應商計費規則）
 
 Acceptance Criteria：
 
@@ -1492,7 +1493,7 @@ Regenerate
 
 - [x] FFmpeg Integration
 - [x] Silence／speaker and chapter pauses
-- [ ] Volume Normalize
+- [x] Volume Normalize（EBU R128 loudnorm 響度標準化）
 - [x] MP3 Output
 - [x] Book／series narration audio composition
 - [x] Duration validation
@@ -1510,13 +1511,13 @@ chapter_001.mp3
 # 41. Phase 8 — Player
 
 - [x] Private HTML audio player
-- [ ] Chapter List
-- [ ] Current Sentence
-- [ ] Current Character
+- [x] Chapter List（合成時間軸章節列表、點擊跳轉與上一章／下一章；Edge／VoAI／BlueMagpie／3wa 多角色路徑回報實測時間軸）
+- [x] Current Sentence（播放中逐 turn 文字同步顯示；文字以 offset 於讀取時切出，來源變更即停止供文）
+- [x] Current Character（播放中角色／旁白／內心獨白標示）
 - [x] Seek（browser native control）
-- [ ] 明確的播放倍速控制（目前 `<audio controls>` 是否顯示倍速由瀏覽器決定，不視為產品能力）
-- [ ] Listening Progress
-- [ ] Resume
+- [x] 明確的播放倍速控制（0.75x ~ 2.0x 顯式倍速切換控制項）
+- [x] Listening Progress（帳號進度持久化、跨裝置版本檢查與本機離線備援）
+- [x] Resume（讀取帳號或本機進度，讓使用者從上次位置續播）
 
 ---
 

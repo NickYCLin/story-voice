@@ -840,7 +840,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                 <div className="mt-2 space-y-2 text-xs text-stone-600">
                   <p>
                     {profile.mode === 'Design' ? '文字設計（供應商目前不支援）' : '錄音克隆'}
-                    {' · 字數 '}
+                    {' · 試講使用本機 AI 主機 · 字數 '}
                     {(profile.transcript ?? profile.voicePromptText ?? '').length}
                     {' · 時長 '}
                     {formatDuration(profile.referenceAudioDurationSeconds)}
@@ -853,7 +853,7 @@ export function CharacterVoiceProfilesPanel({ characterProfileId, characterName,
                       onClick={() => void playPreview(profile, DEFAULT_PREVIEW_TEXT)}
                       type="button"
                     >
-                      {previewingId === profile.id ? '合成中…' : '▶ 播放試講'}
+                      {previewingId === profile.id ? '合成中…' : '▶ 播放試講（本機）'}
                     </button>
                   )}
 

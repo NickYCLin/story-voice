@@ -326,7 +326,9 @@ grant JSON 內部欄位與檔案路徑，只留下開發者實際需要的 HTTP 
 - 授權摘要：可否 API、公開、商用，效期與適用範圍；只顯示公開資訊。
 - CTA：播放示範、申請 API、前往控制台或登記通知。
 
-**Backend gap**：目前沒有 voice detail DTO／endpoint。
+2026-09-08 已實作 `/voices/:alias` 與 `GET /api/public/v1/voices/{alias}`，包含固定示範、核准風格／用途、授權效期與地區摘要。此版本尚未部署至正式環境；公開開關與 entry 設定沒有變更。角色視覺、更多來源資訊與 creator publication 仍待後續設計。
+
+API 只回傳明列的公開欄位，沿用 list／demo 的完整授權與素材驗證；任何失效都回 404。詳細頁在重新聚焦或到期時重新讀取，離開或失效後停止示範播放。契約與驗證方式見 [PUBLIC_VOICE_DETAIL.md](PUBLIC_VOICE_DETAIL.md)。
 
 #### I. 我的聲線 `/creator/voices`
 

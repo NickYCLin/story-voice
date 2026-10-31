@@ -6,7 +6,6 @@ RUN dotnet publish src/StoryVoice.Worker/StoryVoice.Worker.csproj -c Release -o 
 
 FROM mcr.microsoft.com/dotnet/runtime:10.0-alpine AS final
 WORKDIR /app
-RUN apk add --no-cache krb5-libs python3 py3-pip ffmpeg \
-    && python3 -m pip install --no-cache-dir --break-system-packages edge-tts==7.2.8
+RUN apk add --no-cache krb5-libs python3 ffmpeg
 COPY --from=build /app .
 ENTRYPOINT ["dotnet", "StoryVoice.Worker.dll"]
