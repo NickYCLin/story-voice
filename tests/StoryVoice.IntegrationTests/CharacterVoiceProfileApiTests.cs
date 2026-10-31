@@ -948,8 +948,10 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal(taskId, operation.RemoteTaskId);
     }
 
-    [Fact]
-    public async Task Confirmation_intent_reconciles_remote_success_after_the_local_ready_save_fails()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Confirmation_intent_reconciles_remote_success_after_the_local_ready_save_fails(bool transcriptionFailed)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var fake = new FakeThreeWaVoiceProfileClient
@@ -988,10 +990,27 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         }
 
         fake.StatusResult = new VoiceProfileStatusResult(
+            "success",
+            TranscriptConfirmed: false,
+            DraftTranscript: null,
+            TranscriptionFailed: true);
+        using var unconfirmedRefresh = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, unconfirmedRefresh.StatusCode);
+        var stillPending = await unconfirmedRefresh.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(stillPending);
+        Assert.Equal("AwaitingTranscriptConfirmation", stillPending.Status);
+        Assert.Equal("人工校正後的最終文字。", stillPending.ConfirmationTranscriptIntent);
+        Assert.Equal("供應商 ASR 草稿。", stillPending.AsrDraftTranscript);
+        Assert.False(stillPending.TranscriptConfirmed);
+
+        fake.StatusResult = new VoiceProfileStatusResult(
             "ready",
             TranscriptConfirmed: true,
             DraftTranscript: "與人工確認意圖不同的文字。",
-            TranscriptionFailed: false);
+            TranscriptionFailed: transcriptionFailed);
         using var mismatchedRefresh = await owner.PostWithCsrfAsync(
             $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
             new { },
@@ -1006,7 +1025,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
             "ready",
             TranscriptConfirmed: true,
             DraftTranscript: null,
-            TranscriptionFailed: false);
+            TranscriptionFailed: transcriptionFailed);
         using var refreshResponse = await owner.PostWithCsrfAsync(
             $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
             new { },
@@ -1022,11 +1041,116 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
         Assert.Equal("人工校正後的最終文字。", reconciled.Transcript);
         Assert.Equal("供應商 ASR 草稿。", reconciled.AsrDraftTranscript);
         Assert.Equal(1, fake.ConfirmCount);
-        Assert.Equal(2, fake.StatusCount);
+        Assert.Equal(3, fake.StatusCount);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("供應商先前產生的草稿。")]
+    public async Task Provider_asr_failure_falls_back_to_expected_transcript_for_human_confirmation(string? existingDraft)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("asr-down-task", DraftTranscript: existingDraft),
+            StatusResult = new VoiceProfileStatusResult(
+                "success",
+                TranscriptConfirmed: false,
+                DraftTranscript: null,
+                TranscriptionFailed: true),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var createContent = CreateCloneContent(expectedTranscript: "錄音者提供的預期逐字稿。");
+        using var createResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            createContent,
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+        Assert.Equal(existingDraft is null ? "Pending" : "AwaitingTranscriptConfirmation", created.Status);
+
+        using var refreshResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
+        var awaiting = await refreshResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(awaiting);
+        Assert.Equal("AwaitingTranscriptConfirmation", awaiting.Status);
+        Assert.Equal(existingDraft ?? "錄音者提供的預期逐字稿。", awaiting.AsrDraftTranscript);
+        Assert.Equal("錄音者提供的預期逐字稿。", awaiting.ExpectedTranscript);
+        Assert.False(awaiting.TranscriptConfirmed);
+
+        using var repeatedRefresh = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, repeatedRefresh.StatusCode);
+        var stillAwaiting = await repeatedRefresh.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(stillAwaiting);
+        Assert.Equal("AwaitingTranscriptConfirmation", stillAwaiting.Status);
+        Assert.Equal(awaiting.AsrDraftTranscript, stillAwaiting.AsrDraftTranscript);
+        Assert.False(stillAwaiting.TranscriptConfirmed);
+        Assert.Equal(0, fake.ConfirmCount);
+
+        using var confirmResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/confirm-transcript",
+            new { transcript = "人工聽錄音後校正的最終逐字稿。" },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
+        var ready = await confirmResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(ready);
+        Assert.Equal("Ready", ready.Status);
+        Assert.True(ready.TranscriptConfirmed);
+        Assert.Equal("人工聽錄音後校正的最終逐字稿。", ready.Transcript);
+        Assert.Equal(1, fake.ConfirmCount);
+        Assert.Equal("人工聽錄音後校正的最終逐字稿。", fake.ConfirmedTranscript);
     }
 
     [Fact]
-    public async Task Remote_confirmed_status_never_invents_a_missing_human_confirmation_intent()
+    public async Task Remote_task_failure_still_marks_the_clone_failed()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var fake = new FakeThreeWaVoiceProfileClient
+        {
+            PrepareResult = new VoiceProfilePrepareResult("failed-task", DraftTranscript: null),
+            StatusResult = new VoiceProfileStatusResult(
+                "failed",
+                TranscriptConfirmed: false,
+                DraftTranscript: null,
+                TranscriptionFailed: true),
+        };
+        using var profileFactory = CreateVoiceProfileFactory(fake);
+        using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);
+        var characterProfileId = await CreateCharacterProfileAsync(owner, cancellationToken);
+        using var createContent = CreateCloneContent();
+        using var createResponse = await owner.PostMultipartWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/base",
+            createContent,
+            cancellationToken);
+        var created = await createResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(created);
+
+        using var refreshResponse = await owner.PostWithCsrfAsync(
+            $"/api/character-profiles/{characterProfileId}/voice-profiles/{created.Id}/refresh-status",
+            new { },
+            cancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
+        var failed = await refreshResponse.Content.ReadFromJsonAsync<CharacterVoiceProfileResponse>(cancellationToken);
+        Assert.NotNull(failed);
+        Assert.Equal("Failed", failed.Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Remote_confirmed_status_never_invents_a_missing_human_confirmation_intent(bool transcriptionFailed)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var fake = new FakeThreeWaVoiceProfileClient
@@ -1036,7 +1160,7 @@ public sealed class CharacterVoiceProfileApiTests(ApiFactory factory) : IClassFi
                 "ready",
                 TranscriptConfirmed: true,
                 DraftTranscript: "供應商宣稱已確認的文字。",
-                TranscriptionFailed: false),
+                TranscriptionFailed: transcriptionFailed),
         };
         using var profileFactory = CreateVoiceProfileFactory(fake);
         using var owner = await profileFactory.CreateAuthenticatedClientAsync(cancellationToken);

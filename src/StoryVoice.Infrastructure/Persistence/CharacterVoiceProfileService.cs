@@ -272,9 +272,25 @@ internal sealed class CharacterVoiceProfileService(
 
         var status = await threeWaClient.GetStatusAsync(profile.VoiceProfileTaskId!, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase) || status.TranscriptionFailed)
+        if (string.Equals(status.TaskStatus, "failed", StringComparison.OrdinalIgnoreCase))
         {
             profile.MarkFailed(now);
+        }
+        else if (status.TranscriptionFailed && !status.TranscriptConfirmed)
+        {
+            if (profile.ConfirmationTranscriptIntent is null
+                && profile.TranscriptConfirmedAt is null
+                && !string.IsNullOrWhiteSpace(profile.ExpectedTranscript))
+            {
+                if (profile.Status == CharacterVoiceProfileStatus.Pending)
+                {
+                    profile.AttachDraftTranscript(profile.VoiceProfileTaskId!, profile.ExpectedTranscript, now);
+                }
+            }
+            else if (profile.ConfirmationTranscriptIntent is null)
+            {
+                profile.MarkFailed(now);
+            }
         }
         else if (status.TranscriptConfirmed)
         {
