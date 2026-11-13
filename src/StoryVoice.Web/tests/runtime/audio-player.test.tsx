@@ -184,6 +184,40 @@ describe('播放器實際互動', () => {
     expect(audio.play).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    ['快轉 10 秒', 80],
+    ['倒轉 10 秒', 60],
+  ])('重載等待期間%s從保留的位置計算並保存', async (buttonName, expectedTime) => {
+    const save = vi.fn()
+    const { container } = render(<LocaleProvider><AudioPlayer src="/first.mp3" storageKey="first" onSaveProgress={save} /></LocaleProvider>)
+    const audio = loadAudio(container)
+    fireEvent.change(screen.getByRole('slider', { name: '播放進度' }), { target: { value: '70' } })
+    let error: { code: number } | null = { code: 3 }
+    let readyState = 0
+    Object.defineProperties(audio, {
+      error: { configurable: true, get: () => error },
+      readyState: { configurable: true, get: () => readyState },
+    })
+    vi.mocked(audio.load).mockImplementation(() => {
+      error = null
+      audio.currentTime = 0
+      Object.defineProperty(audio, 'duration', { configurable: true, value: NaN })
+      fireEvent.durationChange(audio)
+    })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '播放', exact: true })))
+    fireEvent.click(screen.getByRole('button', { name: buttonName }))
+    expect(screen.getByRole('slider', { name: '播放進度' }).getAttribute('aria-valuenow')).toBe(String(expectedTime))
+    expect(save).toHaveBeenLastCalledWith(expectedTime * 1000, 120000)
+    fireEvent.click(screen.getByRole('button', { name: buttonName }))
+    const repeatedTime = expectedTime + (expectedTime - 70)
+    expect(save).toHaveBeenLastCalledWith(repeatedTime * 1000, 120000)
+    readyState = 1
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 120 })
+    await act(async () => fireEvent.loadedMetadata(audio))
+    expect(audio.currentTime).toBe(repeatedTime)
+    expect(audio.play).toHaveBeenCalledTimes(1)
+  })
+
   it('離開重載中的播放器仍保存原進度，不被媒體重設值覆蓋', async () => {
     const save = vi.fn()
     const { container, unmount } = render(<LocaleProvider><AudioPlayer src="/first.mp3" storageKey="first" onSaveProgress={save} /></LocaleProvider>)

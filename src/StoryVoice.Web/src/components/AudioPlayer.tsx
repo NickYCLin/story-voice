@@ -327,7 +327,8 @@ function AudioPlayerSession({
   const skipSeconds = (delta: number) => {
     const audio = audioRef.current
     if (!audio) return
-    seekToMs((audio.currentTime + delta) * 1000)
+    const position = reloadProgress.current?.time ?? audio.currentTime
+    seekToMs((position + delta) * 1000)
   }
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
