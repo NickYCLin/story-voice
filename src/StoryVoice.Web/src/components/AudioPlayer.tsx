@@ -123,6 +123,7 @@ function AudioPlayerSession({
   const { locale } = useLocale()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const playbackRequest = useRef<AbortController | null>(null)
+  const reloadProgress = useRef<{ time: number; duration: number } | null>(null)
   const [showChapterList, setShowChapterList] = useState(false)
 
   const [isPlaying, setIsPlaying] = useState(false)
@@ -217,7 +218,9 @@ function AudioPlayerSession({
   }, [serverProgress])
 
   // Save playback position periodically
-  const persistProgress = useCallback((time: number, dur: number) => {
+  const persistProgress = useCallback((position: number, audioDuration: number) => {
+    const time = reloadProgress.current?.time ?? position
+    const dur = reloadProgress.current?.duration ?? audioDuration
     if (!effectiveStorageKey || typeof window === 'undefined') return
     if (!progressChanged.current) return
     if (!Number.isFinite(time) || !Number.isFinite(dur) || dur <= 0) return
@@ -257,6 +260,7 @@ function AudioPlayerSession({
     if (!audio || !Number.isFinite(targetMs) || duration <= 0) return
     const target = Math.max(0, Math.min(duration, targetMs / 1000))
     progressChanged.current = true
+    if (reloadProgress.current) reloadProgress.current.time = target
     audio.currentTime = target
     setCurrentTime(target)
     setSavedResumeTime(null)
@@ -270,15 +274,17 @@ function AudioPlayerSession({
     playbackRequest.current = request
     setPlaybackError(false)
     try {
-      if (audio.error) {
+      if (audio.error || reloadProgress.current) {
         // load() clears currentTime, including a position chosen after a decode error.
-        const requestedTime = audio.currentTime
+        reloadProgress.current ??= { time: audio.currentTime, duration: audio.duration }
         audio.load()
         await waitForMedia(audio, 'loadedmetadata', request.signal)
         if (request.signal.aborted || audioRef.current !== audio) return
+        const requestedTime = reloadProgress.current.time
         if (Number.isFinite(requestedTime) && requestedTime > 0 && requestedTime < audio.duration) {
           audio.currentTime = requestedTime
         }
+        reloadProgress.current = null
       }
       if (audio.seeking) await waitForMedia(audio, 'seeked', request.signal)
       if (request.signal.aborted || audioRef.current !== audio) return
@@ -390,7 +396,7 @@ function AudioPlayerSession({
         onPlaying={(e) => { setIsBuffering(false); setIsPlaying(!e.currentTarget.paused) }}
         onEmptied={() => { setIsPlaying(false); setIsBuffering(false) }}
         onTimeUpdate={(e) => {
-          const cur = e.currentTarget.currentTime
+          const cur = reloadProgress.current?.time ?? e.currentTarget.currentTime
           setCurrentTime(cur)
           if (Date.now() - lastPersistedAt.current >= 5000) {
             lastPersistedAt.current = Date.now()
