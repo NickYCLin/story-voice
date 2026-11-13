@@ -168,10 +168,17 @@ describe('播放器實際互動', () => {
       error: { configurable: true, get: () => error },
       readyState: { configurable: true, get: () => readyState },
     })
-    vi.mocked(audio.load).mockImplementation(() => { error = null; audio.currentTime = 0 })
+    vi.mocked(audio.load).mockImplementation(() => {
+      error = null
+      audio.currentTime = 0
+      Object.defineProperty(audio, 'duration', { configurable: true, value: NaN })
+      fireEvent.durationChange(audio)
+    })
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '播放', exact: true })))
+    expect(screen.getByRole('slider', { name: '播放進度' }).getAttribute('max')).toBe('120')
     fireEvent.change(screen.getByRole('slider', { name: '播放進度' }), { target: { value: '30' } })
     readyState = 1
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 120 })
     await act(async () => fireEvent.loadedMetadata(audio))
     expect(audio.currentTime).toBe(30)
     expect(audio.play).toHaveBeenCalledTimes(1)

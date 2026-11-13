@@ -365,7 +365,10 @@ function AudioPlayerSession({
       <audio
         className="sr-only"
         tabIndex={-1}
-        onDurationChange={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? Math.max(0, e.currentTarget.duration) : 0)}
+        onDurationChange={(e) => {
+          const nextDuration = reloadProgress.current?.duration ?? e.currentTarget.duration
+          setDuration(Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0)
+        }}
         onEnded={(e) => {
           setIsPlaying(false)
           setIsBuffering(false)
