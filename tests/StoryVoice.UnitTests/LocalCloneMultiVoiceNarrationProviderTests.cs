@@ -1,9 +1,13 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using StoryVoice.Application.Narrations;
 using StoryVoice.Application.Series;
+using StoryVoice.Domain.Narrations;
 using StoryVoice.Infrastructure.Narrations;
 using StoryVoice.Worker;
 
@@ -104,6 +108,101 @@ public sealed class LocalCloneMultiVoiceNarrationProviderTests : IDisposable
         Options.Create(new LocalClonePreviewOptions { FormalNarrationEnabled = enabled, RetryDelaySeconds = 0 }),
         Options.Create(new NarrationOptions { AudioRootPath = root }),
         NullLogger<LocalCloneMultiVoiceNarrationProvider>.Instance);
+
+    [Fact]
+    public async Task Measured_chunks_and_encoded_pauses_compose_a_chapter_and_character_timeline()
+    {
+        var client = new FakeClient(_ => Wave());
+        var request = Request(new string('甲', 321));
+        var voice = request.Turns[0].Voice;
+        request = request with { Turns = [request.Turns[0] with { PauseBeforeMs = 250 }, new("English 123", voice, "+0%", "+0Hz", "+0%", 500)] };
+        var output = Path.Combine(root, "out.mp3");
+        var result = await Provider(client).SynthesizeAsync(request, output, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, client.Texts.Count);
+        Assert.NotNull(result.TurnTimings);
+        Assert.Equal(2, result.TurnTimings.Count);
+        var first = result.TurnTimings[0];
+        var second = result.TurnTimings[1];
+        Assert.Equal(0, first.TurnIndex);
+        Assert.Equal(1, second.TurnIndex);
+        Assert.InRange(first.StartMs, 250, 310);
+        Assert.InRange(first.DurationMs, 3000, 3300);
+        Assert.InRange(second.StartMs - first.StartMs - first.DurationMs, 500, 570);
+        Assert.InRange(second.DurationMs, 1000, 1100);
+        await AssertAudioEndAsync(output, second);
+
+        var chapterId = Guid.NewGuid();
+        var characterId = Guid.NewGuid();
+        var timeline = NarrationTimelineComposer.Compose([
+            new(chapterId, 0, true, [new(SpeechSegmentSourceKind.Body, 0, 321, SpeechSegmentTurnKind.Narrator, null)]),
+            new(chapterId, 0, false, [new(SpeechSegmentSourceKind.Body, 321, 11, SpeechSegmentTurnKind.Dialogue, characterId)]),
+        ], result.TurnTimings);
+        Assert.NotNull(timeline);
+        Assert.Equal(chapterId, timeline.Turns[0].ChapterId);
+        Assert.True(timeline.Turns[0].ChapterStart);
+        Assert.Equal(characterId, timeline.Turns[1].Slices[0].CharacterId);
+        Assert.Equal(second.StartMs, timeline.Turns[1].StartMs);
+    }
+
+    [Fact]
+    public async Task Retried_job_measures_reused_cached_chunks_without_synthesizing_them_again()
+    {
+        var request = Request(new string('甲', 160) + new string('乙', 160) + "丙");
+        var client = new FakeClient(_ => Wave());
+        var provider = Provider(client);
+        var output = Path.Combine(root, "out.mp3");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => provider.SynthesizeAsync(request, output,
+            (_, _) => throw new InvalidOperationException("Interrupted after caching the first chunk."), TestContext.Current.CancellationToken));
+        Assert.Single(client.Texts);
+        Assert.False(File.Exists(output));
+
+        var result = await provider.SynthesizeAsync(request, output, null, TestContext.Current.CancellationToken);
+        Assert.Equal(3, client.Texts.Count);
+        var timing = Assert.Single(result.TurnTimings!);
+        Assert.Equal(0, timing.StartMs);
+        Assert.InRange(timing.DurationMs, 3000, 3300);
+        await AssertAudioEndAsync(output, timing);
+    }
+
+    [Fact]
+    public async Task Sentence_fallback_timing_uses_the_joined_audio_duration()
+    {
+        var client = new FakeClient(text => text == "甲。乙。" ? throw Unavailable() : Wave());
+        var output = Path.Combine(root, "out.mp3");
+        var result = await Provider(client).SynthesizeAsync(Request("甲。乙。"), output, null, TestContext.Current.CancellationToken);
+        var timing = Assert.Single(result.TurnTimings!);
+        Assert.Equal(4, client.Texts.Count);
+        Assert.InRange(timing.DurationMs, 2000, 2200);
+        await AssertAudioEndAsync(output, timing);
+    }
+
+    [Fact]
+    public async Task Punctuation_only_chunks_do_not_shift_timing_but_empty_turns_disable_the_timeline()
+    {
+        var client = new FakeClient(_ => Wave());
+        var request = Request(new string('。', 160) + "hello");
+        var output = Path.Combine(root, "out.mp3");
+        var result = await Provider(client).SynthesizeAsync(request, output, null, TestContext.Current.CancellationToken);
+        var timing = Assert.Single(result.TurnTimings!);
+        Assert.Equal(0, timing.StartMs);
+        await AssertAudioEndAsync(output, timing);
+        request = request with { Turns = [request.Turns[0] with { Text = "。", PauseBeforeMs = 250 }, request.Turns[0]] };
+        var withoutTimeline = await Provider(client).SynthesizeAsync(request, Path.Combine(root, "no-timeline.mp3"), null, TestContext.Current.CancellationToken);
+        Assert.Null(withoutTimeline.TurnTimings);
+    }
+
+    private static async Task AssertAudioEndAsync(string output, NarrationTurnTiming lastTurn)
+    {
+        var start = new ProcessStartInfo("ffprobe") { UseShellExecute = false, RedirectStandardOutput = true };
+        foreach (var argument in new[] { "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output })
+            start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var duration = await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, process.ExitCode);
+        Assert.InRange(Math.Abs(double.Parse(duration.Trim(), CultureInfo.InvariantCulture) * 1000 - lastTurn.StartMs - lastTurn.DurationMs), 0, 100);
+    }
 
     private MultiVoiceNarrationRequest Request(string text)
     {

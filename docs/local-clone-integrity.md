@@ -30,7 +30,12 @@ API 的公開音訊 route 不會公開此收據。
 
 新 cache namespace 與所有不可變工作欄位、provider 版本、參考錄音及逐字稿雜湊綁定。
 只重用 SHA-256 sidecar 相符的 chunk，不信任舊 cache。失敗時保留 cache 與失敗收據；
-成功後移除 cache。朗讀時間軸介面保持相容，但此 provider 尚未回傳逐 turn timing。
+成功後移除 cache。provider 以 ffprobe 量測每個實際使用的 MP3 chunk 與前置靜音，
+將同 turn 的多段音訊累加成逐 turn timing；重用 cache 及逐句回退的合併音訊也實測，
+不以文字長度估算。起點排除前置靜音，累計邊界統一取整，交由既有 Worker 組合章節、
+句子來源及角色。僅標點 chunk 不佔語音時長；任何 turn 缺少語音或量測值無效時，
+不回傳不完整時間軸，不會將後續角色或章節錯配。這是合成測試音驗證的程式能力，
+不代表正式模型逐字正確或正式環境已完成同步驗收。
 
 ## 本人錄音授權 v2
 

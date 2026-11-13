@@ -84,15 +84,18 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
             }
 
             var sequence = new List<string>();
+            var timing = new NarrationTimingAccumulator();
             var completed = 0;
             for (var turnIndex = 0; turnIndex < turnChunks.Length; turnIndex++)
             {
                 var (turn, referenceKey, chunks) = turnChunks[turnIndex];
+                double pauseSeconds = 0;
                 if (turn.PauseBeforeMs > 0)
                 {
                     var silencePath = Path.Combine(workDirectory, $"{turnIndex:0000}-pause.mp3");
                     await GenerateSilenceAsync(silencePath, turn.PauseBeforeMs, cancellationToken);
                     sequence.Add(silencePath);
+                    pauseSeconds = await ProbeDurationSecondsAsync(silencePath, cancellationToken);
                 }
 
                 var reference = references[referenceKey];
@@ -132,6 +135,9 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
                     evidence.AudioBytes = new FileInfo(cachedPath).Length;
                     await WriteReceiptAsync(Path.Combine(cacheDirectory, "integrity.json"), integrity, cancellationToken);
                     sequence.Add(cachedPath);
+                    var chunkSeconds = await ProbeDurationSecondsAsync(cachedPath, cancellationToken);
+                    timing.Add(turnIndex, chunkSeconds + pauseSeconds, pauseSeconds * 1000);
+                    pauseSeconds = 0;
                     completed++;
                     if (progressCallback is not null)
                     {
@@ -143,7 +149,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
             var candidate = Path.Combine(workDirectory, "complete.mp3");
             await ConcatAsync(sequence, candidate, cancellationToken);
             var duration = await ProbeDurationSecondsAsync(candidate, cancellationToken);
-            if (duration <= 0 || !File.Exists(candidate) || new FileInfo(candidate).Length < 1)
+            if (!double.IsFinite(duration) || duration <= 0 || !File.Exists(candidate) || new FileInfo(candidate).Length < 1)
             {
                 throw new InvalidOperationException("自架克隆聲線合成沒有產生可用音訊。");
             }
@@ -154,7 +160,7 @@ public sealed class LocalCloneMultiVoiceNarrationProvider(
             await WriteReceiptAsync(outputPath + ".integrity.json", integrity, cancellationToken);
             File.Copy(candidate, outputPath, overwrite: false);
             TryDeleteDirectory(cacheDirectory, logger);
-            return MultiVoiceSynthesisResult.None;
+            return timing.ToResult(turnChunks.Length);
         }
         catch
         {
