@@ -293,11 +293,9 @@ public sealed class ThreeWaVoxCpm2NarrationProvider(
     {
         var output = await RunProcessAsync(
             "ffprobe",
-            ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            Mp3PacketDuration.ProbeArguments(path),
             cancellationToken);
-        return double.TryParse(output.Trim(), System.Globalization.CultureInfo.InvariantCulture, out var duration)
-            ? duration
-            : 0;
+        return Mp3PacketDuration.ParseSeconds(output);
     }
 
     private static Task RunFfmpegAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken) =>
