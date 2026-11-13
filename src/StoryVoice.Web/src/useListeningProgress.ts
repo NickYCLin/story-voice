@@ -126,9 +126,12 @@ export function useListeningProgress(jobId: string, csrfToken: string) {
       setState((current) => ({ session, status, progress: progress ?? (current.session === session ? current.progress : undefined) }))
     })
     const retry = () => session.retry()
+    const retryWhenVisible = () => { if (document.visibilityState === 'visible') session.retry() }
     window.addEventListener('online', retry)
+    document.addEventListener('visibilitychange', retryWhenVisible)
     return () => {
       window.removeEventListener('online', retry)
+      document.removeEventListener('visibilitychange', retryWhenVisible)
       unsubscribe()
     }
   }, [session])
