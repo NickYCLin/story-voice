@@ -218,6 +218,38 @@ describe('播放器實際互動', () => {
     expect(audio.play).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    [120, 120, 120],
+    [70, 60, 60],
+  ])('重載選定 %s 秒且實際長度為 %s 秒時，從 %s 秒交給媒體播放', async (requestedTime, actualDuration, expectedTime) => {
+    const save = vi.fn()
+    const { container } = render(<LocaleProvider><AudioPlayer src="/first.mp3" storageKey="first" onSaveProgress={save} /></LocaleProvider>)
+    const audio = loadAudio(container)
+    fireEvent.change(screen.getByRole('slider', { name: '播放進度' }), { target: { value: String(requestedTime) } })
+    let error: { code: number } | null = { code: 3 }
+    let readyState = 0
+    Object.defineProperties(audio, {
+      error: { configurable: true, get: () => error },
+      readyState: { configurable: true, get: () => readyState },
+    })
+    vi.mocked(audio.load).mockImplementation(() => {
+      error = null
+      audio.currentTime = 0
+      Object.defineProperty(audio, 'duration', { configurable: true, value: NaN })
+      fireEvent.durationChange(audio)
+    })
+    const playedPositions: number[] = []
+    vi.mocked(audio.play).mockImplementation(async () => { playedPositions.push(audio.currentTime) })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '播放', exact: true })))
+    readyState = 1
+    Object.defineProperty(audio, 'duration', { configurable: true, value: actualDuration })
+    await act(async () => fireEvent.loadedMetadata(audio))
+    expect(playedPositions).toEqual([expectedTime])
+    expect(screen.getByRole('slider', { name: '播放進度' }).getAttribute('aria-valuenow')).toBe(String(expectedTime))
+    fireEvent(window, new Event('pagehide'))
+    expect(save).toHaveBeenLastCalledWith(expectedTime * 1000, actualDuration * 1000)
+  })
+
   it('離開重載中的播放器仍保存原進度，不被媒體重設值覆蓋', async () => {
     const save = vi.fn()
     const { container, unmount } = render(<LocaleProvider><AudioPlayer src="/first.mp3" storageKey="first" onSaveProgress={save} /></LocaleProvider>)

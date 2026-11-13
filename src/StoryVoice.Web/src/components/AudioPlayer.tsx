@@ -281,8 +281,10 @@ function AudioPlayerSession({
         await waitForMedia(audio, 'loadedmetadata', request.signal)
         if (request.signal.aborted || audioRef.current !== audio) return
         const requestedTime = reloadProgress.current.time
-        if (Number.isFinite(requestedTime) && requestedTime > 0 && requestedTime < audio.duration) {
-          audio.currentTime = requestedTime
+        if (Number.isFinite(requestedTime) && Number.isFinite(audio.duration) && audio.duration > 0) {
+          const restoredTime = Math.max(0, Math.min(requestedTime, audio.duration))
+          audio.currentTime = restoredTime
+          setCurrentTime(restoredTime)
         }
         reloadProgress.current = null
       }
